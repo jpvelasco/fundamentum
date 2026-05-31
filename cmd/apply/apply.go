@@ -37,9 +37,25 @@ func run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("render templates: %w", err)
 	}
 
-	items := buildItems(client, owner, repo, rendered)
+	// Pre-flight: check branch protection state before asking solo/team.
+	rulesetExists, _ := client.RulesetExists(owner, repo, "protect-main")
+	tagExists, _ := client.RulesetExists(owner, repo, "protect-version-tags")
+	classicExists, _ := client.ClassicProtectionExists(owner, repo)
 
-	fmt.Printf("fundamentum apply %s/%s\n\n", owner, repo)
+	// Only ask solo/team if branch protection will actually be applied.
+	// If the ruleset already exists, the question has no effect.
+	var opts github.BranchProtectionOptions
+	needsBranchProtection := !rulesetExists
+	if needsBranchProtection {
+		fmt.Printf("fundamentum apply %s/%s\n\n", owner, repo)
+		opts.Solo = wizard.PromptProjectType(os.Stdin, os.Stdout)
+		fmt.Println()
+	} else {
+		fmt.Printf("fundamentum apply %s/%s\n\n", owner, repo)
+	}
+
+	items := buildItems(client, owner, repo, rendered, rulesetExists, tagExists, classicExists, opts)
+
 	wizard.PrintSummaryTable(os.Stdout, items, !globals.DryRun)
 
 	if wizard.ConfirmDefaults(os.Stdin, os.Stdout) {
@@ -57,7 +73,13 @@ func parseOwnerRepo(arg string) (string, string, error) {
 	return "", "", fmt.Errorf("invalid OWNER/REPO %q: expected a slash separator", arg)
 }
 
-func buildItems(c *github.Client, owner, repo string, rendered []templates.RenderedFile) []wizard.Item {
+func buildItems(
+	c *github.Client,
+	owner, repo string,
+	rendered []templates.RenderedFile,
+	rulesetExists, tagExists, classicExists bool,
+	opts github.BranchProtectionOptions,
+) []wizard.Item {
 	var items []wizard.Item
 
 	// aliases maps template output paths to known case/path variants that count as "already exists".
@@ -131,16 +153,12 @@ func buildItems(c *github.Client, owner, repo string, rendered []templates.Rende
 		})
 	}
 
-	rulesetExists, _ := c.RulesetExists(owner, repo, "protect-main")
-	tagExists, _ := c.RulesetExists(owner, repo, "protect-version-tags")
-	classicExists, _ := c.ClassicProtectionExists(owner, repo)
-
 	items = append(items, wizard.Item{
 		Name:   "General settings (auto-delete branches)",
 		Action: wizard.ActionCreate,
 		Apply:  func() error { return c.ApplyGeneralSettings(owner, repo) },
 	})
-	items = append(items, branchProtectionItem(c, owner, repo, rulesetExists, classicExists))
+	items = append(items, branchProtectionItem(c, owner, repo, rulesetExists, classicExists, opts))
 	items = append(items, wizard.Item{
 		Name:     "Tag ruleset (protect-version-tags)",
 		Action:   actionFromExists(tagExists),
@@ -161,7 +179,7 @@ func buildItems(c *github.Client, owner, repo string, rendered []templates.Rende
 //   - ruleset exists → skip
 //   - classic exists → upgrade (create ruleset + remove classic)
 //   - neither exists → try ruleset, fall back to classic on 403
-func branchProtectionItem(c *github.Client, owner, repo string, rulesetExists, classicExists bool) wizard.Item {
+func branchProtectionItem(c *github.Client, owner, repo string, rulesetExists, classicExists bool, opts github.BranchProtectionOptions) wizard.Item {
 	switch {
 	case rulesetExists:
 		return wizard.Item{
@@ -173,7 +191,7 @@ func branchProtectionItem(c *github.Client, owner, repo string, rulesetExists, c
 			Name:   "Branch protection (upgrade classic → ruleset)",
 			Action: wizard.ActionUpgrade,
 			Apply: func() error {
-				if err := c.EnsureBranchRuleset(owner, repo, []string{}); err != nil {
+				if err := c.EnsureBranchRuleset(owner, repo, []string{}, opts); err != nil {
 					return err
 				}
 				return c.RemoveClassicBranchProtection(owner, repo)
@@ -185,12 +203,12 @@ func branchProtectionItem(c *github.Client, owner, repo string, rulesetExists, c
 			Action:   wizard.ActionCreate,
 			Optional: true,
 			Apply: func() error {
-				err := c.EnsureBranchRuleset(owner, repo, []string{})
+				err := c.EnsureBranchRuleset(owner, repo, []string{}, opts)
 				if err == nil {
 					return nil
 				}
 				// Ruleset unavailable (private free-tier) — fall back to classic.
-				return c.ApplyClassicBranchProtection(owner, repo)
+				return c.ApplyClassicBranchProtection(owner, repo, opts)
 			},
 		}
 	}

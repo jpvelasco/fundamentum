@@ -22,6 +22,16 @@ func PrintSummaryTable(w io.Writer, items []Item, live bool) {
 	}
 }
 
+// PromptProjectType asks whether the repo is solo or team and returns true for solo.
+// Only called when branch protection will actually be applied (ActionCreate or ActionUpgrade).
+func PromptProjectType(r io.Reader, w io.Writer) bool {
+	_, _ = fmt.Fprint(w, "Project type? [solo/team] (default: solo): ")
+	scanner := bufio.NewScanner(r)
+	scanner.Scan()
+	input := strings.TrimSpace(strings.ToLower(scanner.Text()))
+	return input == "" || input == "solo" || input == "s"
+}
+
 // ConfirmDefaults prompts "Apply all defaults? [Y/n]" and returns true if the
 // user accepts (empty input or 'y'/'Y').
 func ConfirmDefaults(r io.Reader, w io.Writer) bool {

@@ -18,7 +18,7 @@ func TestCreateBranchRuleset(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{Token: "t", baseURL: srv.URL}
-	if err := c.CreateBranchRuleset("owner", "repo", []string{"Test / ubuntu"}); err != nil {
+	if err := c.CreateBranchRuleset("owner", "repo", []string{"Test / ubuntu"}, BranchProtectionOptions{Solo: true}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !called {

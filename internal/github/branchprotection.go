@@ -18,13 +18,13 @@ func (c *Client) ClassicProtectionExists(owner, repo string) (bool, error) {
 
 // ApplyClassicBranchProtection sets branch protection on main using the classic API.
 // Works on all repos including private free-tier (unlike rulesets).
-func (c *Client) ApplyClassicBranchProtection(owner, repo string) error {
+func (c *Client) ApplyClassicBranchProtection(owner, repo string, opts BranchProtectionOptions) error {
 	body := map[string]any{
 		"required_status_checks": nil,
 		"enforce_admins":         true,
 		"required_pull_request_reviews": map[string]any{
-			"dismiss_stale_reviews":           true,
-			"require_code_owner_reviews":      true,
+			"dismiss_stale_reviews":           !opts.Solo,
+			"require_code_owner_reviews":      !opts.Solo,
 			"required_approving_review_count": 0,
 		},
 		"restrictions":       nil,

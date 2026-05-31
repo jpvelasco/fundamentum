@@ -8,6 +8,13 @@ import (
 	"net/http"
 )
 
+// BranchProtectionOptions controls how strictly the branch ruleset is configured.
+type BranchProtectionOptions struct {
+	// Solo disables CODEOWNERS review requirement and stale review dismissal,
+	// which would deadlock a solo maintainer who can't approve their own PRs.
+	Solo bool
+}
+
 // RulesetExists returns true if a ruleset with the given name already exists.
 func (c *Client) RulesetExists(owner, repo, name string) (bool, error) {
 	resp, err := c.get(fmt.Sprintf("/repos/%s/%s/rulesets", owner, repo))
@@ -33,7 +40,7 @@ func (c *Client) RulesetExists(owner, repo, name string) (bool, error) {
 }
 
 // EnsureBranchRuleset creates the protect-main branch ruleset if it doesn't exist.
-func (c *Client) EnsureBranchRuleset(owner, repo string, statusChecks []string) error {
+func (c *Client) EnsureBranchRuleset(owner, repo string, statusChecks []string, opts BranchProtectionOptions) error {
 	exists, err := c.RulesetExists(owner, repo, "protect-main")
 	if err != nil {
 		return err
@@ -41,7 +48,7 @@ func (c *Client) EnsureBranchRuleset(owner, repo string, statusChecks []string) 
 	if exists {
 		return nil
 	}
-	return c.CreateBranchRuleset(owner, repo, statusChecks)
+	return c.CreateBranchRuleset(owner, repo, statusChecks, opts)
 }
 
 // EnsureTagRuleset creates the protect-version-tags ruleset if it doesn't exist.
@@ -58,24 +65,22 @@ func (c *Client) EnsureTagRuleset(owner, repo string) error {
 
 // CreateBranchRuleset creates the protect-main branch ruleset.
 // statusChecks is the list of required CI job names (can be empty; add after first CI run).
-func (c *Client) CreateBranchRuleset(owner, repo string, statusChecks []string) error {
+func (c *Client) CreateBranchRuleset(owner, repo string, statusChecks []string, opts BranchProtectionOptions) error {
 	checks := make([]map[string]any, len(statusChecks))
 	for i, name := range statusChecks {
 		checks[i] = map[string]any{"context": name}
 	}
+	prParams := map[string]any{
+		"required_approving_review_count":   0,
+		"dismiss_stale_reviews_on_push":     !opts.Solo,
+		"require_code_owner_review":         !opts.Solo,
+		"require_last_push_approval":        false,
+		"required_review_thread_resolution": true,
+	}
 	rules := []map[string]any{
 		{"type": "deletion"},
 		{"type": "non_fast_forward"},
-		{
-			"type": "pull_request",
-			"parameters": map[string]any{
-				"required_approving_review_count":   0,
-				"dismiss_stale_reviews_on_push":     true,
-				"require_code_owner_review":         true,
-				"require_last_push_approval":        false,
-				"required_review_thread_resolution": true,
-			},
-		},
+		{"type": "pull_request", "parameters": prParams},
 	}
 	if len(checks) > 0 {
 		rules = append(rules, map[string]any{
