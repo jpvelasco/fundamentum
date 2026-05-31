@@ -82,20 +82,16 @@ func buildItems(c *github.Client, owner, repo string, rendered []templates.Rende
 		})
 	}
 
-	branchExists, _ := c.RulesetExists(owner, repo, "protect-main")
+	rulesetExists, _ := c.RulesetExists(owner, repo, "protect-main")
 	tagExists, _ := c.RulesetExists(owner, repo, "protect-version-tags")
+	classicExists, _ := c.ClassicProtectionExists(owner, repo)
 
 	items = append(items, wizard.Item{
 		Name:   "General settings (auto-delete branches)",
 		Action: wizard.ActionCreate,
 		Apply:  func() error { return c.ApplyGeneralSettings(owner, repo) },
 	})
-	items = append(items, wizard.Item{
-		Name:     "Branch ruleset (protect-main)",
-		Action:   actionFromExists(branchExists),
-		Optional: true,
-		Apply:    func() error { return c.EnsureBranchRuleset(owner, repo, []string{}) },
-	})
+	items = append(items, branchProtectionItem(c, owner, repo, rulesetExists, classicExists))
 	items = append(items, wizard.Item{
 		Name:     "Tag ruleset (protect-version-tags)",
 		Action:   actionFromExists(tagExists),
@@ -110,6 +106,45 @@ func buildItems(c *github.Client, owner, repo string, rendered []templates.Rende
 	})
 
 	return items
+}
+
+// branchProtectionItem returns the correct Item for branch protection based on current state:
+//   - ruleset exists → skip
+//   - classic exists → upgrade (create ruleset + remove classic)
+//   - neither exists → try ruleset, fall back to classic on 403
+func branchProtectionItem(c *github.Client, owner, repo string, rulesetExists, classicExists bool) wizard.Item {
+	switch {
+	case rulesetExists:
+		return wizard.Item{
+			Name:   "Branch protection (protect-main ruleset)",
+			Action: wizard.ActionSkip,
+		}
+	case classicExists:
+		return wizard.Item{
+			Name:   "Branch protection (upgrade classic → ruleset)",
+			Action: wizard.ActionUpgrade,
+			Apply: func() error {
+				if err := c.EnsureBranchRuleset(owner, repo, []string{}); err != nil {
+					return err
+				}
+				return c.RemoveClassicBranchProtection(owner, repo)
+			},
+		}
+	default:
+		return wizard.Item{
+			Name:     "Branch protection (protect-main)",
+			Action:   wizard.ActionCreate,
+			Optional: true,
+			Apply: func() error {
+				err := c.EnsureBranchRuleset(owner, repo, []string{})
+				if err == nil {
+					return nil
+				}
+				// Ruleset unavailable (private free-tier) — fall back to classic.
+				return c.ApplyClassicBranchProtection(owner, repo)
+			},
+		}
+	}
 }
 
 func actionFromExists(exists bool) wizard.Action {

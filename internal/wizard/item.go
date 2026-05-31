@@ -10,6 +10,7 @@ const (
 	ActionCreate Action = iota
 	ActionUpdate
 	ActionSkip
+	ActionUpgrade
 )
 
 func (a Action) String() string {
@@ -20,6 +21,8 @@ func (a Action) String() string {
 		return "update"
 	case ActionSkip:
 		return "skip"
+	case ActionUpgrade:
+		return "upgrade classic → ruleset"
 	default:
 		return "unknown"
 	}
@@ -48,3 +51,5 @@ func (i Item) LiveLabel() string {
 	}
 	return i.Action.String()
 }
+
+func (i Item) isSkip() bool { return i.Action == ActionSkip }
