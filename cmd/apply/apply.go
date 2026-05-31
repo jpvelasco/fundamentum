@@ -60,27 +60,7 @@ func parseOwnerRepo(arg string) (string, string, error) {
 func buildItems(c *github.Client, owner, repo string, rendered []templates.RenderedFile) []wizard.Item {
 	var items []wizard.Item
 
-	items = append(items, wizard.Item{
-		Name:   "General settings (auto-delete branches)",
-		Action: wizard.ActionCreate,
-		Apply:  func() error { return c.ApplyGeneralSettings(owner, repo) },
-	})
-	items = append(items, wizard.Item{
-		Name:   "Branch ruleset (protect-main)",
-		Action: wizard.ActionCreate,
-		Apply:  func() error { return c.CreateBranchRuleset(owner, repo, []string{}) },
-	})
-	items = append(items, wizard.Item{
-		Name:   "Tag ruleset (protect-version-tags)",
-		Action: wizard.ActionCreate,
-		Apply:  func() error { return c.CreateTagRuleset(owner, repo) },
-	})
-	items = append(items, wizard.Item{
-		Name:   "Security (secret scanning, CodeQL, Dependabot)",
-		Action: wizard.ActionCreate,
-		Apply:  func() error { return c.EnableSecurity(owner, repo) },
-	})
-
+	// Files first — branch protection applied after, so direct commits are still allowed.
 	for _, f := range rendered {
 		file := f
 		items = append(items, wizard.Item{
@@ -92,5 +72,27 @@ func buildItems(c *github.Client, owner, repo string, rendered []templates.Rende
 			},
 		})
 	}
+
+	items = append(items, wizard.Item{
+		Name:   "General settings (auto-delete branches)",
+		Action: wizard.ActionCreate,
+		Apply:  func() error { return c.ApplyGeneralSettings(owner, repo) },
+	})
+	items = append(items, wizard.Item{
+		Name:   "Branch ruleset (protect-main)",
+		Action: wizard.ActionCreate,
+		Apply:  func() error { return c.EnsureBranchRuleset(owner, repo, []string{}) },
+	})
+	items = append(items, wizard.Item{
+		Name:   "Tag ruleset (protect-version-tags)",
+		Action: wizard.ActionCreate,
+		Apply:  func() error { return c.EnsureTagRuleset(owner, repo) },
+	})
+	items = append(items, wizard.Item{
+		Name:   "Security (secret scanning, CodeQL, Dependabot)",
+		Action: wizard.ActionCreate,
+		Apply:  func() error { return c.EnableSecurity(owner, repo) },
+	})
+
 	return items
 }

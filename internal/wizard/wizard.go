@@ -46,7 +46,7 @@ func RunItems(items []Item, dryRun bool) error {
 		fmt.Printf("  %-45s  applying...", item.Name)
 		if err := item.Apply(); err != nil {
 			fmt.Printf("\r  %-45s  ✗ %v\n", item.Name, err)
-			return fmt.Errorf("%s: %w", item.Name, err)
+			continue
 		}
 		fmt.Printf("\r  %-45s  ✓\n", item.Name)
 	}
@@ -76,7 +76,7 @@ func RunInteractive(items []Item, dryRun bool) error {
 		fmt.Printf("  %-45s  applying...", item.Name)
 		if err := item.Apply(); err != nil {
 			fmt.Printf("\r  %-45s  ✗ %v\n", item.Name, err)
-			return fmt.Errorf("%s: %w", item.Name, err)
+			continue
 		}
 		fmt.Printf("\r  %-45s  ✓\n", item.Name)
 	}
