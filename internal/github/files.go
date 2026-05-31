@@ -10,6 +10,22 @@ import (
 	"net/http"
 )
 
+// AnyFileExists checks whether any of the given paths exists in the repo.
+// Use this to detect case-variant or path-variant duplicates before writing.
+func (c *Client) AnyFileExists(owner, repo string, paths []string) (bool, error) {
+	for _, path := range paths {
+		resp, err := c.get(fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, path))
+		if err != nil {
+			return false, fmt.Errorf("check file %s: %w", path, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // FileStatus returns "create", "update", or "skip" for a file without writing.
 func (c *Client) FileStatus(owner, repo, path string, content []byte) (string, error) {
 	apiPath := fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, path)

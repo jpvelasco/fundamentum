@@ -22,6 +22,7 @@ health files to a GitHub repository in one shot.`,
 	cmd.PersistentFlags().BoolVar(&globals.DryRun, "dry-run", false, "print actions without applying them")
 	cmd.PersistentFlags().BoolVar(&globals.Verbose, "verbose", false, "print API calls")
 	cmd.PersistentFlags().StringVar(&globals.Token, "token", "", "GitHub token (default: GITHUB_TOKEN env var)")
+	cmd.PersistentFlags().BoolVar(&globals.NoOverwrite, "no-overwrite", false, "skip files that already exist, never update")
 	cmd.AddCommand(apply.NewCmd())
 	cmd.AddCommand(repoinit.NewCmd())
 	return cmd

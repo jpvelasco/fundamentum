@@ -60,16 +60,51 @@ func parseOwnerRepo(arg string) (string, string, error) {
 func buildItems(c *github.Client, owner, repo string, rendered []templates.RenderedFile) []wizard.Item {
 	var items []wizard.Item
 
+	// aliases maps template paths to known case/path variants that count as "already exists".
+	aliases := map[string][]string{
+		"CODEOWNERS": {
+			"CODEOWNERS",
+			".github/CODEOWNERS",
+		},
+		".github/PULL_REQUEST_TEMPLATE.md": {
+			".github/pull_request_template.md",
+			".github/PULL_REQUEST_TEMPLATE.md",
+		},
+		".codacy/codacy.yaml": {
+			".codacy.yml",
+			".codacy/codacy.yaml",
+			".codacy/codacy.yml",
+		},
+		".github/ISSUE_TEMPLATE/bug_report.yml": {
+			".github/ISSUE_TEMPLATE/bug_report.yml",
+			".github/ISSUE_TEMPLATE/bug_report.md",
+		},
+		".github/ISSUE_TEMPLATE/feature_request.yml": {
+			".github/ISSUE_TEMPLATE/feature_request.yml",
+			".github/ISSUE_TEMPLATE/feature_request.md",
+		},
+	}
+
 	// Files first — branch protection applied after, so direct commits are still allowed.
 	for _, f := range rendered {
 		file := f
 		action := wizard.ActionCreate
-		if status, err := c.FileStatus(owner, repo, file.Path, []byte(file.Content)); err == nil {
+
+		// Check alias paths before the exact path to avoid false "missing" on case/path variants.
+		if variants, ok := aliases[file.Path]; ok {
+			if exists, err := c.AnyFileExists(owner, repo, variants); err == nil && exists {
+				action = wizard.ActionSkip
+			}
+		} else if status, err := c.FileStatus(owner, repo, file.Path, []byte(file.Content)); err == nil {
 			switch status {
 			case "skip":
 				action = wizard.ActionSkip
 			case "update":
-				action = wizard.ActionUpdate
+				if globals.NoOverwrite {
+					action = wizard.ActionSkip
+				} else {
+					action = wizard.ActionUpdate
+				}
 			}
 		}
 		items = append(items, wizard.Item{

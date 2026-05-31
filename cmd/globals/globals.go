@@ -9,3 +9,6 @@ var Verbose bool
 
 // Token is the GitHub personal access token; falls back to GITHUB_TOKEN env var.
 var Token string
+
+// NoOverwrite skips files that already exist rather than updating them.
+var NoOverwrite bool
