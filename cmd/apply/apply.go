@@ -63,9 +63,18 @@ func buildItems(c *github.Client, owner, repo string, rendered []templates.Rende
 	// Files first — branch protection applied after, so direct commits are still allowed.
 	for _, f := range rendered {
 		file := f
+		action := wizard.ActionCreate
+		if status, err := c.FileStatus(owner, repo, file.Path, []byte(file.Content)); err == nil {
+			switch status {
+			case "skip":
+				action = wizard.ActionSkip
+			case "update":
+				action = wizard.ActionUpdate
+			}
+		}
 		items = append(items, wizard.Item{
 			Name:   file.Path,
-			Action: wizard.ActionCreate,
+			Action: action,
 			Apply: func() error {
 				_, err := c.UpsertFile(owner, repo, file.Path, []byte(file.Content))
 				return err
@@ -73,26 +82,39 @@ func buildItems(c *github.Client, owner, repo string, rendered []templates.Rende
 		})
 	}
 
+	branchExists, _ := c.RulesetExists(owner, repo, "protect-main")
+	tagExists, _ := c.RulesetExists(owner, repo, "protect-version-tags")
+
 	items = append(items, wizard.Item{
 		Name:   "General settings (auto-delete branches)",
 		Action: wizard.ActionCreate,
 		Apply:  func() error { return c.ApplyGeneralSettings(owner, repo) },
 	})
 	items = append(items, wizard.Item{
-		Name:   "Branch ruleset (protect-main)",
-		Action: wizard.ActionCreate,
-		Apply:  func() error { return c.EnsureBranchRuleset(owner, repo, []string{}) },
+		Name:     "Branch ruleset (protect-main)",
+		Action:   actionFromExists(branchExists),
+		Optional: true,
+		Apply:    func() error { return c.EnsureBranchRuleset(owner, repo, []string{}) },
 	})
 	items = append(items, wizard.Item{
-		Name:   "Tag ruleset (protect-version-tags)",
-		Action: wizard.ActionCreate,
-		Apply:  func() error { return c.EnsureTagRuleset(owner, repo) },
+		Name:     "Tag ruleset (protect-version-tags)",
+		Action:   actionFromExists(tagExists),
+		Optional: true,
+		Apply:    func() error { return c.EnsureTagRuleset(owner, repo) },
 	})
 	items = append(items, wizard.Item{
-		Name:   "Security (secret scanning, CodeQL, Dependabot)",
-		Action: wizard.ActionCreate,
-		Apply:  func() error { return c.EnableSecurity(owner, repo) },
+		Name:     "Security (secret scanning, CodeQL, Dependabot)",
+		Action:   wizard.ActionCreate,
+		Optional: true,
+		Apply:    func() error { return c.EnableSecurity(owner, repo) },
 	})
 
 	return items
+}
+
+func actionFromExists(exists bool) wizard.Action {
+	if exists {
+		return wizard.ActionSkip
+	}
+	return wizard.ActionCreate
 }

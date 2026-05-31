@@ -8,8 +8,8 @@ import (
 	"net/http"
 )
 
-// rulesetExists returns true if a ruleset with the given name already exists.
-func (c *Client) rulesetExists(owner, repo, name string) (bool, error) {
+// RulesetExists returns true if a ruleset with the given name already exists.
+func (c *Client) RulesetExists(owner, repo, name string) (bool, error) {
 	resp, err := c.get(fmt.Sprintf("/repos/%s/%s/rulesets", owner, repo))
 	if err != nil {
 		return false, fmt.Errorf("list rulesets: %w", err)
@@ -34,7 +34,7 @@ func (c *Client) rulesetExists(owner, repo, name string) (bool, error) {
 
 // EnsureBranchRuleset creates the protect-main branch ruleset if it doesn't exist.
 func (c *Client) EnsureBranchRuleset(owner, repo string, statusChecks []string) error {
-	exists, err := c.rulesetExists(owner, repo, "protect-main")
+	exists, err := c.RulesetExists(owner, repo, "protect-main")
 	if err != nil {
 		return err
 	}
@@ -46,7 +46,7 @@ func (c *Client) EnsureBranchRuleset(owner, repo string, statusChecks []string) 
 
 // EnsureTagRuleset creates the protect-version-tags ruleset if it doesn't exist.
 func (c *Client) EnsureTagRuleset(owner, repo string) error {
-	exists, err := c.rulesetExists(owner, repo, "protect-version-tags")
+	exists, err := c.RulesetExists(owner, repo, "protect-version-tags")
 	if err != nil {
 		return err
 	}

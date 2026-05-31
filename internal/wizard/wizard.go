@@ -45,7 +45,11 @@ func RunItems(items []Item, dryRun bool) error {
 		}
 		fmt.Printf("  %-45s  applying...", item.Name)
 		if err := item.Apply(); err != nil {
-			fmt.Printf("\r  %-45s  ✗ %v\n", item.Name, err)
+			if item.Optional {
+				fmt.Printf("\r  %-45s  ⚠ requires GitHub Pro or public repo\n", item.Name)
+			} else {
+				fmt.Printf("\r  %-45s  ✗ %v\n", item.Name, err)
+			}
 			continue
 		}
 		fmt.Printf("\r  %-45s  ✓\n", item.Name)
@@ -75,7 +79,11 @@ func RunInteractive(items []Item, dryRun bool) error {
 		}
 		fmt.Printf("  %-45s  applying...", item.Name)
 		if err := item.Apply(); err != nil {
-			fmt.Printf("\r  %-45s  ✗ %v\n", item.Name, err)
+			if item.Optional {
+				fmt.Printf("\r  %-45s  ⚠ requires GitHub Pro or public repo\n", item.Name)
+			} else {
+				fmt.Printf("\r  %-45s  ✗ %v\n", item.Name, err)
+			}
 			continue
 		}
 		fmt.Printf("\r  %-45s  ✓\n", item.Name)

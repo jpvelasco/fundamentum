@@ -10,6 +10,36 @@ import (
 	"net/http"
 )
 
+// FileStatus returns "create", "update", or "skip" for a file without writing.
+func (c *Client) FileStatus(owner, repo, path string, content []byte) (string, error) {
+	apiPath := fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, path)
+	resp, err := c.get(apiPath)
+	if err != nil {
+		return "", fmt.Errorf("check file %s: %w", path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var existing struct {
+			Content string `json:"content"`
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		if err := json.Unmarshal(raw, &existing); err != nil {
+			return "", fmt.Errorf("parse existing file %s: %w", path, err)
+		}
+		existingClean := bytes.ReplaceAll([]byte(existing.Content), []byte("\n"), nil)
+		if bytes.Equal(existingClean, []byte(base64.StdEncoding.EncodeToString(content))) {
+			return "skip", nil
+		}
+		return "update", nil
+	case http.StatusNotFound:
+		return "create", nil
+	default:
+		b, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("check file %s: %s: %s", path, resp.Status, b)
+	}
+}
+
 // UpsertFile creates or updates a file in the repo via the Contents API.
 // Returns "created", "updated", or "skipped" (content unchanged).
 func (c *Client) UpsertFile(owner, repo, path string, content []byte) (string, error) {

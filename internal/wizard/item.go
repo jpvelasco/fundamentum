@@ -27,9 +27,10 @@ func (a Action) String() string {
 
 // Item is a single setting or file that fundamentum manages.
 type Item struct {
-	Name   string
-	Action Action
-	Apply  func() error
+	Name     string
+	Action   Action
+	Apply    func() error
+	Optional bool // failures show as ⚠ (plan limit) rather than ✗ (error)
 }
 
 // DryRunLabel returns the human-readable action for --dry-run output.
