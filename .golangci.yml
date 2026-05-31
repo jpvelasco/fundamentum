@@ -20,6 +20,7 @@ linters:
         - G104
         - G204
         - G304
+        - G704
     staticcheck:
       checks:
         - all

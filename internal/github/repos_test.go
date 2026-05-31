@@ -13,7 +13,7 @@ func TestCreateRepo(t *testing.T) {
 			called = true
 		}
 		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(`{"full_name":"owner/repo"}`))
+		_, _ = w.Write([]byte(`{"full_name":"owner/repo"}`))
 	}))
 	defer srv.Close()
 

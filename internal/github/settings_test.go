@@ -13,7 +13,7 @@ func TestApplyGeneralSettings(t *testing.T) {
 			called = true
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 

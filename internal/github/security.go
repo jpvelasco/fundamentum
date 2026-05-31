@@ -1,3 +1,4 @@
+// Package github provides a GitHub API client with authenticated HTTP operations.
 package github
 
 import (
@@ -18,7 +19,7 @@ func (c *Client) EnableSecurity(owner, repo string) error {
 		if err != nil {
 			return fmt.Errorf("enable security %s: %w", path, err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 			return fmt.Errorf("enable security %s: unexpected status %s", path, resp.Status)
 		}
@@ -33,7 +34,7 @@ func (c *Client) EnableSecurity(owner, repo string) error {
 	if err != nil {
 		return fmt.Errorf("enable secret scanning: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("enable secret scanning: %s: %s", resp.Status, body)
@@ -46,7 +47,7 @@ func (c *Client) EnableSecurity(owner, repo string) error {
 	if err != nil {
 		return fmt.Errorf("enable CodeQL: %w", err)
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 	if resp2.StatusCode != http.StatusOK && resp2.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp2.Body)
 		return fmt.Errorf("enable CodeQL: %s: %s", resp2.Status, body)

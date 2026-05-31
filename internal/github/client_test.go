@@ -12,7 +12,7 @@ func TestClientGet(t *testing.T) {
 			t.Errorf("missing or wrong Authorization header: %q", r.Header.Get("Authorization"))
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":1}`))
+		_, _ = w.Write([]byte(`{"id":1}`))
 	}))
 	defer srv.Close()
 
@@ -32,7 +32,7 @@ func TestClientPatch(t *testing.T) {
 			t.Errorf("expected PATCH, got %s", r.Method)
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 

@@ -1,3 +1,4 @@
+// Package github provides a GitHub API client with authenticated HTTP operations.
 package github
 
 import (
@@ -15,7 +16,7 @@ func (c *Client) CreateRepo(name string, private bool) error {
 	if err != nil {
 		return fmt.Errorf("create repo: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("create repo: %s: %s", resp.Status, body)
