@@ -1,5 +1,7 @@
 version: "2"
+
 linters:
+  default: none
   enable:
     - errcheck
     - govet
@@ -11,13 +13,14 @@ linters:
     - unconvert
     - gosec
     - dupl
-issues:
-  exclude-rules:
-    - linters: [gosec]
-      text: "G104"
-    - linters: [gosec]
-      text: "G204"
-    - linters: [gosec]
-      text: "G304"
-    - linters: [staticcheck]
-      text: "ST1005"
+
+  settings:
+    gosec:
+      excludes:
+        - G104
+        - G204
+        - G304
+    staticcheck:
+      checks:
+        - all
+        - "-ST1005"
