@@ -60,18 +60,32 @@ func parseOwnerRepo(arg string) (string, string, error) {
 func buildItems(c *github.Client, owner, repo string, rendered []templates.RenderedFile) []wizard.Item {
 	var items []wizard.Item
 
-	// aliases maps template paths to known case/path variants that count as "already exists".
+	// aliases maps template output paths to known case/path variants that count as "already exists".
+	// Covers legacy root placements, case variants, and format variants (.yml vs .md).
 	aliases := map[string][]string{
-		"CODEOWNERS": {
-			"CODEOWNERS",
+		".github/CODEOWNERS": {
 			".github/CODEOWNERS",
+			"CODEOWNERS",
+		},
+		".github/CONTRIBUTING.md": {
+			".github/CONTRIBUTING.md",
+			"CONTRIBUTING.md",
+		},
+		".github/CODE_OF_CONDUCT.md": {
+			".github/CODE_OF_CONDUCT.md",
+			"CODE_OF_CONDUCT.md",
+		},
+		".github/SECURITY.md": {
+			".github/SECURITY.md",
+			"SECURITY.md",
 		},
 		".github/PULL_REQUEST_TEMPLATE.md": {
-			".github/pull_request_template.md",
 			".github/PULL_REQUEST_TEMPLATE.md",
+			".github/pull_request_template.md",
 		},
-		".codacy/codacy.yaml": {
+		".codacy.yml": {
 			".codacy.yml",
+			".codacy.yaml",
 			".codacy/codacy.yaml",
 			".codacy/codacy.yml",
 		},

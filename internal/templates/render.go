@@ -25,7 +25,7 @@ type RepoData struct {
 }
 
 // Render renders all embedded templates and returns RenderedFiles with target
-// paths (dotgithub/ → .github/, dotcodacy/ → .codacy/).
+// paths (dotgithub/ → .github/, dotcodacy.yml → .codacy.yml).
 func Render(data RepoData) ([]RenderedFile, error) {
 	var files []RenderedFile
 	err := fs.WalkDir(templatefs.FS, ".", func(path string, d fs.DirEntry, err error) error {
@@ -54,7 +54,7 @@ func Render(data RepoData) ([]RenderedFile, error) {
 		}
 
 		target := strings.Replace(path, "dotgithub/", ".github/", 1)
-		target = strings.Replace(target, "dotcodacy/", ".codacy/", 1)
+		target = strings.Replace(target, "dotcodacy.yml", ".codacy.yml", 1)
 		files = append(files, RenderedFile{Path: target, Content: rendered})
 		return nil
 	})
