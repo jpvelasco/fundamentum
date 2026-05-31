@@ -1,0 +1,23 @@
+version: "2"
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gocritic
+    - misspell
+    - unconvert
+    - gosec
+    - dupl
+issues:
+  exclude-rules:
+    - linters: [gosec]
+      text: "G104"
+    - linters: [gosec]
+      text: "G204"
+    - linters: [gosec]
+      text: "G304"
+    - linters: [staticcheck]
+      text: "ST1005"

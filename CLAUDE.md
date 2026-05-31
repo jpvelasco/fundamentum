@@ -1,0 +1,26 @@
+# CLAUDE.md
+
+## Build / Lint / Test
+
+```bash
+go build -o fundamentum.exe -v .   # Windows
+go build -o fundamentum -v .       # Linux/macOS
+golangci-lint run ./...
+go test ./...
+go test -v ./internal/wizard
+go test -v -run TestRender ./internal/templates
+```
+
+Pre-commit hooks: `git config core.hooksPath .hooks`
+
+## Architecture
+
+Go CLI (Cobra). Two commands: `apply OWNER/REPO` (harden existing repo), `init OWNER/REPO` (create + harden).
+- `internal/github/` — GitHub API via net/http
+- `internal/wizard/` — summary table + Y/N interactive flow
+- `internal/templates/` — //go:embed + text/template rendering
+- `internal/templatefs/` — embed FS for templates directory
+
+## Conventions
+
+Mirrors ludus: two import groups (stdlib first, then third-party+internal), table-driven tests (stdlib only), `fmt.Errorf("ctx: %w", err)`, no raw exec.Command.
