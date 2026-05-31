@@ -2,6 +2,8 @@ package root
 
 import (
 	"testing"
+
+	"github.com/jpvelasco/fundamentum/cmd/globals"
 )
 
 func TestRootHelp(t *testing.T) {
@@ -18,7 +20,7 @@ func TestDryRunFlag(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !DryRun {
+	if !globals.DryRun {
 		t.Error("expected DryRun=true after --dry-run flag")
 	}
 }

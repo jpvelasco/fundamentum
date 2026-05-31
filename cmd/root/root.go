@@ -1,4 +1,4 @@
-// Package root provides the root Cobra command.
+// Package root wires the fundamentum CLI root command.
 package root
 
 import (
@@ -6,12 +6,9 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-)
 
-var (
-	DryRun  bool
-	Verbose bool
-	Token   string
+	"github.com/jpvelasco/fundamentum/cmd/apply"
+	"github.com/jpvelasco/fundamentum/cmd/globals"
 )
 
 func newRootCmd() *cobra.Command {
@@ -21,9 +18,10 @@ func newRootCmd() *cobra.Command {
 		Long: `fundamentum applies branch protection, security settings, and community
 health files to a GitHub repository in one shot.`,
 	}
-	cmd.PersistentFlags().BoolVar(&DryRun, "dry-run", false, "print actions without applying them")
-	cmd.PersistentFlags().BoolVar(&Verbose, "verbose", false, "print API calls")
-	cmd.PersistentFlags().StringVar(&Token, "token", "", "GitHub token (default: GITHUB_TOKEN env var)")
+	cmd.PersistentFlags().BoolVar(&globals.DryRun, "dry-run", false, "print actions without applying them")
+	cmd.PersistentFlags().BoolVar(&globals.Verbose, "verbose", false, "print API calls")
+	cmd.PersistentFlags().StringVar(&globals.Token, "token", "", "GitHub token (default: GITHUB_TOKEN env var)")
+	cmd.AddCommand(apply.NewCmd())
 	return cmd
 }
 
