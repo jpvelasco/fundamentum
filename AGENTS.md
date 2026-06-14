@@ -15,6 +15,9 @@ golangci-lint run ./...
 # Test
 go test ./...
 
+# Test single package
+go test ./internal/github/...
+
 # Run
 echo $env:GITHUB_TOKEN   # must be set, or pass --token
 go run . apply OWNER/REPO
@@ -39,6 +42,7 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`.
 - `cmd/apply` — apply logic: renders templates, checks existing state, builds item list, runs wizard
 - `cmd/repoinit` — creates repo via API, then delegates to apply
 - `cmd/globals` — shared mutable flag state (DryRun, Token, Verbose, NoOverwrite)
+- `cmd/util` — shared utilities (ParseOwnerRepo)
 - `internal/github` — thin HTTP client for GitHub API (net/http, no SDK)
 - `internal/wizard` — interactive summary table + Y/N apply flow
 - `internal/templates` — renders embedded templates via text/template
@@ -47,9 +51,15 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`.
 ### Key behavior
 
 - **Branch protection**: tries modern ruleset first, falls back to classic protection on 403 (free-tier private repos)
-- **File aliasing** (`cmd/apply/apply.go:87`): checks path variants before deciding create/skip/update — e.g., `CODEOWNERS` at root counts as existing even though target is `.github/CODEOWNERS`
+- **File aliasing** (`cmd/apply/apply.go:89`): checks path variants before deciding create/skip/update — e.g., `CODEOWNERS` at root counts as existing even though target is `.github/CODEOWNERS`
 - **`--no-overwrite`**: skips any file that already exists, even if content differs
 - Auth: `--token` flag or `GITHUB_TOKEN` env var, used as Bearer token
+
+### Testing
+
+- Always use `github.NewClient(token, verbose).WithBaseURL(srv.URL)` to create test clients — never construct `Client` directly (the `client *http.Client` field must be initialized)
+- All wizard prompt functions accept `io.Reader`/`io.Writer` for testability
+- `cmd/globals` is mutable package-level state — use `t.Cleanup` to reset after tests
 
 ### Conventions
 
