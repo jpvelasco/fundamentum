@@ -17,7 +17,7 @@ func TestCreateRepo(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &Client{Token: "t", baseURL: srv.URL}
+	c := NewClient("t", false).WithBaseURL(srv.URL)
 	if err := c.CreateRepo("repo", false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

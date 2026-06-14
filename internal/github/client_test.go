@@ -16,7 +16,7 @@ func TestClientGet(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &Client{Token: "test-token", baseURL: srv.URL}
+	c := NewClient("test-token", false).WithBaseURL(srv.URL)
 	resp, err := c.get("/")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -36,7 +36,7 @@ func TestClientPatch(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &Client{Token: "test-token", baseURL: srv.URL}
+	c := NewClient("test-token", false).WithBaseURL(srv.URL)
 	resp, err := c.patch("/", map[string]any{"foo": "bar"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

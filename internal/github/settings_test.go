@@ -17,7 +17,7 @@ func TestApplyGeneralSettings(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &Client{Token: "t", baseURL: srv.URL}
+	c := NewClient("t", false).WithBaseURL(srv.URL)
 	if err := c.ApplyGeneralSettings("owner", "repo"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -3,6 +3,7 @@ package templatefs
 
 import (
 	"embed"
+	"errors"
 	"io/fs"
 )
 
@@ -10,4 +11,12 @@ import (
 var raw embed.FS
 
 // FS is rooted at the templates directory.
-var FS, _ = fs.Sub(raw, "templates")
+var FS fs.FS
+
+func init() {
+	var err error
+	FS, err = fs.Sub(raw, "templates")
+	if err != nil {
+		panic(errors.New("templatefs: cannot embed templates: " + err.Error()))
+	}
+}

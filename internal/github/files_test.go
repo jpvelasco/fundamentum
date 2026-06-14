@@ -22,7 +22,7 @@ func TestUpsertFile_Create(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &Client{Token: "t", baseURL: srv.URL}
+	c := NewClient("t", false).WithBaseURL(srv.URL)
 	action, err := c.UpsertFile("owner", "repo", "CONTRIBUTING.md", []byte("hello"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -46,7 +46,7 @@ func TestUpsertFile_Skip(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &Client{Token: "t", baseURL: srv.URL}
+	c := NewClient("t", false).WithBaseURL(srv.URL)
 	action, err := c.UpsertFile("owner", "repo", "CONTRIBUTING.md", []byte("hello"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

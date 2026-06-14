@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 )
 
 const defaultBase = "https://api.github.com"
@@ -16,6 +17,7 @@ type Client struct {
 	Token   string
 	Verbose bool
 	baseURL string
+	client  *http.Client
 }
 
 // NewClient creates a Client, falling back to GITHUB_TOKEN env var if token is empty.
@@ -23,7 +25,20 @@ func NewClient(token string, verbose bool) *Client {
 	if token == "" {
 		token = os.Getenv("GITHUB_TOKEN")
 	}
-	return &Client{Token: token, Verbose: verbose, baseURL: defaultBase}
+	return &Client{
+		Token:   token,
+		Verbose: verbose,
+		baseURL: defaultBase,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+	}
+}
+
+// WithBaseURL sets the base URL for the client, useful for testing.
+func (c *Client) WithBaseURL(baseURL string) *Client {
+	c.baseURL = baseURL
+	return c
 }
 
 func (c *Client) base() string {
@@ -53,7 +68,7 @@ func (c *Client) do(method, path string, body any) (*http.Response, error) {
 	if c.Verbose {
 		fmt.Printf("+ %s %s\n", method, c.base()+path)
 	}
-	return http.DefaultClient.Do(req)
+	return c.client.Do(req)
 }
 
 func (c *Client) get(path string) (*http.Response, error) {

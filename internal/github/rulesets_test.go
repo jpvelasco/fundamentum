@@ -17,7 +17,7 @@ func TestCreateBranchRuleset(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &Client{Token: "t", baseURL: srv.URL}
+	c := NewClient("t", false).WithBaseURL(srv.URL)
 	if err := c.CreateBranchRuleset("owner", "repo", []string{"Test / ubuntu"}, BranchProtectionOptions{Solo: true}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestCreateTagRuleset(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &Client{Token: "t", baseURL: srv.URL}
+	c := NewClient("t", false).WithBaseURL(srv.URL)
 	if err := c.CreateTagRuleset("owner", "repo"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

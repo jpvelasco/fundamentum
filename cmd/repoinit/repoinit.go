@@ -8,6 +8,7 @@ import (
 
 	"github.com/jpvelasco/fundamentum/cmd/apply"
 	"github.com/jpvelasco/fundamentum/cmd/globals"
+	"github.com/jpvelasco/fundamentum/cmd/util"
 	"github.com/jpvelasco/fundamentum/internal/github"
 )
 
@@ -27,7 +28,7 @@ func NewCmd() *cobra.Command {
 }
 
 func run(ownerRepo string, private bool) error {
-	_, repo, err := parseOwnerRepo(ownerRepo)
+	_, repo, err := util.ParseOwnerRepo(ownerRepo)
 	if err != nil {
 		return err
 	}
@@ -46,13 +47,4 @@ func run(ownerRepo string, private bool) error {
 	applyCmd := apply.NewCmd()
 	applyCmd.SetArgs([]string{ownerRepo})
 	return applyCmd.Execute()
-}
-
-func parseOwnerRepo(arg string) (string, string, error) {
-	for i, c := range arg {
-		if c == '/' {
-			return arg[:i], arg[i+1:], nil
-		}
-	}
-	return "", "", fmt.Errorf("invalid OWNER/REPO %q: expected a slash separator", arg)
 }

@@ -23,4 +23,11 @@ func TestDryRunFlag(t *testing.T) {
 	if !globals.DryRun {
 		t.Error("expected DryRun=true after --dry-run flag")
 	}
+	// Reset globals to avoid polluting other tests.
+	t.Cleanup(func() {
+		globals.DryRun = false
+		globals.Verbose = false
+		globals.Token = ""
+		globals.NoOverwrite = false
+	})
 }

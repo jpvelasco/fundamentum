@@ -6,9 +6,9 @@ import (
 	"net/http"
 )
 
-// ClassicProtectionExists returns true if classic branch protection is set on main.
-func (c *Client) ClassicProtectionExists(owner, repo string) (bool, error) {
-	resp, err := c.get(fmt.Sprintf("/repos/%s/%s/branches/main/protection", owner, repo))
+// ClassicProtectionExists returns true if classic branch protection is set on the given branch.
+func (c *Client) ClassicProtectionExists(owner, repo, branch string) (bool, error) {
+	resp, err := c.get(fmt.Sprintf("/repos/%s/%s/branches/%s/protection", owner, repo, branch))
 	if err != nil {
 		return false, fmt.Errorf("check classic protection: %w", err)
 	}
@@ -16,9 +16,9 @@ func (c *Client) ClassicProtectionExists(owner, repo string) (bool, error) {
 	return resp.StatusCode == http.StatusOK, nil
 }
 
-// ApplyClassicBranchProtection sets branch protection on main using the classic API.
+// ApplyClassicBranchProtection sets branch protection using the classic API.
 // Works on all repos including private free-tier (unlike rulesets).
-func (c *Client) ApplyClassicBranchProtection(owner, repo string, opts BranchProtectionOptions) error {
+func (c *Client) ApplyClassicBranchProtection(owner, repo, branch string, opts BranchProtectionOptions) error {
 	body := map[string]any{
 		"required_status_checks": nil,
 		"enforce_admins":         true,
@@ -31,7 +31,7 @@ func (c *Client) ApplyClassicBranchProtection(owner, repo string, opts BranchPro
 		"allow_force_pushes": false,
 		"allow_deletions":    false,
 	}
-	resp, err := c.do(http.MethodPut, fmt.Sprintf("/repos/%s/%s/branches/main/protection", owner, repo), body)
+	resp, err := c.do(http.MethodPut, fmt.Sprintf("/repos/%s/%s/branches/%s/protection", owner, repo, branch), body)
 	if err != nil {
 		return fmt.Errorf("apply classic branch protection: %w", err)
 	}
@@ -43,9 +43,9 @@ func (c *Client) ApplyClassicBranchProtection(owner, repo string, opts BranchPro
 	return nil
 }
 
-// RemoveClassicBranchProtection removes classic branch protection from main.
-func (c *Client) RemoveClassicBranchProtection(owner, repo string) error {
-	resp, err := c.do(http.MethodDelete, fmt.Sprintf("/repos/%s/%s/branches/main/protection", owner, repo), nil)
+// RemoveClassicBranchProtection removes classic branch protection.
+func (c *Client) RemoveClassicBranchProtection(owner, repo, branch string) error {
+	resp, err := c.do(http.MethodDelete, fmt.Sprintf("/repos/%s/%s/branches/%s/protection", owner, repo, branch), nil)
 	if err != nil {
 		return fmt.Errorf("remove classic branch protection: %w", err)
 	}

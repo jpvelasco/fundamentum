@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jpvelasco/fundamentum/cmd/globals"
+	"github.com/jpvelasco/fundamentum/cmd/util"
 	"github.com/jpvelasco/fundamentum/internal/github"
 	"github.com/jpvelasco/fundamentum/internal/templates"
 	"github.com/jpvelasco/fundamentum/internal/wizard"
@@ -24,13 +25,14 @@ func NewCmd() *cobra.Command {
 }
 
 func run(cmd *cobra.Command, args []string) error {
-	owner, repo, err := parseOwnerRepo(args[0])
+	owner, repo, err := util.ParseOwnerRepo(args[0])
 	if err != nil {
 		return err
 	}
 
 	client := github.NewClient(globals.Token, globals.Verbose)
-	data := templates.RepoData{Owner: owner, RepoName: repo, DefaultBranch: "main"}
+	branch := "main"
+	data := templates.RepoData{Owner: owner, RepoName: repo, DefaultBranch: branch}
 
 	rendered, err := templates.Render(data)
 	if err != nil {
@@ -46,7 +48,7 @@ func run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("check tag ruleset: %w", err)
 	}
-	classicExists, err := client.ClassicProtectionExists(owner, repo)
+	classicExists, err := client.ClassicProtectionExists(owner, repo, branch)
 	if err != nil {
 		return fmt.Errorf("check classic protection: %w", err)
 	}
@@ -63,28 +65,19 @@ func run(cmd *cobra.Command, args []string) error {
 		fmt.Printf("fundamentum apply %s/%s\n\n", owner, repo)
 	}
 
-	items := buildItems(client, owner, repo, rendered, rulesetExists, tagExists, classicExists, opts)
+	items := buildItems(client, owner, repo, branch, rendered, rulesetExists, tagExists, classicExists, opts)
 
 	wizard.PrintSummaryTable(os.Stdout, items, !globals.DryRun)
 
 	if wizard.ConfirmDefaults(os.Stdin, os.Stdout) {
 		return wizard.RunItems(items, globals.DryRun)
 	}
-	return wizard.RunInteractive(items, globals.DryRun)
-}
-
-func parseOwnerRepo(arg string) (string, string, error) {
-	for i, c := range arg {
-		if c == '/' {
-			return arg[:i], arg[i+1:], nil
-		}
-	}
-	return "", "", fmt.Errorf("invalid OWNER/REPO %q: expected a slash separator", arg)
+	return wizard.RunInteractive(items, globals.DryRun, os.Stdin)
 }
 
 func buildItems(
 	c *github.Client,
-	owner, repo string,
+	owner, repo, branch string,
 	rendered []templates.RenderedFile,
 	rulesetExists, tagExists, classicExists bool,
 	opts github.BranchProtectionOptions,
@@ -167,7 +160,7 @@ func buildItems(
 		Action: wizard.ActionCreate,
 		Apply:  func() error { return c.ApplyGeneralSettings(owner, repo) },
 	})
-	items = append(items, branchProtectionItem(c, owner, repo, rulesetExists, classicExists, opts))
+	items = append(items, branchProtectionItem(c, owner, repo, branch, rulesetExists, classicExists, opts))
 	items = append(items, wizard.Item{
 		Name:     "Tag ruleset (protect-version-tags)",
 		Action:   actionFromExists(tagExists),
@@ -188,7 +181,7 @@ func buildItems(
 //   - ruleset exists → skip
 //   - classic exists → upgrade (create ruleset + remove classic)
 //   - neither exists → try ruleset, fall back to classic on 403
-func branchProtectionItem(c *github.Client, owner, repo string, rulesetExists, classicExists bool, opts github.BranchProtectionOptions) wizard.Item {
+func branchProtectionItem(c *github.Client, owner, repo, branch string, rulesetExists, classicExists bool, opts github.BranchProtectionOptions) wizard.Item {
 	switch {
 	case rulesetExists:
 		return wizard.Item{
@@ -201,9 +194,9 @@ func branchProtectionItem(c *github.Client, owner, repo string, rulesetExists, c
 			Action: wizard.ActionUpgrade,
 			Apply: func() error {
 				if err := c.EnsureBranchRuleset(owner, repo, []string{}, opts); err != nil {
-					return err
-				}
-				return c.RemoveClassicBranchProtection(owner, repo)
+						return err
+					}
+					return c.RemoveClassicBranchProtection(owner, repo, branch)
 			},
 		}
 	default:
@@ -217,7 +210,7 @@ func branchProtectionItem(c *github.Client, owner, repo string, rulesetExists, c
 					return nil
 				}
 				// Ruleset unavailable (private free-tier) — fall back to classic.
-				return c.ApplyClassicBranchProtection(owner, repo, opts)
+						return c.ApplyClassicBranchProtection(owner, repo, branch, opts)
 			},
 		}
 	}

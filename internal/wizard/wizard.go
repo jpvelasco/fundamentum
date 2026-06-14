@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 )
 
@@ -68,7 +67,7 @@ func RunItems(items []Item, dryRun bool) error {
 }
 
 // RunInteractive walks through each non-skipped item asking for confirmation.
-func RunInteractive(items []Item, dryRun bool) error {
+func RunInteractive(items []Item, dryRun bool, r io.Reader) error {
 	for i, item := range items {
 		if item.isSkip() {
 			fmt.Printf("  %-45s  already exists — skip\n", item.Name)
@@ -76,7 +75,7 @@ func RunInteractive(items []Item, dryRun bool) error {
 		}
 		fmt.Printf("\n[%d/%d] %s (%s)\n", i+1, len(items), item.Name, item.LiveLabel())
 		fmt.Print("  Apply? [Y/n]: ")
-		scanner := bufio.NewScanner(os.Stdin)
+		scanner := bufio.NewScanner(r)
 		scanner.Scan()
 		input := strings.TrimSpace(scanner.Text())
 		if input != "" && !strings.EqualFold(input, "y") {
