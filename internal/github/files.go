@@ -39,7 +39,10 @@ func (c *Client) FileStatus(owner, repo, path string, content []byte) (string, e
 		var existing struct {
 			Content string `json:"content"`
 		}
-		raw, _ := io.ReadAll(resp.Body)
+		raw, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return "", fmt.Errorf("read existing file %s: %w", path, err)
+		}
 		if err := json.Unmarshal(raw, &existing); err != nil {
 			return "", fmt.Errorf("parse existing file %s: %w", path, err)
 		}
@@ -79,7 +82,10 @@ func (c *Client) UpsertFile(owner, repo, path string, content []byte) (string, e
 			Content string `json:"content"`
 			SHA     string `json:"sha"`
 		}
-		raw, _ := io.ReadAll(resp.Body)
+		raw, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return "", fmt.Errorf("read existing file %s: %w", path, err)
+		}
 		if err := json.Unmarshal(raw, &existing); err != nil {
 			return "", fmt.Errorf("parse existing file %s: %w", path, err)
 		}

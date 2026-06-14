@@ -38,9 +38,18 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	// Pre-flight: check branch protection state before asking solo/team.
-	rulesetExists, _ := client.RulesetExists(owner, repo, "protect-main")
-	tagExists, _ := client.RulesetExists(owner, repo, "protect-version-tags")
-	classicExists, _ := client.ClassicProtectionExists(owner, repo)
+	rulesetExists, err := client.RulesetExists(owner, repo, "protect-main")
+	if err != nil {
+		return fmt.Errorf("check branch ruleset: %w", err)
+	}
+	tagExists, err := client.RulesetExists(owner, repo, "protect-version-tags")
+	if err != nil {
+		return fmt.Errorf("check tag ruleset: %w", err)
+	}
+	classicExists, err := client.ClassicProtectionExists(owner, repo)
+	if err != nil {
+		return fmt.Errorf("check classic protection: %w", err)
+	}
 
 	// Only ask solo/team if branch protection will actually be applied.
 	// If the ruleset already exists, the question has no effect.
