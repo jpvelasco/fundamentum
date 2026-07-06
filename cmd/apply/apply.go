@@ -32,7 +32,14 @@ func run(cmd *cobra.Command, args []string) error {
 
 	client := github.NewClient(globals.Token, globals.Verbose)
 	branch := "main"
-	data := templates.RepoData{Owner: owner, RepoName: repo, DefaultBranch: branch}
+
+	// Detect repo visibility to determine which tooling to apply.
+	visibility, err := client.GetRepoVisibility(owner, repo)
+	if err != nil {
+		return fmt.Errorf("detect repo visibility: %w", err)
+	}
+
+	data := templates.RepoData{Owner: owner, RepoName: repo, DefaultBranch: branch, Visibility: visibility}
 
 	rendered, err := templates.Render(data)
 	if err != nil {
@@ -65,7 +72,7 @@ func run(cmd *cobra.Command, args []string) error {
 		fmt.Printf("fundamentum apply %s/%s\n\n", owner, repo)
 	}
 
-	items := buildItems(client, owner, repo, branch, rendered, rulesetExists, tagExists, classicExists, opts)
+	items := buildItems(client, owner, repo, branch, visibility, rendered, rulesetExists, tagExists, classicExists, opts)
 
 	wizard.PrintSummaryTable(os.Stdout, items, !globals.DryRun)
 
@@ -77,7 +84,7 @@ func run(cmd *cobra.Command, args []string) error {
 
 func buildItems(
 	c *github.Client,
-	owner, repo, branch string,
+	owner, repo, branch, visibility string,
 	rendered []templates.RenderedFile,
 	rulesetExists, tagExists, classicExists bool,
 	opts github.BranchProtectionOptions,
@@ -160,19 +167,31 @@ func buildItems(
 		Action: wizard.ActionCreate,
 		Apply:  func() error { return c.ApplyGeneralSettings(owner, repo) },
 	})
-	items = append(items, branchProtectionItem(c, owner, repo, branch, rulesetExists, classicExists, opts))
+	items = append(items, branchProtectionItem(c, owner, repo, branch, visibility, rulesetExists, classicExists, opts))
 	items = append(items, wizard.Item{
 		Name:     "Tag ruleset (protect-version-tags)",
 		Action:   actionFromExists(tagExists),
 		Optional: true,
 		Apply:    func() error { return c.EnsureTagRuleset(owner, repo) },
 	})
-	items = append(items, wizard.Item{
-		Name:     "Security (secret scanning, CodeQL, Dependabot)",
-		Action:   wizard.ActionCreate,
-		Optional: true,
-		Apply:    func() error { return c.EnableSecurity(owner, repo) },
-	})
+
+	// Security features: CodeQL only for public repos (free-tier private needs GHAS).
+	// Secret scanning and Dependabot work for all repos.
+	if visibility == "public" {
+		items = append(items, wizard.Item{
+			Name:     "Security (secret scanning, CodeQL, Dependabot)",
+			Action:   wizard.ActionCreate,
+			Optional: true,
+			Apply:    func() error { return c.EnableSecurity(owner, repo, visibility) },
+		})
+	} else {
+		items = append(items, wizard.Item{
+			Name:     "Security (secret scanning, Dependabot)",
+			Action:   wizard.ActionCreate,
+			Optional: true,
+			Apply:    func() error { return c.EnableSecurity(owner, repo, visibility) },
+		})
+	}
 
 	return items
 }
@@ -180,8 +199,8 @@ func buildItems(
 // branchProtectionItem returns the correct Item for branch protection based on current state:
 //   - ruleset exists → skip
 //   - classic exists → upgrade (create ruleset + remove classic)
-//   - neither exists → try ruleset, fall back to classic on 403
-func branchProtectionItem(c *github.Client, owner, repo, branch string, rulesetExists, classicExists bool, opts github.BranchProtectionOptions) wizard.Item {
+//   - neither exists → ruleset for public repos; try ruleset then fall back to classic for private
+func branchProtectionItem(c *github.Client, owner, repo, branch, visibility string, rulesetExists, classicExists bool, opts github.BranchProtectionOptions) wizard.Item {
 	switch {
 	case rulesetExists:
 		return wizard.Item{
@@ -194,9 +213,9 @@ func branchProtectionItem(c *github.Client, owner, repo, branch string, rulesetE
 			Action: wizard.ActionUpgrade,
 			Apply: func() error {
 				if err := c.EnsureBranchRuleset(owner, repo, []string{}, opts); err != nil {
-						return err
-					}
-					return c.RemoveClassicBranchProtection(owner, repo, branch)
+					return err
+				}
+				return c.RemoveClassicBranchProtection(owner, repo, branch)
 			},
 		}
 	default:
@@ -209,8 +228,12 @@ func branchProtectionItem(c *github.Client, owner, repo, branch string, rulesetE
 				if err == nil {
 					return nil
 				}
-				// Ruleset unavailable (private free-tier) — fall back to classic.
-						return c.ApplyClassicBranchProtection(owner, repo, branch, opts)
+				// Public repos must use rulesets — no fallback.
+				if visibility == "public" {
+					return err
+				}
+				// Private free-tier: rulesets unavailable — fall back to classic.
+				return c.ApplyClassicBranchProtection(owner, repo, branch, opts)
 			},
 		}
 	}
