@@ -68,3 +68,10 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`.
 - No `exec.Command` anywhere
 - Table-driven tests, stdlib only
 - golangci-lint v2 with staticcheck `-ST1005` excluded; gosec excludes G104, G204, G304, G704
+
+## Codacy
+
+- **Cloud CLI:** `npx @codacy/codacy-cloud-cli issues gh jpvelasco fundamentum --overview` (requires CODACY_API_TOKEN)
+- **Local analysis:** `codacy-analysis analyze` (requires `@codacy/analysis-cli` installed globally)
+- **CI:** Codacy runs as a required status check via cloud webhook — no local workflow needed
+- `.codacy.yml` controls exclude paths and engine configs

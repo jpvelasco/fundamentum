@@ -1,0 +1,4 @@
+---
+exclude_paths:
+  - ".remember/**"
+  - ".codacy/**"
