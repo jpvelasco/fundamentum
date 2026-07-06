@@ -1,0 +1,9 @@
+coverage:
+  paths:
+    - coverage.out
+
+comment:
+  enable: true
+
+report:
+  enable: true
