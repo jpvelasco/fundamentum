@@ -58,13 +58,13 @@ func TestBuildItems(t *testing.T) {
 	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 
 	// Render templates to get files
-	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main"}
+	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"}
 	rendered, err := templates.Render(data)
 	if err != nil {
 		t.Fatalf("Render() error = %v", err)
 	}
 
-	items := buildItems(c, "owner", "repo", "main", rendered, false, false, false, github.BranchProtectionOptions{})
+	items := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{})
 
 	// Should have file items + general settings + branch protection + tag ruleset + security
 	if len(items) < 5 {
@@ -98,7 +98,7 @@ func TestBuildItems(t *testing.T) {
 
 func TestBuildItems_WithExistingRuleset(t *testing.T) {
 	c := &github.Client{}
-	items := buildItems(c, "owner", "repo", "main", nil, true, true, false, github.BranchProtectionOptions{})
+	items := buildItems(c, "owner", "repo", "main", "public", nil, true, true, false, github.BranchProtectionOptions{})
 
 	// Branch protection should be skipped
 	for _, item := range items {

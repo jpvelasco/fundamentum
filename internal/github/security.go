@@ -7,8 +7,9 @@ import (
 	"net/http"
 )
 
-// EnableSecurity enables Dependabot alerts, secret scanning, push protection, and CodeQL.
-func (c *Client) EnableSecurity(owner, repo string) error {
+// EnableSecurity enables Dependabot alerts, secret scanning, and push protection.
+// CodeQL is only enabled for public repos (private repos require GitHub Advanced Security).
+func (c *Client) EnableSecurity(owner, repo, visibility string) error {
 	base := fmt.Sprintf("/repos/%s/%s", owner, repo)
 
 	for _, path := range []string{
@@ -40,17 +41,21 @@ func (c *Client) EnableSecurity(owner, repo string) error {
 		return fmt.Errorf("enable secret scanning: %s: %s", resp.Status, body)
 	}
 
-	resp2, err := c.patch(base+"/code-scanning/default-setup", map[string]any{
-		"state":       "configured",
-		"query_suite": "default",
-	})
-	if err != nil {
-		return fmt.Errorf("enable CodeQL: %w", err)
-	}
-	defer func() { _ = resp2.Body.Close() }()
-	if resp2.StatusCode != http.StatusOK && resp2.StatusCode != http.StatusAccepted {
-		body, _ := io.ReadAll(resp2.Body)
-		return fmt.Errorf("enable CodeQL: %s: %s", resp2.Status, body)
+	// CodeQL requires GitHub Advanced Security for private repos (paid).
+	// Only enable for public repos.
+	if visibility == "public" {
+		resp2, err := c.patch(base+"/code-scanning/default-setup", map[string]any{
+			"state":       "configured",
+			"query_suite": "default",
+		})
+		if err != nil {
+			return fmt.Errorf("enable CodeQL: %w", err)
+		}
+		defer func() { _ = resp2.Body.Close() }()
+		if resp2.StatusCode != http.StatusOK && resp2.StatusCode != http.StatusAccepted {
+			body, _ := io.ReadAll(resp2.Body)
+			return fmt.Errorf("enable CodeQL: %s: %s", resp2.Status, body)
+		}
 	}
 
 	return nil
