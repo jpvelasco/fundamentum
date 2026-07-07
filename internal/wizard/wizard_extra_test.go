@@ -201,8 +201,8 @@ func TestIsSkip(t *testing.T) {
 	}
 	for _, tt := range tests {
 		item := Item{Action: tt.action}
-		if item.isSkip() != tt.want {
-			t.Errorf("isSkip(%v) = %v, want %v", tt.action, item.isSkip(), tt.want)
+		if item.IsSkip() != tt.want {
+			t.Errorf("isSkip(%v) = %v, want %v", tt.action, item.IsSkip(), tt.want)
 		}
 	}
 }

@@ -44,7 +44,7 @@ func ConfirmDefaults(r io.Reader, w io.Writer) bool {
 // RunItems applies each item's Apply func, printing status as it goes.
 func RunItems(items []Item, dryRun bool) error {
 	for _, item := range items {
-		if item.isSkip() {
+		if item.IsSkip() {
 			fmt.Printf("  %-45s  skipped\n", item.Name)
 			continue
 		}
@@ -69,7 +69,7 @@ func RunItems(items []Item, dryRun bool) error {
 // RunInteractive walks through each non-skipped item asking for confirmation.
 func RunInteractive(items []Item, dryRun bool, r io.Reader) error {
 	for i, item := range items {
-		if item.isSkip() {
+		if item.IsSkip() {
 			fmt.Printf("  %-45s  already exists — skip\n", item.Name)
 			continue
 		}

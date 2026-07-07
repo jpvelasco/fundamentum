@@ -33,7 +33,8 @@ type Item struct {
 	Name     string
 	Action   Action
 	Apply    func() error
-	Optional bool // failures show as ⚠ (plan limit) rather than ✗ (error)
+	Optional bool    // failures show as ⚠ (plan limit) rather than ✗ (error)
+	Content  []byte  // rendered file content for file items (used by PR mode)
 }
 
 // DryRunLabel returns the human-readable action for --dry-run output.
@@ -52,4 +53,4 @@ func (i Item) LiveLabel() string {
 	return i.Action.String()
 }
 
-func (i Item) isSkip() bool { return i.Action == ActionSkip }
+func (i Item) IsSkip() bool { return i.Action == ActionSkip }

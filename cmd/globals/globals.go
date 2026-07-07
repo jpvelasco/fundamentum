@@ -12,3 +12,7 @@ var Token string
 
 // NoOverwrite skips files that already exist rather than updating them.
 var NoOverwrite bool
+
+// ViaPR pushes file changes through a PR instead of direct commits.
+// Useful when branch protection blocks direct pushes (409).
+var ViaPR bool
