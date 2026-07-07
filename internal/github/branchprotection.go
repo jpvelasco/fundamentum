@@ -18,7 +18,8 @@ func (c *Client) ClassicProtectionExists(owner, repo, branch string) (bool, erro
 
 // ApplyClassicBranchProtection sets branch protection using the classic API.
 // Works on all repos including private free-tier (unlike rulesets).
-// statusChecks are the required CI/status check names; use DefaultStatusChecks for Codacy + Socket.
+// statusChecks are the required CI/status check names; use DefaultStatusChecks for Codacy,
+// or append additional checks (e.g., Socket) as needed.
 func (c *Client) ApplyClassicBranchProtection(owner, repo, branch string, statusChecks []string, opts BranchProtectionOptions) error {
 	var checksReq any
 	if len(statusChecks) > 0 {

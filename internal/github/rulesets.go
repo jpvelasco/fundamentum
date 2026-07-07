@@ -9,11 +9,11 @@ import (
 )
 
 // DefaultStatusChecks are the status checks added to branch protection by default.
-// Codacy reports quality gates; Socket reports dependency security findings.
+// Codacy is always configured by fundamentum (.codacy.yml), so its check is safe to require.
+// Socket is a GitHub App that may not be installed on all accounts — add it via the
+// statusChecks parameter on CreateBranchRuleset / ApplyClassicBranchProtection if available.
 var DefaultStatusChecks = []string{
 	"Codacy Static Code Analysis",
-	"Socket Security: Project Report",
-	"Socket Security: Pull Request Alerts",
 }
 
 // BranchProtectionOptions controls how strictly the branch ruleset is configured.
@@ -72,8 +72,8 @@ func (c *Client) EnsureTagRuleset(owner, repo string) error {
 }
 
 // CreateBranchRuleset creates the protect-main branch ruleset.
-// statusChecks are additional checks on top of DefaultStatusChecks (Codacy + Socket).
-// Pass an empty slice to use only the defaults.
+// statusChecks are additional checks on top of DefaultStatusChecks (Codacy).
+// Pass nil to use only the defaults.
 func (c *Client) CreateBranchRuleset(owner, repo string, statusChecks []string, opts BranchProtectionOptions) error {
 	allChecks := append([]string{}, DefaultStatusChecks...)
 	allChecks = append(allChecks, statusChecks...)
