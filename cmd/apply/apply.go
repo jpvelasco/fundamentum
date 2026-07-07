@@ -247,8 +247,9 @@ func actionFromExists(exists bool) wizard.Action {
 	return wizard.ActionCreate
 }
 
-// applyItems runs the item list. When viaPR is true (or a 409 is detected),
-// file items are batched into a single PR instead of direct commits.
+// applyItems runs the item list. When viaPR is true, file items are batched
+// into a single PR instead of direct commits. If viaPR is false and a 409
+// is detected, the operation fails with a suggestion to re-run with --pr.
 func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Item, dryRun, viaPR bool) error {
 	var fileChanges []github.FileChange
 	var nonFileItems []wizard.Item
@@ -265,7 +266,7 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 
 		// Check if this is a file item (has rendered content).
 		if item.Content != nil {
-			if viaPR || globals.ViaPR {
+			if viaPR {
 				// Collect for PR batch.
 				fileChanges = append(fileChanges, github.FileChange{
 					Path:    item.Name,
@@ -274,18 +275,11 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 				continue
 			}
 
-			// Direct apply — detect 409 and switch to PR mode.
+			// Direct apply — detect 409 and fail with guidance.
 			fmt.Printf("  %-45s  applying...", item.Name)
 			if err := item.Apply(); err != nil {
 				if github.IsConflict409(err) {
-					fmt.Printf("\n  Branch protection blocks direct commits — switching to PR mode...\n")
-					viaPR = true
-					// This item goes into the PR batch.
-					fileChanges = append(fileChanges, github.FileChange{
-						Path:    item.Name,
-						Content: item.Content,
-					})
-					continue
+					return fmt.Errorf("branch protection requires changes via pull request\n  re-run with --pr flag to push file changes through a PR")
 				}
 				if item.Optional {
 					fmt.Printf("\r  %-45s  ⚠ requires GitHub Pro or public repo\n", item.Name)

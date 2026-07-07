@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // FileChange describes a file to be created or updated.
@@ -62,7 +63,9 @@ func (c *Client) UpsertFileOnBranch(owner, repo, branch, path string, content []
 		return "", fmt.Errorf("check file %s on %s: %s: %s", path, branch, resp.Status, b)
 	}
 
-	putResp, err := c.do(http.MethodPut, apiPath, body)
+	// PUT doesn't support ?ref= — use the branch in the request body instead.
+	putPath := fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, path)
+	putResp, err := c.do(http.MethodPut, putPath, body)
 	if err != nil {
 		return "", fmt.Errorf("upsert file %s on %s: %w", path, branch, err)
 	}
@@ -133,7 +136,7 @@ func (c *Client) CreatePullRequest(owner, repo, title, body, head, base string) 
 // ApplyViaPR creates a feature branch, pushes all file changes, and opens a PR.
 // Returns the PR number on success.
 func (c *Client) ApplyViaPR(owner, repo, defaultBranch string, changes []FileChange) (int, error) {
-	branch := "fundamentum/harden-" + defaultBranch
+	branch := fmt.Sprintf("fundamentum/harden-%s-%d", defaultBranch, time.Now().Unix())
 
 	if err := c.CreatePRBranch(owner, repo, branch, defaultBranch); err != nil {
 		return 0, fmt.Errorf("create branch: %w", err)
@@ -165,5 +168,6 @@ func IsConflict409(err error) bool {
 		return false
 	}
 	msg := err.Error()
-	return strings.Contains(msg, "409") && strings.Contains(msg, "rule violations")
+	// "409" from resp.Status is stable; "rule violations" or "GH013" from the JSON body.
+	return strings.Contains(msg, "409") && (strings.Contains(msg, "rule violations") || strings.Contains(msg, "GH013"))
 }
