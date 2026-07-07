@@ -6,7 +6,7 @@ import (
 )
 
 func TestRender(t *testing.T) {
-	data := RepoData{Owner: "jpvelasco", RepoName: "fundamentum", DefaultBranch: "main"}
+	data := RepoData{Owner: "jpvelasco", RepoName: "fundamentum", DefaultBranch: "main", Visibility: "private"}
 	files, err := Render(data)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
