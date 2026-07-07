@@ -212,7 +212,7 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			Name:   "Branch protection (upgrade classic → ruleset)",
 			Action: wizard.ActionUpgrade,
 			Apply: func() error {
-				if err := c.EnsureBranchRuleset(owner, repo, []string{}, opts); err != nil {
+				if err := c.EnsureBranchRuleset(owner, repo, nil, opts); err != nil {
 					return err
 				}
 				return c.RemoveClassicBranchProtection(owner, repo, branch)
@@ -224,7 +224,7 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			Action:   wizard.ActionCreate,
 			Optional: true,
 			Apply: func() error {
-				err := c.EnsureBranchRuleset(owner, repo, []string{}, opts)
+				err := c.EnsureBranchRuleset(owner, repo, nil, opts)
 				if err == nil {
 					return nil
 				}
@@ -233,7 +233,7 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 					return err
 				}
 				// Private free-tier: rulesets unavailable — fall back to classic.
-				return c.ApplyClassicBranchProtection(owner, repo, branch, opts)
+				return c.ApplyClassicBranchProtection(owner, repo, branch, github.DefaultStatusChecks, opts)
 			},
 		}
 	}

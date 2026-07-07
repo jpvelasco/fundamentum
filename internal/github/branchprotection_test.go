@@ -53,7 +53,7 @@ func TestApplyClassicBranchProtection(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient("t", false).WithBaseURL(srv.URL)
-	if err := c.ApplyClassicBranchProtection("owner", "repo", "main", BranchProtectionOptions{Solo: true}); err != nil {
+	if err := c.ApplyClassicBranchProtection("owner", "repo", "main", DefaultStatusChecks, BranchProtectionOptions{Solo: true}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !called {

@@ -414,7 +414,7 @@ func TestApplyClassicBranchProtection_Error(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient("t", false).WithBaseURL(srv.URL)
-	err := c.ApplyClassicBranchProtection("owner", "repo", "main", BranchProtectionOptions{})
+	err := c.ApplyClassicBranchProtection("owner", "repo", "main", DefaultStatusChecks, BranchProtectionOptions{})
 	if err == nil {
 		t.Error("expected error for 403 response")
 	}
