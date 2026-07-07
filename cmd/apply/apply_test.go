@@ -5,48 +5,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/jpvelasco/fundamentum/cmd/util"
 	"github.com/jpvelasco/fundamentum/internal/github"
 	"github.com/jpvelasco/fundamentum/internal/templates"
 	"github.com/jpvelasco/fundamentum/internal/wizard"
 )
-
-func TestParseOwnerRepo(t *testing.T) {
-	tests := []struct {
-		name    string
-		arg     string
-		want    string
-		want1   string
-		wantErr bool
-	}{
-		{
-			name:  "valid",
-			arg:   "owner/repo",
-			want:  "owner",
-			want1: "repo",
-		},
-		{
-			name:    "invalid",
-			arg:     "repo",
-			wantErr: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			owner, repo, err := util.ParseOwnerRepo(tt.arg)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseOwnerRepo() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if owner != tt.want {
-				t.Errorf("ParseOwnerRepo() owner = %v, want %v", owner, tt.want)
-			}
-			if repo != tt.want1 {
-				t.Errorf("ParseOwnerRepo() repo = %v, want %v", repo, tt.want1)
-			}
-		})
-	}
-}
 
 func TestBuildItems(t *testing.T) {
 	// Mock server that returns file not found for all files
