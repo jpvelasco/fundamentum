@@ -8,6 +8,14 @@ import (
 	"net/http"
 )
 
+// DefaultStatusChecks are the status checks added to branch protection by default.
+// Codacy reports quality gates; Socket reports dependency security findings.
+var DefaultStatusChecks = []string{
+	"Codacy Static Code Analysis",
+	"Socket Security: Project Report",
+	"Socket Security: Pull Request Alerts",
+}
+
 // BranchProtectionOptions controls how strictly the branch ruleset is configured.
 type BranchProtectionOptions struct {
 	// Solo disables CODEOWNERS review requirement and stale review dismissal,
@@ -64,10 +72,13 @@ func (c *Client) EnsureTagRuleset(owner, repo string) error {
 }
 
 // CreateBranchRuleset creates the protect-main branch ruleset.
-// statusChecks is the list of required CI job names (can be empty; add after first CI run).
+// statusChecks are additional checks on top of DefaultStatusChecks (Codacy + Socket).
+// Pass an empty slice to use only the defaults.
 func (c *Client) CreateBranchRuleset(owner, repo string, statusChecks []string, opts BranchProtectionOptions) error {
-	checks := make([]map[string]any, len(statusChecks))
-	for i, name := range statusChecks {
+	allChecks := append([]string{}, DefaultStatusChecks...)
+	allChecks = append(allChecks, statusChecks...)
+	checks := make([]map[string]any, len(allChecks))
+	for i, name := range allChecks {
 		checks[i] = map[string]any{"context": name}
 	}
 	prParams := map[string]any{
