@@ -71,7 +71,7 @@ func (c *Client) UpsertFile(owner, repo, path string, content []byte) (string, e
 	defer func() { _ = resp.Body.Close() }()
 
 	body := map[string]any{
-		"message": "chore: add " + path + " via fundamentum",
+		"message": "chore: add " + path,
 		"content": base64.StdEncoding.EncodeToString(content),
 	}
 
@@ -95,7 +95,7 @@ func (c *Client) UpsertFile(owner, repo, path string, content []byte) (string, e
 			return "skipped", nil
 		}
 		body["sha"] = existing.SHA
-		body["message"] = "chore: update " + path + " via fundamentum"
+		body["message"] = "chore: update " + path
 		action = "updated"
 
 	case http.StatusNotFound:
