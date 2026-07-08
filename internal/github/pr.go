@@ -27,7 +27,7 @@ func (c *Client) UpsertFileOnBranch(owner, repo, branch, path string, content []
 	defer func() { _ = resp.Body.Close() }()
 
 	body := map[string]any{
-		"message": "chore: add " + path + " via fundamentum",
+		"message": "chore: add " + path,
 		"content": base64.StdEncoding.EncodeToString(content),
 		"branch":  branch,
 	}
@@ -52,7 +52,7 @@ func (c *Client) UpsertFileOnBranch(owner, repo, branch, path string, content []
 			return "skipped", nil
 		}
 		body["sha"] = existing.SHA
-		body["message"] = "chore: update " + path + " via fundamentum"
+		body["message"] = "chore: update " + path
 		action = "updated"
 
 	case http.StatusNotFound:
@@ -136,7 +136,7 @@ func (c *Client) CreatePullRequest(owner, repo, title, body, head, base string) 
 // ApplyViaPR creates a feature branch, pushes all file changes, and opens a PR.
 // Returns the PR number on success.
 func (c *Client) ApplyViaPR(owner, repo, defaultBranch string, changes []FileChange) (int, error) {
-	branch := fmt.Sprintf("fundamentum/harden-%s-%d", defaultBranch, time.Now().Unix())
+	branch := fmt.Sprintf("harden-%s-%d", defaultBranch, time.Now().Unix())
 
 	if err := c.CreatePRBranch(owner, repo, branch, defaultBranch); err != nil {
 		return 0, fmt.Errorf("create branch: %w", err)
@@ -152,8 +152,8 @@ func (c *Client) ApplyViaPR(owner, repo, defaultBranch string, changes []FileCha
 		}
 	}
 
-	title := "chore: harden repo via fundamentum"
-	body := "Applied by [fundamentum](https://github.com/jpvelasco/fundamentum) — branch protection, security, community files, and quality gates."
+	title := "feat: harden repo — community files, settings, security"
+	body := "Applied repo hardening: branch protection, security features, community health files, and quality gates."
 
 	prNum, err := c.CreatePullRequest(owner, repo, title, body, branch, defaultBranch)
 	if err != nil {
