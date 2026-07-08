@@ -31,7 +31,7 @@ See `planning/product-spec.md`, `planning/roadmap.md`, and `planning/technical-s
 
 ## Codacy
 
-- **Cloud CLI:** `npx @codacy/codacy-cloud-cli issues gh jpvelasco fundamentum --overview` (requires CODACY_API_TOKEN)
-- **Local analysis:** `codacy-analysis analyze` (requires `@codacy/analysis-cli` installed globally)
+- **Cloud CLI (latest):** `npx --yes @codacy/codacy-cloud-cli@latest issues ...` (or with CODACY_API_TOKEN)
+- **Local analysis (latest):** `npx --yes @codacy/analysis-cli@latest analyze` (globals optional)
 - **CI:** Codacy runs as a required status check via cloud webhook — no local workflow needed
-- `.codacy.yml` controls exclude paths and engine configs
+- `.codacy.yml` controls exclude paths and engine configs (see also AGENTS.md for current CLI usage)
