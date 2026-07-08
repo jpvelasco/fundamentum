@@ -28,6 +28,16 @@ go run . init OWNER/REPO
 
 Pre-commit order: build → lint → test.
 
+## PR Workflow (use with pr-auto / pr-doctor skills)
+
+For PRs: use pr-auto for full lifecycle (create, fix CI/reviews, land safely).
+- Never merge if CI red on required checks.
+- Always address/resolve review threads with substantive replies.
+- Admin actions (force, --admin merge, protection bypass) → STOP and ask human first.
+- After changes to .github/, .codacy.yml, workflows, etc.: suggest `go run . apply <owner>/<repo>` (dry-run first).
+- Load AGENTS.md + CLAUDE.md at start. Follow squash default, feature branches, CI wait.
+- Use supporting skills: check-work (verify fixes), review (findings), monitor (long CI).
+
 ## Architecture
 
 Go CLI (Cobra). Entry point: `main.go` → `cmd/root/root.go`.
@@ -74,9 +84,11 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`.
 
 ## Codacy
 
-- **Cloud CLI:** `npx @codacy/codacy-cloud-cli issues gh jpvelasco fundamentum --overview` (requires CODACY_API_TOKEN)
-- **Local analysis:** `codacy-analysis analyze` (requires `@codacy/analysis-cli` installed globally)
+- **Cloud CLI (latest, no install confusion):** `npx --yes @codacy/codacy-cloud-cli@latest issues gh jpvelasco fundamentum --overview` (or set CODACY_API_TOKEN)
+- **Local analysis (latest):** `npx --yes @codacy/analysis-cli@latest analyze ...` (or `codacy-analysis` if globally installed)
 - **CI:** Codacy runs as a required status check via cloud webhook — no local workflow needed
 - `.codacy.yml` controls exclude paths and engine configs (`engines:` section)
-- **Cannot disable tools via `.codacy.yml`.** The `enabled: false` option only works for languages (`languages.<lang>.enabled: false`). Tools can only be enabled/disabled on the [Code patterns page](https://docs.codacy.com/repositories-configure/configuring-code-patterns/) in the Codacy UI. The `tools:` key is from Codacy CLI v2 (`.codacy/codacy.yaml`) and is not recognized by the cloud config.
+- **Cannot disable tools via `.codacy.yml`.** The `enabled: false` option only works for languages (`languages.<lang>.enabled: false`). Disable tools on the [Code patterns page](https://docs.codacy.com/repositories-configure/configuring-code-patterns/) instead.
+- **Legacy `tools:` key ignored.** The `.codacy/codacy.yaml` format is from Codacy CLI v2 and not recognized by the current cloud config.
+- **Use npm CLIs via npx.** For local and cloud interaction, use `@codacy/codacy-cloud-cli` and `@codacy/analysis-cli`.
 - **Trivy noise:** Trivy errors with "no patterns configured" on repos without Dockerfiles/K8s manifests. Must be disabled in the Codacy UI per-repo.

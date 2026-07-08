@@ -13,9 +13,23 @@ fundamentum apply OWNER/REPO
 # Create a new repo + harden it
 fundamentum init OWNER/REPO
 
-# Preview everything first
+# Preview without changes
 fundamentum --dry-run apply OWNER/REPO
+
+# Apply via pull request
+fundamentum --pr apply OWNER/REPO
 ```
+
+## Prerequisites
+
+A GitHub personal access token with **`repo` scope** (classic) or **Contents + Metadata + Administration** permissions (fine-grained). Set it via the `GITHUB_TOKEN` environment variable or pass `--token`.
+
+```bash
+export GITHUB_TOKEN=ghp_xxxxx        # Linux/macOS
+$env:GITHUB_TOKEN = "ghp_xxxxx"      # PowerShell
+```
+
+**Note:** Branch protection on free-tier private repos requires GitHub Pro for the API. If rulesets are unavailable, fundamentum falls back to classic branch protection — but if that also fails (403), you'll need to set up branch protection manually via the repo Settings → Branches page.
 
 ## What it does
 
@@ -36,18 +50,27 @@ Everything is **idempotent** — re-running is safe and fast.
 | `--token`         | GitHub token (defaults to `GITHUB_TOKEN`)        |
 | `--no-overwrite`  | Skip any file that already exists                |
 | `--pr`            | Apply file changes via PR instead of direct push |
+| `--version`       | Print version and exit                           |
 
-`init` also supports `--private`.
+`init` also supports `--private` (default: `true`).
 
-See the interactive wizard: it shows a clear summary table, asks solo/team (when relevant), and lets you confirm or step through changes.
+## How it works
 
-## Install (once released)
+1. fundamentum detects your repo's current state (existing files, branch protection, visibility).
+2. It renders opinionated templates and shows a summary table of what will change.
+3. You confirm all defaults or step through items interactively.
+4. Files are created or updated directly (or via PR with `--pr`). Settings, security, and branch protection are applied via the GitHub API.
+
+## Install
 
 ```bash
-# Go
+# Go install
 go install github.com/jpvelasco/fundamentum@latest
 
-# npm (shim)
+# Run from source
+go run github.com/jpvelasco/fundamentum apply OWNER/REPO
+
+# npm (shim, after v1.0)
 npm install -g fundamentum
 ```
 

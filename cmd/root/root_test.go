@@ -31,3 +31,17 @@ func TestDryRunFlag(t *testing.T) {
 		globals.NoOverwrite = false
 	})
 }
+
+func TestVersionFlag(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"--version"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error on --version, got: %v", err)
+	}
+}
+
+func TestVersionDefault(t *testing.T) {
+	if Version == "" {
+		t.Error("expected non-empty default Version")
+	}
+}

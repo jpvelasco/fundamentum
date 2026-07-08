@@ -19,8 +19,16 @@ func NewCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "apply OWNER/REPO",
 		Short: "Harden an existing GitHub repo",
-		Args:  cobra.ExactArgs(1),
-		RunE:  run,
+		Long: `Harden an existing GitHub repository with community health files,
+branch protection, security features, and starter workflows.
+
+Examples:
+  fundamentum apply OWNER/REPO              # interactive harden
+  fundamentum --dry-run apply OWNER/REPO    # preview without changes
+  fundamentum --pr apply OWNER/REPO         # apply via pull request
+  fundamentum --token $GITHUB_TOKEN apply OWNER/REPO`,
+		Args: cobra.ExactArgs(1),
+		RunE: run,
 	}
 }
 
@@ -77,7 +85,15 @@ func run(cmd *cobra.Command, args []string) error {
 	wizard.PrintSummaryTable(os.Stdout, items, !globals.DryRun)
 
 	if wizard.ConfirmDefaults(os.Stdin, os.Stdout) {
-		return applyItems(client, owner, repo, branch, items, globals.DryRun, globals.ViaPR)
+		if err := applyItems(client, owner, repo, branch, items, globals.DryRun, globals.ViaPR); err != nil {
+			return err
+		}
+		if globals.DryRun {
+			fmt.Printf("\n  Dry run complete — no changes made.\n")
+		} else {
+			fmt.Printf("\n  ✓ Done — https://github.com/%s/%s\n", owner, repo)
+		}
+		return nil
 	}
 	return wizard.RunInteractive(items, globals.DryRun, os.Stdin)
 }
@@ -335,5 +351,6 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 		}
 	}
 
+	fmt.Printf("\n  Repo: https://github.com/%s/%s\n", owner, repo)
 	return nil
 }

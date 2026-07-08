@@ -18,7 +18,13 @@ func NewCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init OWNER/REPO",
 		Short: "Create a new GitHub repo and harden it",
-		Args:  cobra.ExactArgs(1),
+		Long: `Create a new GitHub repository and apply hardening in one shot.
+By default creates a private repo. Use --private=false for public.
+
+Examples:
+  fundamentum init OWNER/REPO
+  fundamentum --dry-run init OWNER/REPO   # preview only`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return run(args[0], private)
 		},

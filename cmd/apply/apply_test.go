@@ -405,3 +405,132 @@ func TestBranchProtectionItem_FallbackOnlyOn403(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyItems_WorkflowLocked_Skipped(t *testing.T) {
+	// Workflow lock error should be treated as skip and processing continues.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"content":{}}`))
+	}))
+	defer srv.Close()
+
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+	items := []wizard.Item{
+		{
+			Name:    ".github/workflows/ci.yml",
+			Action:  wizard.ActionUpdate,
+			Content: []byte("workflow"),
+			Apply: func() error {
+				return fmt.Errorf("upsert file .github/workflows/ci.yml: %w", github.ErrWorkflowLocked)
+			},
+		},
+		{
+			Name:    ".github/CODEOWNERS",
+			Action:  wizard.ActionCreate,
+			Content: []byte("me"),
+			Apply: func() error { return nil },
+		},
+	}
+	err := applyItems(c, "owner", "repo", "main", items, false, false)
+	if err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+}
+
+func TestApplyItems_NonFileFatalError(t *testing.T) {
+	// Non-optional non-file item that fails should print error but not return fatal.
+	// (applyItems does not return errors for individual item failures — it continues.)
+	items := []wizard.Item{
+		{
+			Name:     "General settings (auto-delete branches)",
+			Action:   wizard.ActionCreate,
+			Optional: false,
+			Apply:    func() error { return fmt.Errorf("API error") },
+		},
+	}
+	c := github.NewClient("", false)
+	err := applyItems(c, "owner", "repo", "main", items, false, false)
+	if err != nil {
+		t.Errorf("expected no error return (non-fatal item failure), got: %v", err)
+	}
+}
+
+func TestApplyItems_MixedFileAndNonFile(t *testing.T) {
+	// Mix of file items and non-file items: files apply directly, non-files defer.
+	fileApplied := false
+	nonFileApplied := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+	items := []wizard.Item{
+		{
+			Name:    ".github/CODEOWNERS",
+			Action:  wizard.ActionCreate,
+			Content: []byte("me"),
+			Apply: func() error {
+				fileApplied = true
+				return nil
+			},
+		},
+		{
+			Name:   "General settings (auto-delete branches)",
+			Action: wizard.ActionCreate,
+			Apply: func() error {
+				nonFileApplied = true
+				return nil
+			},
+		},
+	}
+	err := applyItems(c, "owner", "repo", "main", items, false, false)
+	if err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+	if !fileApplied {
+		t.Error("expected file item to be applied directly")
+	}
+	if !nonFileApplied {
+		t.Error("expected non-file item to be applied after files")
+	}
+}
+
+func TestBuildItems_AliasFormatVariants(t *testing.T) {
+	// Test alias detection for format variants (.yml vs .md for issue templates).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// bug_report.md exists as alias (yml target)
+		if strings.Contains(r.URL.Path, "/bug_report.md") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"content":"b2xkCg=="}`))
+			return
+		}
+		// feature_request.yml exists at target path with same content
+		if strings.Contains(r.URL.Path, "/feature_request.yml") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"content":"b2xkCg=="}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"}
+	rendered, err := templates.Render(data)
+	if err != nil {
+		t.Fatalf("Render() error: %v", err)
+	}
+
+	items := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{})
+
+	// bug_report.yml should be skipped because .md alias exists
+	for _, item := range items {
+		if item.Name == ".github/ISSUE_TEMPLATE/bug_report.yml" {
+			if item.Action != wizard.ActionSkip {
+				t.Errorf("expected bug_report.yml to be skipped (md alias exists), got %v", item.Action)
+			}
+		}
+	}
+}

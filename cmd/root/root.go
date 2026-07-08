@@ -12,12 +12,22 @@ import (
 	"github.com/jpvelasco/fundamentum/cmd/repoinit"
 )
 
+// Version is set by build ldflags (e.g., -ldflags '-X github.com/jpvelasco/fundamentum/cmd/root.Version=v1.0.0').
+var Version = "dev"
+
 func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "fundamentum",
 		Short: "Bootstrap and harden GitHub repos for OSS collaboration",
 		Long: `fundamentum applies branch protection, security settings, and community
-health files to a GitHub repository in one shot.`,
+health files to a GitHub repository in one shot.
+
+Examples:
+  fundamentum apply OWNER/REPO              # harden existing repo
+  fundamentum init OWNER/REPO               # create and harden new repo
+  fundamentum --dry-run apply OWNER/REPO    # preview without changes
+  fundamentum --version                     # show version`,
+		Version: Version,
 	}
 	cmd.PersistentFlags().BoolVar(&globals.DryRun, "dry-run", false, "print actions without applying them")
 	cmd.PersistentFlags().BoolVar(&globals.Verbose, "verbose", false, "print API calls")
