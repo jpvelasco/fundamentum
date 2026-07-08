@@ -2,9 +2,9 @@ package github
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
@@ -348,9 +348,12 @@ func TestCreateTagRuleset_Error(t *testing.T) {
 }
 
 func TestCreateBranchRuleset_WithStatusChecks(t *testing.T) {
-	var postPath string
+	var postBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		postPath = r.URL.Path
+		// Decode the body to inspect
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		postBody = body
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"id":1}`))
 	}))
@@ -361,8 +364,88 @@ func TestCreateBranchRuleset_WithStatusChecks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(postPath, "rulesets") {
-		t.Errorf("expected rulesets path, got %s", postPath)
+	if postBody == nil {
+		t.Fatal("expected POST body")
+	}
+}
+
+func TestCreateBranchRuleset_DedupStatusChecks(t *testing.T) {
+	tests := []struct {
+		name        string
+		statusChecks []string
+		wantCount   int // number of required_status_checks entries
+	}{
+		{
+			name:        "no duplicates",
+			statusChecks: []string{"ci", "lint"},
+			wantCount:   3, // Codacy + ci + lint
+		},
+		{
+			name:        "duplicate with default",
+			statusChecks: []string{"Codacy Static Code Analysis"},
+			wantCount:   1, // Codacy deduped
+		},
+		{
+			name:        "empty",
+			statusChecks: nil,
+			wantCount:   1, // Codacy only
+		},
+		{
+			name:        "empty string slice",
+			statusChecks: []string{},
+			wantCount:   1, // Codacy only
+		},
+		{
+			name:        "self duplicate",
+			statusChecks: []string{"ci", "ci"},
+			wantCount:   2, // Codacy + ci
+		},
+		{
+			name:        "all duplicates",
+			statusChecks: []string{"Codacy Static Code Analysis", "Codacy Static Code Analysis"},
+			wantCount:   1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var postBody map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&postBody)
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"id":1}`))
+			}))
+			defer srv.Close()
+
+			c := NewClient("t", false).WithBaseURL(srv.URL)
+			err := c.CreateBranchRuleset("owner", "repo", tt.statusChecks, BranchProtectionOptions{})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			// Count required_status_checks entries in the rules array
+			rules, ok := postBody["rules"].([]any)
+			if !ok {
+				t.Fatal("expected rules array in body")
+			}
+			for _, rule := range rules {
+				rm, ok := rule.(map[string]any)
+				if !ok || rm["type"] != "required_status_checks" {
+					continue
+				}
+				params, ok := rm["parameters"].(map[string]any)
+				if !ok {
+					continue
+				}
+				checks, ok := params["required_status_checks"].([]any)
+				if !ok {
+					continue
+				}
+				if len(checks) != tt.wantCount {
+					t.Errorf("expected %d checks, got %d", tt.wantCount, len(checks))
+				}
+			}
+		})
 	}
 }
 

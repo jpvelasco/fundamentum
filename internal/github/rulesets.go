@@ -8,6 +8,19 @@ import (
 	"net/http"
 )
 
+// dedup removes duplicate strings while preserving order.
+func dedup(s []string) []string {
+	seen := make(map[string]struct{}, len(s))
+	out := make([]string, 0, len(s))
+	for _, v := range s {
+		if _, ok := seen[v]; !ok {
+			seen[v] = struct{}{}
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 // DefaultStatusChecks are the status checks added to branch protection by default.
 // Codacy is always configured by fundamentum (.codacy.yml), so its check is safe to require.
 // Socket is a GitHub App that may not be installed on all accounts — add it via the
@@ -75,8 +88,7 @@ func (c *Client) EnsureTagRuleset(owner, repo string) error {
 // statusChecks are additional checks on top of DefaultStatusChecks (Codacy).
 // Pass nil to use only the defaults.
 func (c *Client) CreateBranchRuleset(owner, repo string, statusChecks []string, opts BranchProtectionOptions) error {
-	allChecks := append([]string{}, DefaultStatusChecks...)
-	allChecks = append(allChecks, statusChecks...)
+	allChecks := dedup(append(append([]string{}, DefaultStatusChecks...), statusChecks...))
 	checks := make([]map[string]any, len(allChecks))
 	for i, name := range allChecks {
 		checks[i] = map[string]any{"context": name}
