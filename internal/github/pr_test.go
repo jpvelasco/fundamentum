@@ -1,6 +1,7 @@
 package github
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -160,6 +161,57 @@ func TestUpsertFileOnBranch_Update(t *testing.T) {
 	}
 	if action != "updated" {
 		t.Errorf("expected action=updated, got %q", action)
+	}
+}
+
+func TestUpsertFileOnBranch_Workflow404_Skipped(t *testing.T) {
+	// GitHub Actions locks workflow files — PUT returns 404 on update.
+	existing := base64.StdEncoding.EncodeToString([]byte("old workflow content"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"content": existing,
+				"sha":     "abc123",
+			})
+		case http.MethodPut:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient("t", false).WithBaseURL(srv.URL)
+	action, err := c.UpsertFileOnBranch("owner", "repo", "feature", ".github/workflows/ci.yml", []byte("new content"))
+	if err == nil {
+		t.Fatal("expected ErrWorkflowLocked, got nil")
+	}
+	if !IsWorkflowLocked(err) {
+		t.Errorf("expected ErrWorkflowLocked, got: %v", err)
+	}
+	if action != "skipped" {
+		t.Errorf("expected action=skipped, got %q", action)
+	}
+}
+
+func TestUpsertFileOnBranch_Create404_Error(t *testing.T) {
+	// If file doesn't exist (create) and PUT still returns 404, it's a real error.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.WriteHeader(http.StatusNotFound)
+		case http.MethodPut:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient("t", false).WithBaseURL(srv.URL)
+	_, err := c.UpsertFileOnBranch("owner", "repo", "feature", "new_file.md", []byte("hello"))
+	if err == nil {
+		t.Fatal("expected error for 404 on create, got nil")
 	}
 }
 

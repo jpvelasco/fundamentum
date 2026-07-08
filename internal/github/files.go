@@ -111,6 +111,12 @@ func (c *Client) UpsertFile(owner, repo, path string, content []byte) (string, e
 		return "", fmt.Errorf("upsert file %s: %w", path, err)
 	}
 	defer func() { _ = putResp.Body.Close() }()
+
+	// GitHub Actions locks workflow files — PUT returns 404 when trying to
+	// overwrite an existing workflow via the Contents API.
+	if putResp.StatusCode == http.StatusNotFound && action == "updated" {
+		return "skipped", fmt.Errorf("upsert file %s: %w", path, ErrWorkflowLocked)
+	}
 	if putResp.StatusCode != http.StatusCreated && putResp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(putResp.Body)
 		return "", fmt.Errorf("upsert file %s: %s: %s", path, putResp.Status, b)
