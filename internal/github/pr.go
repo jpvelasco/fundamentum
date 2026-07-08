@@ -171,3 +171,13 @@ func IsConflict409(err error) bool {
 	// "409" from resp.Status is stable; "rule violations" or "GH013" from the JSON body.
 	return strings.Contains(msg, "409") && (strings.Contains(msg, "rule violations") || strings.Contains(msg, "GH013"))
 }
+
+// IsForbidden403 returns true if the error contains a 403 Forbidden status.
+// Used to detect when rulesets are unavailable on free-tier private repos.
+func IsForbidden403(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "403")
+}
