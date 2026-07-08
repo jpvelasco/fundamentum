@@ -1,4 +1,6 @@
 fundamentum.exe
 fundamentum
 *.exe
+coverage
+coverage.out
 docs/superpowers/

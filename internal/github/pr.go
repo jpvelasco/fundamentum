@@ -16,6 +16,15 @@ type FileChange struct {
 	Content []byte
 }
 
+// ErrWorkflowLocked is returned when GitHub Actions locks a workflow file
+// and the Contents API refuses to overwrite it (PUT returns 404).
+var ErrWorkflowLocked = fmt.Errorf("workflow file locked by GitHub Actions")
+
+// IsWorkflowLocked returns true if the error wraps ErrWorkflowLocked.
+func IsWorkflowLocked(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "workflow file locked by GitHub Actions")
+}
+
 // UpsertFileOnBranch creates or updates a file on a specific branch via the Contents API.
 func (c *Client) UpsertFileOnBranch(owner, repo, branch, path string, content []byte) (string, error) {
 	apiPath := fmt.Sprintf("/repos/%s/%s/contents/%s?ref=%s", owner, repo, path, branch)
@@ -70,6 +79,12 @@ func (c *Client) UpsertFileOnBranch(owner, repo, branch, path string, content []
 		return "", fmt.Errorf("upsert file %s on %s: %w", path, branch, err)
 	}
 	defer func() { _ = putResp.Body.Close() }()
+
+	// GitHub Actions locks workflow files — PUT returns 404 when trying to
+	// overwrite an existing workflow via the Contents API.
+	if putResp.StatusCode == http.StatusNotFound && action == "updated" {
+		return "skipped", fmt.Errorf("upsert file %s on %s: %w", path, branch, ErrWorkflowLocked)
+	}
 	if putResp.StatusCode != http.StatusCreated && putResp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(putResp.Body)
 		return "", fmt.Errorf("upsert file %s on %s: %s: %s", path, branch, putResp.Status, b)
@@ -145,6 +160,10 @@ func (c *Client) ApplyViaPR(owner, repo, defaultBranch string, changes []FileCha
 	for _, ch := range changes {
 		action, err := c.UpsertFileOnBranch(owner, repo, branch, ch.Path, ch.Content)
 		if err != nil {
+			if IsWorkflowLocked(err) {
+				fmt.Printf("  %-45s  ⚠ workflow locked by GitHub Actions\n", ch.Path)
+				continue
+			}
 			return 0, fmt.Errorf("upsert %s: %w", ch.Path, err)
 		}
 		if action != "skipped" {

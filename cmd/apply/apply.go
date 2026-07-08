@@ -284,6 +284,10 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 			// Direct apply — detect 409 and auto-fallback to PR mode.
 			fmt.Printf("  %-45s  applying...", item.Name)
 			if err := item.Apply(); err != nil {
+				if github.IsWorkflowLocked(err) {
+					fmt.Printf("\r  %-45s  ⚠ workflow locked by GitHub Actions\n", item.Name)
+					continue
+				}
 				if github.IsConflict409(err) {
 					fmt.Printf("\r  %-45s  ⚠ branch protection requires PR — switching to PR mode\n", item.Name)
 					// Retry this item via PR mode.
