@@ -253,10 +253,12 @@ func actionFromExists(exists bool) wizard.Action {
 
 // applyItems runs the item list. When viaPR is true, file items are batched
 // into a single PR instead of direct commits. If viaPR is false and a 409
-// is detected, the operation fails with a suggestion to re-run with --pr.
+// is detected, the tool automatically falls back to PR mode for remaining
+// file items — no re-run needed.
 func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Item, dryRun, viaPR bool) error {
 	var fileChanges []github.FileChange
 	var nonFileItems []wizard.Item
+	fallback := false // true after first 409 triggers auto-fallback to PR mode
 
 	for _, item := range items {
 		if item.IsSkip() {
@@ -270,8 +272,8 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 
 		// Check if this is a file item (has rendered content).
 		if item.Content != nil {
-			if viaPR {
-				// Collect for PR batch.
+			if viaPR || fallback {
+				// Collect for PR batch (explicit --pr or auto-fallback).
 				fileChanges = append(fileChanges, github.FileChange{
 					Path:    item.Name,
 					Content: item.Content,
@@ -279,11 +281,18 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 				continue
 			}
 
-			// Direct apply — detect 409 and fail with guidance.
+			// Direct apply — detect 409 and auto-fallback to PR mode.
 			fmt.Printf("  %-45s  applying...", item.Name)
 			if err := item.Apply(); err != nil {
 				if github.IsConflict409(err) {
-					return fmt.Errorf("branch protection requires changes via pull request\n  re-run with --pr flag to push file changes through a PR")
+					fmt.Printf("\r  %-45s  ⚠ branch protection requires PR — switching to PR mode\n", item.Name)
+					// Retry this item via PR mode.
+					fileChanges = append(fileChanges, github.FileChange{
+						Path:    item.Name,
+						Content: item.Content,
+					})
+					fallback = true
+					continue
 				}
 				if item.Optional {
 					fmt.Printf("\r  %-45s  ⚠ requires GitHub Pro or public repo\n", item.Name)
