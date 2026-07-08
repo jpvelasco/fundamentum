@@ -88,5 +88,7 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`.
 - **Local analysis (latest):** `npx --yes @codacy/analysis-cli@latest analyze ...` (or `codacy-analysis` if globally installed)
 - **CI:** Codacy runs as a required status check via cloud webhook — no local workflow needed
 - `.codacy.yml` controls exclude paths and engine configs (`engines:` section)
-- **Cannot disable tools via `.codacy.yml`.** The `enabled: false` option only works for languages (`languages.<lang>.enabled: false`). Use the [Code patterns page](https://docs.codacy.com/repositories-configure/configuring-code-patterns/) in the Codacy UI to enable or disable tools. The legacy `tools:` key (from Codacy CLI v2 / `.codacy/codacy.yaml`) is not recognized by the current cloud config. For local and cloud interaction, use the maintained npm CLIs (`@codacy/codacy-cloud-cli`, `@codacy/analysis-cli`) via npx.
+- **Cannot disable tools via `.codacy.yml`.** The `enabled: false` option only works for languages (`languages.<lang>.enabled: false`). Disable tools on the [Code patterns page](https://docs.codacy.com/repositories-configure/configuring-code-patterns/) instead.
+- **Legacy `tools:` key ignored.** The `.codacy/codacy.yaml` format is from Codacy CLI v2 and not recognized by the current cloud config.
+- **Use npm CLIs via npx.** For local and cloud interaction, use `@codacy/codacy-cloud-cli` and `@codacy/analysis-cli`.
 - **Trivy noise:** Trivy errors with "no patterns configured" on repos without Dockerfiles/K8s manifests. Must be disabled in the Codacy UI per-repo.
