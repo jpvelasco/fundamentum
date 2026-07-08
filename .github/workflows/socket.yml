@@ -16,4 +16,5 @@ jobs:
       - name: Socket Security
         uses: SocketDev/action@937f824ec476dfd164d4a4d9995751427b0be143  # v1
         with:
+          mode: firewall-free
           github-token: ${{ secrets.GITHUB_TOKEN }}
