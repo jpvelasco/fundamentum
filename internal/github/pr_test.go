@@ -188,7 +188,7 @@ func TestUpsertFileOnBranch_Skip(t *testing.T) {
 
 func TestIsConflict409(t *testing.T) {
 	tests := []struct {
-		msg string
+		msg  string
 		want bool
 	}{
 		{"409: rule violations", true},
@@ -207,6 +207,34 @@ func TestIsConflict409(t *testing.T) {
 	}
 	if got := IsConflict409(nil); got {
 		t.Error("IsConflict409(nil) = true, want false")
+	}
+}
+
+func TestIsForbidden403(t *testing.T) {
+	tests := []struct {
+		msg  string
+		want bool
+	}{
+		{"403 Forbidden: Forbidden", true},
+		{"create branch ruleset: 403 Forbidden: {\"message\":\"Forbidden\"}", true},
+		{"403: rule violations", true},
+		{"409: rule violations", false},
+		{"404: not found", false},
+		{"422 Unprocessable Entity: validation failed", false},
+		{"500 Internal Server Error", false},
+		{"network error: connection refused", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.msg, func(t *testing.T) {
+			err := &testErr{msg: tt.msg}
+			if got := IsForbidden403(err); got != tt.want {
+				t.Errorf("IsForbidden403(%q) = %v, want %v", tt.msg, got, tt.want)
+			}
+		})
+	}
+	if got := IsForbidden403(nil); got {
+		t.Error("IsForbidden403(nil) = true, want false")
 	}
 }
 
