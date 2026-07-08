@@ -1,5 +1,7 @@
 # AGENTS.md
 
+fundamentum is a **free, open-source (MIT) CLI** for one-shot GitHub repo hardening. Focused feature set — no cloud, no org batching, no audit subcommand.
+
 ## Commands
 
 ```bash

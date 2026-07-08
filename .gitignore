@@ -4,3 +4,9 @@ fundamentum
 coverage
 coverage.out
 docs/superpowers/
+planning/
+
+# Local AI/tooling cruft
+.claude/
+.remember/
+

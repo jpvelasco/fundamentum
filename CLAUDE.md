@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+fundamentum is a focused free MIT CLI for GitHub repo hardening (community files + protection + security in one shot with a wizard). Not overblown.
+
 ## Build / Lint / Test
 
 ```bash
@@ -24,6 +26,8 @@ Go CLI (Cobra). Two commands: `apply OWNER/REPO` (harden existing repo), `init O
 ## Conventions
 
 Mirrors ludus: two import groups (stdlib first, then third-party+internal), table-driven tests (stdlib only), `fmt.Errorf("ctx: %w", err)`, no raw exec.Command.
+
+See `planning/product-spec.md`, `planning/roadmap.md`, and `planning/technical-spec.md` for current scope.
 
 ## Codacy
 
