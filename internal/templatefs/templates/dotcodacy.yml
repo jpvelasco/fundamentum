@@ -1,5 +1,2 @@
 ---
 exclude_paths: []
-tools:
-  trivy:
-    enabled: false
