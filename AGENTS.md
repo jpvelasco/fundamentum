@@ -50,8 +50,9 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`.
 
 ### Key behavior
 
-- **Branch protection**: tries modern ruleset first, falls back to classic protection on 403 (free-tier private repos)
+- **Branch protection**: tries modern ruleset first, falls back to classic protection on 403 (free-tier private repos). **Limitation:** the classic branch protection API requires GitHub Pro — free-tier private repos get 403 from the API even though the feature exists in the UI. Must be set up manually via Settings → Branches.
 - **File aliasing** (`cmd/apply/apply.go:89`): checks path variants before deciding create/skip/update — e.g., `CODEOWNERS` at root counts as existing even though target is `.github/CODEOWNERS`
+- **Workflow 404 handling** (`internal/github/files.go`): GitHub Actions locks workflow files — PUT returns 404 when updating an existing workflow via Contents API. Detected as `ErrWorkflowLocked`, returns `action="skipped"` so apply continues.
 - **`--no-overwrite`**: skips any file that already exists, even if content differs
 - Auth: `--token` flag or `GITHUB_TOKEN` env var, used as Bearer token
 
@@ -74,4 +75,6 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`.
 - **Cloud CLI:** `npx @codacy/codacy-cloud-cli issues gh jpvelasco fundamentum --overview` (requires CODACY_API_TOKEN)
 - **Local analysis:** `codacy-analysis analyze` (requires `@codacy/analysis-cli` installed globally)
 - **CI:** Codacy runs as a required status check via cloud webhook — no local workflow needed
-- `.codacy.yml` controls exclude paths and engine configs
+- `.codacy.yml` controls exclude paths and engine configs (`engines:` section)
+- **Cannot disable tools via `.codacy.yml`.** The `enabled: false` option only works for languages (`languages.<lang>.enabled: false`). Tools can only be enabled/disabled on the [Code patterns page](https://docs.codacy.com/repositories-configure/configuring-code-patterns/) in the Codacy UI. The `tools:` key is from Codacy CLI v2 (`.codacy/codacy.yaml`) and is not recognized by the cloud config.
+- **Trivy noise:** Trivy errors with "no patterns configured" on repos without Dockerfiles/K8s manifests. Must be disabled in the Codacy UI per-repo.
