@@ -293,3 +293,277 @@ func TestIsForbidden403(t *testing.T) {
 type testErr struct{ msg string }
 
 func (e *testErr) Error() string { return e.msg }
+
+func TestApplyViaPR(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler http.HandlerFunc
+		changes []FileChange
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "happy path with 2 files",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					// branch info or file check
+					if strings.Contains(r.URL.Path, "/branches/") {
+						w.WriteHeader(http.StatusOK)
+						_ = json.NewEncoder(w).Encode(map[string]any{
+							"commit": map[string]any{"sha": "aaaa1111"},
+						})
+					} else {
+						// file does not exist
+						w.WriteHeader(http.StatusNotFound)
+					}
+				case http.MethodPost:
+					// create branch ref or create PR
+					if strings.Contains(r.URL.Path, "/git/refs") {
+						w.WriteHeader(http.StatusCreated)
+					} else {
+						w.WriteHeader(http.StatusCreated)
+						_ = json.NewEncoder(w).Encode(map[string]any{"number": 7})
+					}
+				case http.MethodPut:
+					w.WriteHeader(http.StatusCreated)
+					_ = json.NewEncoder(w).Encode(map[string]any{})
+				}
+			},
+			changes: []FileChange{
+				{Path: "README.md", Content: []byte("hello")},
+				{Path: "LICENSE", Content: []byte("MIT")},
+			},
+		},
+		{
+			name: "branch create fails",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					w.WriteHeader(http.StatusOK)
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"commit": map[string]any{"sha": "aaaa1111"},
+					})
+				case http.MethodPost:
+					w.WriteHeader(http.StatusUnprocessableEntity)
+					_, _ = w.Write([]byte(`{"message":"invalid"}`))
+				}
+			},
+			changes: []FileChange{
+				{Path: "README.md", Content: []byte("hello")},
+			},
+			wantErr: true,
+			errMsg:  "create branch",
+		},
+		{
+			name: "workflow locked continues",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				// Track which file is being upserted
+				path := ""
+				if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/") {
+					path = strings.TrimPrefix(r.URL.Path, "/repos/owner/repo/contents/")
+				}
+				if r.Method == http.MethodPut {
+					path = strings.TrimPrefix(r.URL.Path, "/repos/owner/repo/contents/")
+				}
+				switch r.Method {
+				case http.MethodGet:
+					switch {
+					case strings.Contains(r.URL.Path, "/branches/"):
+						w.WriteHeader(http.StatusOK)
+						_ = json.NewEncoder(w).Encode(map[string]any{
+							"commit": map[string]any{"sha": "aaaa1111"},
+						})
+					case path == ".github/workflows/ci.yml":
+						// existing workflow file
+						w.WriteHeader(http.StatusOK)
+						_ = json.NewEncoder(w).Encode(map[string]any{
+							"content": "b2xk",
+							"sha":     "abc123",
+						})
+					default:
+						// other file does not exist
+						w.WriteHeader(http.StatusNotFound)
+					}
+				case http.MethodPost:
+					if strings.Contains(r.URL.Path, "/git/refs") {
+						w.WriteHeader(http.StatusCreated)
+					} else {
+						w.WriteHeader(http.StatusCreated)
+						_ = json.NewEncoder(w).Encode(map[string]any{"number": 9})
+					}
+				case http.MethodPut:
+					if path == ".github/workflows/ci.yml" {
+						// workflow locked
+						w.WriteHeader(http.StatusNotFound)
+					} else {
+						w.WriteHeader(http.StatusCreated)
+					}
+				}
+			},
+			changes: []FileChange{
+				{Path: "README.md", Content: []byte("hello")},
+				{Path: ".github/workflows/ci.yml", Content: []byte("new workflow")},
+			},
+		},
+		{
+			name: "upsert error returns immediately",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				path := ""
+				if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/") {
+					path = strings.TrimPrefix(r.URL.Path, "/repos/owner/repo/contents/")
+				}
+				if r.Method == http.MethodPut {
+					path = strings.TrimPrefix(r.URL.Path, "/repos/owner/repo/contents/")
+				}
+				switch r.Method {
+				case http.MethodGet:
+					if strings.Contains(r.URL.Path, "/branches/") {
+						w.WriteHeader(http.StatusOK)
+						_ = json.NewEncoder(w).Encode(map[string]any{
+							"commit": map[string]any{"sha": "aaaa1111"},
+						})
+					} else {
+						w.WriteHeader(http.StatusNotFound)
+					}
+				case http.MethodPost:
+					w.WriteHeader(http.StatusCreated)
+				case http.MethodPut:
+					if path == "README.md" {
+						w.WriteHeader(http.StatusCreated)
+					} else {
+						// non-workflow error on second file
+						w.WriteHeader(http.StatusConflict)
+						_, _ = w.Write([]byte(`{"message":"conflict"}`))
+					}
+				}
+			},
+			changes: []FileChange{
+				{Path: "README.md", Content: []byte("hello")},
+				{Path: "bad.md", Content: []byte("bad")},
+			},
+			wantErr: true,
+			errMsg:  "upsert bad.md",
+		},
+		{
+			name: "PR create fails",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					if strings.Contains(r.URL.Path, "/branches/") {
+						w.WriteHeader(http.StatusOK)
+						_ = json.NewEncoder(w).Encode(map[string]any{
+							"commit": map[string]any{"sha": "aaaa1111"},
+						})
+					} else {
+						w.WriteHeader(http.StatusNotFound)
+					}
+				case http.MethodPost:
+					if strings.Contains(r.URL.Path, "/git/refs") {
+						w.WriteHeader(http.StatusCreated)
+					} else {
+						// PR creation fails
+						w.WriteHeader(http.StatusUnprocessableEntity)
+						_, _ = w.Write([]byte(`{"message":"invalid"}`))
+					}
+				case http.MethodPut:
+					w.WriteHeader(http.StatusCreated)
+				}
+			},
+			changes: []FileChange{
+				{Path: "README.md", Content: []byte("hello")},
+			},
+			wantErr: true,
+			errMsg:  "create PR",
+		},
+		{
+			name: "empty changes",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					w.WriteHeader(http.StatusOK)
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"commit": map[string]any{"sha": "aaaa1111"},
+					})
+				case http.MethodPost:
+					if strings.Contains(r.URL.Path, "/git/refs") {
+						w.WriteHeader(http.StatusCreated)
+					} else {
+						w.WriteHeader(http.StatusCreated)
+						_ = json.NewEncoder(w).Encode(map[string]any{"number": 3})
+					}
+				}
+			},
+			changes: nil,
+		},
+		{
+			name: "skipped file no print",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				path := ""
+				if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/") {
+					path = strings.TrimPrefix(r.URL.Path, "/repos/owner/repo/contents/")
+				}
+				if r.Method == http.MethodPut {
+					path = strings.TrimPrefix(r.URL.Path, "/repos/owner/repo/contents/")
+				}
+				switch r.Method {
+				case http.MethodGet:
+					switch {
+					case strings.Contains(r.URL.Path, "/branches/"):
+						w.WriteHeader(http.StatusOK)
+						_ = json.NewEncoder(w).Encode(map[string]any{
+							"commit": map[string]any{"sha": "aaaa1111"},
+						})
+					case path == "README.md":
+						// file exists with same content
+						w.WriteHeader(http.StatusOK)
+						_ = json.NewEncoder(w).Encode(map[string]any{
+							"content": "aGVsbG8=", // "hello" base64
+							"sha":     "abc123",
+						})
+					default:
+						w.WriteHeader(http.StatusNotFound)
+					}
+				case http.MethodPost:
+					if strings.Contains(r.URL.Path, "/git/refs") {
+						w.WriteHeader(http.StatusCreated)
+					} else {
+						w.WriteHeader(http.StatusCreated)
+						_ = json.NewEncoder(w).Encode(map[string]any{"number": 5})
+					}
+				case http.MethodPut:
+					w.WriteHeader(http.StatusCreated)
+				}
+			},
+			changes: []FileChange{
+				{Path: "README.md", Content: []byte("hello")},
+				{Path: "LICENSE", Content: []byte("MIT")},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(tt.handler)
+			defer srv.Close()
+
+			c := NewClient("t", false).WithBaseURL(srv.URL)
+			prNum, err := c.ApplyViaPR("owner", "repo", "main", tt.changes)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("expected error containing %q, got: %v", tt.errMsg, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if prNum == 0 {
+					t.Error("expected non-zero PR number")
+				}
+			}
+		})
+	}
+}

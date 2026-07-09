@@ -19,6 +19,6 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Run tests with coverage
-        run: go test ./... -v -coverprofile=coverage.out -covermode=atomic
+        run: go test ./... -v -coverprofile=coverage -covermode=atomic
       - name: Run octocov
         uses: k1LoW/octocov-action@v1
