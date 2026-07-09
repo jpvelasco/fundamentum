@@ -1,5 +1,6 @@
-# Probe: confirm GitHub receives codecov/project (not only codecov/patch) on PRs.
-# If project never appears while required on main, branch protection will stay BLOCKED.
+# Project status is configured so Codecov still computes overall coverage in the UI.
+# GitHub only reliably receives codecov/patch as a check; codecov/project often never
+# posts (probe PR #25). Branch protection requires codecov/patch only — not project.
 coverage:
   status:
     project:

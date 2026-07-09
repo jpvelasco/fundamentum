@@ -30,6 +30,8 @@ Pre-commit order: template drift → build → lint → test.
 
 **Codecov template drift gate:** `TestCodecovTemplateDrift` compares live `.github/workflows/codecov.yml` upload settings against the embed template `public_codecov.yml` (auth, Python uploader, coverage flags, pinned action versions). Runs in pre-commit (fail-fast) and CI job `Template drift`. Action pins may differ intentionally.
 
+**Codecov required check:** require `codecov/patch` only. Probe PR #25 showed uploads succeed and Codecov has full project totals, but GitHub never receives a `codecov/project` check/status — only `codecov/patch`. Do not re-add `codecov/project` as required until a PR shows that context actually posting.
+
 ## PR Workflow (use with pr-auto / pr-doctor skills)
 
 For PRs: use pr-auto for full lifecycle (create, fix CI/reviews, land safely).
