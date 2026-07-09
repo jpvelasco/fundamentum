@@ -26,6 +26,14 @@ func TestClientGet(t *testing.T) {
 	}
 }
 
+func TestClientBase_DefaultFallback(t *testing.T) {
+	c := &Client{Token: "t", Verbose: false, baseURL: ""}
+	got := c.base()
+	if got != defaultBase {
+		t.Errorf("expected %s, got %s", defaultBase, got)
+	}
+}
+
 func TestClientPatch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPatch {
