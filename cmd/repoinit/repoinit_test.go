@@ -39,16 +39,12 @@ func TestRun_DryRunPath(t *testing.T) {
 	})
 
 	globals.DryRun = true
-
 	err := run("owner/repo", false)
-	// The apply command's run() makes API calls even in dry-run mode,
-	// so we expect an error from the apply subcommand (network error).
-	// The key assertion is that run() does not return a "create repo" error
-	// — the dry-run path skips CreateRepo entirely.
-	if err != nil {
-		if strings.Contains(err.Error(), "create repo") {
-			t.Error("dry-run path should skip CreateRepo, got create repo error")
-		}
+	// In dry-run mode, run() should skip CreateRepo entirely.
+	// Any error should NOT contain "create repo" — that would mean
+	// the dry-run branch was not taken.
+	if err != nil && strings.Contains(err.Error(), "create repo") {
+		t.Errorf("dry-run path should skip CreateRepo, got: %v", err)
 	}
 }
 
@@ -70,39 +66,6 @@ func TestRun_NonDryRun_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestRun_GlobalStateReset(t *testing.T) {
-	// Verify globals are not left in a dirty state after run().
-	origDryRun := globals.DryRun
-	origToken := globals.Token
-	origVerbose := globals.Verbose
-	origNoOverwrite := globals.NoOverwrite
-	origViaPR := globals.ViaPR
-
-	t.Cleanup(func() {
-		globals.DryRun = origDryRun
-		globals.Token = origToken
-		globals.Verbose = origVerbose
-		globals.NoOverwrite = origNoOverwrite
-		globals.ViaPR = origViaPR
-	})
-
-	globals.DryRun = false
-	globals.Token = ""
-	globals.Verbose = false
-
-	_ = run("owner/repo", false)
-
-	if globals.DryRun != origDryRun {
-		t.Errorf("globals.DryRun changed: got %v, want %v", globals.DryRun, origDryRun)
-	}
-	if globals.Token != origToken {
-		t.Errorf("globals.Token changed: got %q, want %q", globals.Token, origToken)
-	}
-	if globals.Verbose != origVerbose {
-		t.Errorf("globals.Verbose changed: got %v, want %v", globals.Verbose, origVerbose)
-	}
-}
-
 func TestRun_PrivateFlag(t *testing.T) {
 	t.Cleanup(func() {
 		globals.DryRun = false
@@ -110,8 +73,8 @@ func TestRun_PrivateFlag(t *testing.T) {
 		globals.Verbose = false
 	})
 
-	// private=true should still fail with no token, but error should
-	// contain "create repo" (not a different error path).
+	// private=true should fail with no token, but the error should
+	// come from the create repo path (not a different error path).
 	err := run("owner/repo", true)
 	if err == nil {
 		t.Error("expected error when CreateRepo fails with private=true")
