@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -e
+# Fail-fast: live Codecov workflow vs embed template functional parity
+# (OIDC, use_pypi, coverage flags, SHA pin). Action SHAs may differ.
+echo "→ template drift"
+go test ./internal/templatefs/ -run TestCodecovTemplateDrift -count=1
 echo "→ build"
 go build ./...
 echo "→ lint"
