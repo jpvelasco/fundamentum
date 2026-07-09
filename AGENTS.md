@@ -26,7 +26,9 @@ go run . apply OWNER/REPO
 go run . init OWNER/REPO
 ```
 
-Pre-commit order: build → lint → test.
+Pre-commit order: template drift → build → lint → test.
+
+**Codecov template drift gate:** `TestCodecovTemplateDrift` compares live `.github/workflows/codecov.yml` upload settings against the embed template `public_codecov.yml` (auth, Python uploader, coverage flags, pinned action versions). Runs in pre-commit (fail-fast) and CI job `Template drift`. Action pins may differ intentionally.
 
 ## PR Workflow (use with pr-auto / pr-doctor skills)
 

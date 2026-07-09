@@ -7,6 +7,19 @@ on:
     branches: ["main"]
 
 jobs:
+  template-drift:
+    name: Template drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332  # v4.1.7
+      - uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491  # v5.0.0
+        with:
+          go-version-file: go.mod
+      # Live .github/workflows/codecov.yml vs embed public_codecov.yml functional parity.
+      # Fails if OIDC / use_pypi / coverage flags / SHA-pin drift (action SHAs may differ).
+      - name: Check Codecov template drift
+        run: go test ./internal/templatefs/ -run TestCodecovTemplateDrift -count=1 -v
+
   build:
     name: Build
     runs-on: ubuntu-latest
