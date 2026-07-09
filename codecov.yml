@@ -1,3 +1,5 @@
+# Probe: confirm GitHub receives codecov/project (not only codecov/patch) on PRs.
+# If project never appears while required on main, branch protection will stay BLOCKED.
 coverage:
   status:
     project:
