@@ -28,7 +28,7 @@ go run . init OWNER/REPO
 
 Pre-commit order: template drift → build → lint → test.
 
-**Codecov template drift gate:** `TestCodecovTemplateDrift` compares live `.github/workflows/codecov.yml` functional settings (OIDC, `use_pypi`, coverage flags, SHA pin) against the embed template `public_codecov.yml`. Runs in pre-commit (fail-fast) and CI job `Template drift`. Action SHAs may differ intentionally.
+**Codecov template drift gate:** `TestCodecovTemplateDrift` compares live `.github/workflows/codecov.yml` functional settings (OIDC (OpenID Connect), `use_pypi`, coverage flags, SHA pin) against the embed template `public_codecov.yml`. Runs in pre-commit (fail-fast) and CI job `Template drift`. Action SHAs may differ intentionally.
 
 ## PR Workflow (use with pr-auto / pr-doctor skills)
 

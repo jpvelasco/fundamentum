@@ -3,7 +3,6 @@ package templatefs
 import (
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -117,19 +116,18 @@ func TestFormatCodecovDrift(t *testing.T) {
 	}
 }
 
+// liveCodecovWorkflow is a fixed relative path from this package directory
+// (go test sets cwd to the package dir). Kept constant so path scanners do not
+// flag dynamic path construction from inputs.
+const liveCodecovWorkflow = "../../.github/workflows/codecov.yml"
+
 // TestCodecovTemplateDrift is the gate used by pre-commit and CI.
 // Live workflow is source of truth for functional settings; the embed template
 // that fundamentum init ships must match. Action SHAs may differ.
 func TestCodecovTemplateDrift(t *testing.T) {
-	root, err := findRepoRoot()
+	liveBytes, err := os.ReadFile(liveCodecovWorkflow)
 	if err != nil {
-		t.Fatalf("find repo root: %v", err)
-	}
-
-	livePath := filepath.Join(root, ".github", "workflows", "codecov.yml")
-	liveBytes, err := os.ReadFile(livePath)
-	if err != nil {
-		t.Fatalf("read live workflow %s: %v", livePath, err)
+		t.Fatalf("read live workflow %s: %v", liveCodecovWorkflow, err)
 	}
 
 	tplBytes, err := fs.ReadFile(FS, "dotgithub/workflows/public_codecov.yml")
@@ -145,19 +143,19 @@ func TestCodecovTemplateDrift(t *testing.T) {
 	}
 }
 
-func findRepoRoot() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", err
+func TestDiffCodecovFunctional_UnpinnedBothSides(t *testing.T) {
+	live := CodecovFunctional{
+		IDTokenWrite: true, UseOIDC: true, UsePyPI: true, FailCIIfError: true,
+		CoverageFiles: "coverage", Coverprofile: "coverage",
+		HasCoverpkgAll: true, CovermodeAtomic: true, CodecovSHAPin: false,
 	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", os.ErrNotExist
-		}
-		dir = parent
+	tpl := live
+	diffs := DiffCodecovFunctional(live, tpl)
+	joined := strings.Join(diffs, "\n")
+	if !strings.Contains(joined, "live codecov-action is not SHA-pinned") {
+		t.Fatalf("expected live pin error, got %v", diffs)
+	}
+	if !strings.Contains(joined, "template codecov-action is not SHA-pinned") {
+		t.Fatalf("expected template pin error, got %v", diffs)
 	}
 }
