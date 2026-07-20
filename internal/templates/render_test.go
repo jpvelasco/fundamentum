@@ -5,6 +5,118 @@ import (
 	"testing"
 )
 
+func TestValidIdentifier(t *testing.T) {
+	tests := []struct {
+		name string
+		r    rune
+		want rune
+	}{
+		{"lowercase", 'a', 'a'},
+		{"uppercase", 'Z', 'Z'},
+		{"digit", '5', '5'},
+		{"hyphen", '-', '-'},
+		{"dot", '.', '.'},
+		{"space stripped", ' ', -1},
+		{"slash stripped", '/', -1},
+		{"underscore stripped", '_', -1},
+		{"newline stripped", '\n', -1},
+		{"null stripped", 0, -1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := validIdentifier(tt.r)
+			if got != tt.want {
+				t.Errorf("validIdentifier(%q) = %v, want %v", tt.r, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRepoDataSanitize(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  RepoData
+		want   RepoData
+	}{
+		{
+			name:   "valid input unchanged",
+			input:  RepoData{Owner: "jpvelasco", RepoName: "fundamentum", DefaultBranch: "main", Visibility: "private"},
+			want:   RepoData{Owner: "jpvelasco", RepoName: "fundamentum", DefaultBranch: "main", Visibility: "private"},
+		},
+		{
+			name:   "owner with special chars stripped",
+			input:  RepoData{Owner: "jp<script>alert(1)</script>", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+			want:   RepoData{Owner: "jpscriptalert1script", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+		},
+		{
+			name:   "empty owner falls back",
+			input:  RepoData{Owner: "", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+		},
+		{
+			name:   "empty repo falls back",
+			input:  RepoData{Owner: "owner", RepoName: "", DefaultBranch: "main", Visibility: "public"},
+			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+		},
+		{
+			name:   "empty branch falls back",
+			input:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "", Visibility: "public"},
+			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+		},
+		{
+			name:   "invalid visibility falls back",
+			input:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "secret"},
+			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+		},
+		{
+			name:   "visibility case normalized",
+			input:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "PRIVATE"},
+			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"},
+		},
+		{
+			name:   "branch with slash preserved",
+			input:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "feature/my-branch_1", Visibility: "public"},
+			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "feature/my-branch_1", Visibility: "public"},
+		},
+		{
+			name:   "branch with special chars stripped",
+			input:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "feat/<test>", Visibility: "public"},
+			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "feat/test", Visibility: "public"},
+		},
+		{
+			name:   "repo with dots preserved",
+			input:  RepoData{Owner: "owner", RepoName: "my.repo.name", DefaultBranch: "main", Visibility: "public"},
+			want:   RepoData{Owner: "owner", RepoName: "my.repo.name", DefaultBranch: "main", Visibility: "public"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.input.sanitize()
+			if got != tt.want {
+				t.Errorf("sanitize() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRenderSanitizesInput(t *testing.T) {
+	data := RepoData{
+		Owner:         "<script>alert(1)</script>",
+		RepoName:      "repo; rm -rf /",
+		DefaultBranch: "main; drop table",
+		Visibility:    "public",
+	}
+	files, err := Render(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, f := range files {
+		if strings.Contains(f.Content, "<script>") {
+			t.Errorf("unescaped <script> tag found in %s", f.Path)
+		}
+	}
+}
+
 func TestRender(t *testing.T) {
 	data := RepoData{Owner: "jpvelasco", RepoName: "fundamentum", DefaultBranch: "main", Visibility: "private"}
 	files, err := Render(data)
