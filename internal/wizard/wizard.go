@@ -52,16 +52,11 @@ func RunItems(items []Item, dryRun bool) error {
 			fmt.Printf("  %-45s  %s\n", item.Name, item.DryRunLabel())
 			continue
 		}
-		fmt.Printf("  %-45s  applying...", item.Name)
 		if err := item.Apply(); err != nil {
-			if item.Optional {
-				fmt.Printf("\r  %-45s  ⚠ requires GitHub Pro or public repo\n", item.Name)
-			} else {
-				fmt.Printf("\r  %-45s  ✗ %v\n", item.Name, err)
-			}
+			printItemError(item, err)
 			continue
 		}
-		fmt.Printf("\r  %-45s  ✓\n", item.Name)
+		fmt.Printf("  %-45s  ✓\n", item.Name)
 	}
 	return nil
 }
@@ -86,16 +81,21 @@ func RunInteractive(items []Item, dryRun bool, r io.Reader) error {
 			fmt.Printf("  %-45s  %s\n", item.Name, item.DryRunLabel())
 			continue
 		}
-		fmt.Printf("  %-45s  applying...", item.Name)
 		if err := item.Apply(); err != nil {
-			if item.Optional {
-				fmt.Printf("\r  %-45s  ⚠ requires GitHub Pro or public repo\n", item.Name)
-			} else {
-				fmt.Printf("\r  %-45s  ✗ %v\n", item.Name, err)
-			}
+			printItemError(item, err)
 			continue
 		}
-		fmt.Printf("\r  %-45s  ✓\n", item.Name)
+		fmt.Printf("  %-45s  ✓\n", item.Name)
 	}
 	return nil
+}
+
+// printItemError formats an error for a wizard item.
+// Optional items show a warning; required items show an error.
+func printItemError(item Item, err error) {
+	if item.Optional {
+		fmt.Printf("  %-45s  ⚠ requires GitHub Pro or public repo\n", item.Name)
+	} else {
+		fmt.Printf("  %-45s  ✗ %v\n", item.Name, err)
+	}
 }
