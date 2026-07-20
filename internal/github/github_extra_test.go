@@ -3,7 +3,6 @@ package github
 import (
 	"encoding/base64"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -111,7 +110,9 @@ func TestFileStatus(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tt.status)
 				if tt.response != "" {
-					_, _ = io.WriteString(w, tt.response)
+					var out any
+					_ = json.Unmarshal([]byte(tt.response), &out)
+					_ = json.NewEncoder(w).Encode(out)
 				}
 			}))
 			defer srv.Close()
@@ -199,8 +200,11 @@ func TestRulesetExists(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(tt.response))
+				var out any
+				_ = json.Unmarshal([]byte(tt.response), &out)
+				_ = json.NewEncoder(w).Encode(out)
 			}))
 			defer srv.Close()
 

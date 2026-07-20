@@ -2,7 +2,6 @@ package github
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -67,7 +66,11 @@ func TestGetRepoVisibility(t *testing.T) {
 				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tt.statusCode)
-				_, _ = io.WriteString(w, tt.response)
+				if tt.statusCode == http.StatusOK && tt.response != "" {
+					var out any
+					_ = json.Unmarshal([]byte(tt.response), &out)
+					_ = json.NewEncoder(w).Encode(out)
+				}
 			}))
 			defer srv.Close()
 
