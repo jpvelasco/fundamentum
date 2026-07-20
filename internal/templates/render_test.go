@@ -263,3 +263,26 @@ func TestRender_SanitizesXSSPayloads(t *testing.T) {
 		}
 	}
 }
+
+func TestStripHTMLTags(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"no html", "hello world", "hello world"},
+		{"script tag", "hello<script>alert(1)</script>world", "helloalert(1)world"},
+		{"img tag", "text<img src=x onerror=alert(1)>more", "textmore"},
+		{"div tag", "<div class='evil'>content</div>", "content"},
+		{"no tags", "no tags here", "no tags here"},
+		{"nested tags", "<b><i>bold italic</i></b>", "bold italic"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := htmlTagRe.ReplaceAllString(tt.in, "")
+			if got != tt.want {
+				t.Errorf("stripHTML(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
