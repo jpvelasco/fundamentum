@@ -20,6 +20,12 @@ import (
 	"github.com/jpvelasco/fundamentum/internal/templatefs"
 )
 
+// stripHTMLTags removes HTML tags and dangerous attributes from rendered output.
+// This is a defense-in-depth measure: template data is pre-sanitized via RepoData.sanitize(),
+// but this ensures any residual HTML-like content in static template text is neutralized.
+// The output is YAML/Markdown — not HTML — so stripping tags is safe.
+var htmlTagRe = regexp.MustCompile(`<[^>]*>`)
+
 // RenderedFile is a target path and rendered content ready to commit.
 type RenderedFile struct {
 	Path    string
@@ -118,6 +124,11 @@ func Render(data RepoData) ([]RenderedFile, error) {
 		} else {
 			rendered = string(raw)
 		}
+
+		// Defense-in-depth: strip any HTML tags from rendered output.
+		// Template data is pre-sanitized, but residual HTML in static template text
+		// is neutralized here. Output is YAML/Markdown — not HTML — so stripping is safe.
+		rendered = htmlTagRe.ReplaceAllString(rendered, "")
 
 		target := resolveTarget(path)
 		files = append(files, RenderedFile{Path: target, Content: rendered})
