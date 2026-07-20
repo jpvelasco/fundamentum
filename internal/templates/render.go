@@ -69,11 +69,11 @@ func (d RepoData) sanitize() RepoData {
 	}
 }
 
-// validIdentifier keeps only ASCII letters, digits, hyphens, and dots for
-// GitHub identifier sanitization.
+// validIdentifier keeps only ASCII letters, digits, hyphens, dots, and
+// underscores for GitHub identifier sanitization.
 func validIdentifier(r rune) rune {
 	if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-		(r >= '0' && r <= '9') || r == '-' || r == '.' {
+		(r >= '0' && r <= '9') || r == '-' || r == '.' || r == '_' {
 		return r
 	}
 	return -1

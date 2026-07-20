@@ -18,7 +18,7 @@ func TestValidIdentifier(t *testing.T) {
 		{"dot", '.', '.'},
 		{"space stripped", ' ', -1},
 		{"slash stripped", '/', -1},
-		{"underscore stripped", '_', -1},
+		{"underscore preserved", '_', '_'},
 		{"newline stripped", '\n', -1},
 		{"null stripped", 0, -1},
 	}
@@ -87,6 +87,11 @@ func TestRepoDataSanitize(t *testing.T) {
 			name:   "repo with dots preserved",
 			input:  RepoData{Owner: "owner", RepoName: "my.repo.name", DefaultBranch: "main", Visibility: "public"},
 			want:   RepoData{Owner: "owner", RepoName: "my.repo.name", DefaultBranch: "main", Visibility: "public"},
+		},
+		{
+			name:   "repo with underscores preserved",
+			input:  RepoData{Owner: "owner", RepoName: "my_repo_name", DefaultBranch: "main", Visibility: "public"},
+			want:   RepoData{Owner: "owner", RepoName: "my_repo_name", DefaultBranch: "main", Visibility: "public"},
 		},
 	}
 	for _, tt := range tests {
