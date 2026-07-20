@@ -71,7 +71,7 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`.
 
 ### Key behavior
 
-- **Branch protection**: tries modern ruleset first, falls back to classic protection on 403 (free-tier private repos). **Limitation:** the classic branch protection API requires GitHub Pro. Free-tier private repos get 403 from the API even though the feature exists in the UI — set up manually via Settings → Branches.
+- **Branch protection**: tries modern ruleset first, falls back to classic protection on 403. **Limitation:** the classic protection API requires GitHub Pro — free-tier private repos must configure branch protection manually via Settings → Branches.
 - **File aliasing** (`cmd/apply/apply.go:89`): checks path variants before deciding create/skip/update — e.g., `CODEOWNERS` at root counts as existing even though target is `.github/CODEOWNERS`
 - **Workflow 404 handling** (`internal/github/files.go`): GitHub Actions locks workflow files — PUT returns 404 when updating an existing workflow via Contents API. Detected as `ErrWorkflowLocked`, returns `action="skipped"` so apply continues.
 - **`--no-overwrite`**: skips any file that already exists, even if content differs
