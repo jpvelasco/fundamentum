@@ -194,32 +194,72 @@ func TestRenderVisibilityFiltering(t *testing.T) {
 			for _, f := range files {
 				pathSet[f.Path] = true
 			}
+
 			for _, want := range tt.wantPublicFiles {
 				if !pathSet[want] {
-					t.Errorf("public: missing %q in rendered files", want)
+					t.Errorf("missing %q in rendered files", want)
 				}
 			}
 			for _, want := range tt.wantPrivateFiles {
 				if !pathSet[want] {
-					t.Errorf("private: missing %q in rendered files", want)
+					t.Errorf("missing %q in rendered files", want)
 				}
 			}
+
 			// Verify opposite visibility files are excluded.
+			var excludeFiles []string
 			if tt.visibility == "public" {
-				if pathSet[".github/workflows/octocov.yml"] {
-					t.Error("public: octocov.yml should not be rendered for public repos")
-				}
+				excludeFiles = []string{".github/workflows/octocov.yml"}
 			} else {
-				if pathSet[".github/workflows/codecov.yml"] {
-					t.Error("private: codecov.yml should not be rendered for private repos")
+				excludeFiles = []string{
+					".github/workflows/codecov.yml",
+					".github/workflows/octopus.yml",
+					".github/workflows/codeql.yml",
 				}
-				if pathSet[".github/workflows/octopus.yml"] {
-					t.Error("private: octopus.yml should not be rendered for private repos")
-				}
-				if pathSet[".github/workflows/codeql.yml"] {
-					t.Error("private: codeql.yml should not be rendered for private repos")
+			}
+			for _, exclude := range excludeFiles {
+				if pathSet[exclude] {
+					t.Errorf("%s: %q should not be rendered for %s repos", tt.visibility, exclude, tt.visibility)
 				}
 			}
 		})
+	}
+}
+
+func TestSafeFuncMap_NoUnsafeFunctions(t *testing.T) {
+	// Verify the safe func map is empty — our templates only need
+	// field access on RepoData, which is provided by default.
+	// If new functions are added, ensure they do not accept user input
+	// that could control execution flow.
+	fm := safeFuncMap()
+	if len(fm) > 0 {
+		t.Errorf("safe func map should be empty, got %d functions", len(fm))
+	}
+}
+
+func TestRender_SanitizesXSSPayloads(t *testing.T) {
+	// Verify that raw HTML tags and script content are stripped from rendered output.
+	data := RepoData{
+		Owner:         "<img onerror=alert(1) src=x>",
+		RepoName:      "\x22><script>alert('xss')</script>",
+		DefaultBranch: "main{{.Owner}}", // template injection attempt
+		Visibility:    "public",
+	}
+	files, err := Render(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check for raw HTML tags that should not survive sanitization.
+	htmlTags := []string{
+		"<img", "<script>", "<script", "</script>",
+		"onerror=", "alert(", "javascript:",
+	}
+	for _, f := range files {
+		for _, tag := range htmlTags {
+			if strings.Contains(f.Content, tag) {
+				t.Errorf("HTML tag %q found in %s", tag, f.Path)
+			}
+		}
 	}
 }

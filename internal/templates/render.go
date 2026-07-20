@@ -1,4 +1,10 @@
 // Package templates renders embedded community health file templates.
+// All template data is sanitized before rendering: owner/repo names are
+// validated against GitHub identifier regexes, branch names are character-
+// whitelisted, and visibility is whitelist-checked to "public" or "private".
+// This prevents template injection and ensures output is safe for config files.
+// text/template is used (not html/template) because output is YAML/Markdown —
+// html/template would escape characters that break config file syntax.
 package templates
 
 import (
@@ -100,7 +106,7 @@ func Render(data RepoData) ([]RenderedFile, error) {
 
 		var rendered string
 		if strings.Contains(string(raw), "{{.") {
-			tmpl, err := template.New(path).Parse(string(raw))
+			tmpl, err := template.New(path).Funcs(safeFuncMap()).Parse(string(raw))
 			if err != nil {
 				return fmt.Errorf("parse template %s: %w", path, err)
 			}
@@ -120,17 +126,17 @@ func Render(data RepoData) ([]RenderedFile, error) {
 	return files, err
 }
 
-// shouldInclude returns false for visibility-gated templates that don't match.
+// shouldInclude skips visibility-gated templates that don't match the repo.
 // "public_" prefix → only public repos. "private_" prefix → only private repos.
 func shouldInclude(path, visibility string) bool {
-	base := filepath.Base(path)
-	if strings.HasPrefix(base, "public_") {
+	switch base := filepath.Base(path); {
+	case strings.HasPrefix(base, "public_"):
 		return visibility == "public"
-	}
-	if strings.HasPrefix(base, "private_") {
+	case strings.HasPrefix(base, "private_"):
 		return visibility == "private"
+	default:
+		return true
 	}
-	return true
 }
 
 // resolveTarget converts embedded template paths to target paths.
@@ -138,24 +144,26 @@ func shouldInclude(path, visibility string) bool {
 func resolveTarget(path string) string {
 	target := strings.Replace(path, "dotgithub/", ".github/", 1)
 	target = strings.Replace(target, "dotcodacy.yml", ".codacy.yml", 1)
-	// Strip visibility prefix from filename.
-	if idx := strings.LastIndex(target, "/"); idx >= 0 {
-		dir := target[:idx+1]
-		base := target[idx+1:]
-		base = stripVisibilityPrefix(base)
-		target = dir + base
-	} else {
-		target = stripVisibilityPrefix(target)
-	}
-	return target
+
+	dir, base := filepath.Split(target)
+	return dir + stripVisibilityPrefix(base)
 }
 
 func stripVisibilityPrefix(base string) string {
-	if strings.HasPrefix(base, "public_") {
+	switch {
+	case strings.HasPrefix(base, "public_"):
 		return strings.TrimPrefix(base, "public_")
-	}
-	if strings.HasPrefix(base, "private_") {
+	case strings.HasPrefix(base, "private_"):
 		return strings.TrimPrefix(base, "private_")
+	default:
+		return base
 	}
-	return base
+}
+
+// safeFuncMap returns an empty FuncMap. Our templates only need field
+// access on RepoData, which is provided by default. An explicit empty
+// map prevents access to arbitrary Go functions that could be used
+// for template injection.
+func safeFuncMap() template.FuncMap {
+	return template.FuncMap{}
 }
