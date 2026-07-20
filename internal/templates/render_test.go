@@ -264,7 +264,7 @@ func TestRender_SanitizesXSSPayloads(t *testing.T) {
 	}
 }
 
-func TestStripHTMLTags(t *testing.T) {
+func TestSanitizeOutput(t *testing.T) {
 	tests := []struct {
 		name string
 		in   string
@@ -273,15 +273,15 @@ func TestStripHTMLTags(t *testing.T) {
 		{"no html", "hello world", "hello world"},
 		{"script tag", "hello<script>alert(1)</script>world", "helloalert(1)world"},
 		{"img tag", "text<img src=x onerror=alert(1)>more", "textmore"},
+		{"your-username preserved", "git@github.com:<your-username>/repo.git", "git@github.com:<your-username>/repo.git"},
 		{"div tag", "<div class='evil'>content</div>", "content"},
-		{"no tags", "no tags here", "no tags here"},
-		{"nested tags", "<b><i>bold italic</i></b>", "bold italic"},
+		{"onerror attribute", "<input onfocus=steal()>", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := htmlTagRe.ReplaceAllString(tt.in, "")
+			got := sanitizeOutput(tt.in)
 			if got != tt.want {
-				t.Errorf("stripHTML(%q) = %q, want %q", tt.in, got, tt.want)
+				t.Errorf("sanitizeOutput(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}

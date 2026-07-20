@@ -20,11 +20,16 @@ import (
 	"github.com/jpvelasco/fundamentum/internal/templatefs"
 )
 
-// stripHTMLTags removes HTML tags and dangerous attributes from rendered output.
-// This is a defense-in-depth measure: template data is pre-sanitized via RepoData.sanitize(),
-// but this ensures any residual HTML-like content in static template text is neutralized.
-// The output is YAML/Markdown — not HTML — so stripping tags is safe.
-var htmlTagRe = regexp.MustCompile(`<[^>]*>`)
+// sanitizeOutput strips dangerous HTML tags from rendered output.
+// This is defense-in-depth: template data is pre-sanitized via RepoData.sanitize(),
+// but this ensures any residual HTML injection is neutralized. Only specific
+// dangerous HTML tags are targeted — generic angle-bracket patterns like
+// `<your-username>` in Markdown are preserved.
+var dangerousTagRe = regexp.MustCompile(`(?i)<(/)?(script|iframe|object|embed|svg|style|link|form|input|img|meta|base|applet|marquee|video|audio|source|track|body|head|html|div|span|a)[^>]*>`)
+
+func sanitizeOutput(s string) string {
+	return dangerousTagRe.ReplaceAllString(s, "")
+}
 
 // RenderedFile is a target path and rendered content ready to commit.
 type RenderedFile struct {
@@ -125,10 +130,11 @@ func Render(data RepoData) ([]RenderedFile, error) {
 			rendered = string(raw)
 		}
 
-		// Defense-in-depth: strip any HTML tags from rendered output.
+		// Defense-in-depth: strip dangerous HTML tags from rendered output.
 		// Template data is pre-sanitized, but residual HTML in static template text
-		// is neutralized here. Output is YAML/Markdown — not HTML — so stripping is safe.
-		rendered = htmlTagRe.ReplaceAllString(rendered, "")
+		// is neutralized here. Only specific dangerous tags are targeted — benign
+		// angle brackets like <your-username> in Markdown are preserved.
+		rendered = sanitizeOutput(rendered)
 
 		target := resolveTarget(path)
 		files = append(files, RenderedFile{Path: target, Content: rendered})
