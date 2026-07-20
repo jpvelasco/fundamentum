@@ -27,7 +27,7 @@ Go CLI (Cobra). Two commands: `apply OWNER/REPO` (harden existing repo), `init O
 
 Mirrors ludus: two import groups (stdlib first, then third-party+internal), table-driven tests (stdlib only), `fmt.Errorf("ctx: %w", err)`, no raw exec.Command.
 
-See `planning/product-spec.md`, `planning/roadmap.md`, and `planning/technical-spec.md` for current scope.
+See `planning/` for product spec, roadmap, and technical spec.
 
 ## Codacy
 

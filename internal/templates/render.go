@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
+	"unicode"
 
 	"github.com/jpvelasco/fundamentum/internal/templatefs"
 )
@@ -26,11 +28,63 @@ type RepoData struct {
 	Visibility    string // "public" or "private"
 }
 
+// sanitize sanitizes RepoData fields to prevent template injection.
+// GitHub identifiers are alphanumeric with hyphens; branch names allow slashes
+// and hyphens. Visibility is whitelist-checked to "public" or "private".
+func (d RepoData) sanitize() RepoData {
+	ownerRe := regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,38}[a-zA-Z0-9])?$`)
+	repoRe := regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9._-]{0,98}[a-zA-Z0-9])?$`)
+	branchRe := regexp.MustCompile(`^[a-zA-Z0-9/_-]+$`)
+
+	owner := strings.Map(validIdentifier, d.Owner)
+	if !ownerRe.MatchString(owner) {
+		owner = "owner"
+	}
+
+	repo := strings.Map(validIdentifier, d.RepoName)
+	if !repoRe.MatchString(repo) {
+		repo = "repo"
+	}
+
+	branch := strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '/' || r == '-' || r == '_' {
+			return r
+		}
+		return -1
+	}, d.DefaultBranch)
+	if !branchRe.MatchString(branch) {
+		branch = "main"
+	}
+
+	visibility := strings.ToLower(d.Visibility)
+	if visibility != "public" && visibility != "private" {
+		visibility = "public"
+	}
+
+	return RepoData{
+		Owner:         owner,
+		RepoName:      repo,
+		DefaultBranch: branch,
+		Visibility:    visibility,
+	}
+}
+
+// validIdentifier keeps only ASCII letters, digits, hyphens, and dots for
+// GitHub identifier sanitization.
+func validIdentifier(r rune) rune {
+	if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9') || r == '-' || r == '.' {
+		return r
+	}
+	return -1
+}
+
 // Render renders all embedded templates and returns RenderedFiles with target
 // paths (dotgithub/ → .github/, dotcodacy.yml → .codacy.yml).
 // Templates with a "public_" filename prefix are only included for public repos.
 // Templates with a "private_" filename prefix are only included for private repos.
 func Render(data RepoData) ([]RenderedFile, error) {
+	data = data.sanitize()
 	var files []RenderedFile
 	err := fs.WalkDir(templatefs.FS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {

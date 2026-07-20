@@ -3,6 +3,7 @@ package github
 import (
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -107,9 +108,10 @@ func TestFileStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tt.status)
 				if tt.response != "" {
-					_, _ = w.Write([]byte(tt.response))
+					_, _ = io.WriteString(w, tt.response)
 				}
 			}))
 			defer srv.Close()
@@ -131,13 +133,15 @@ func TestUpsertFile_Update(t *testing.T) {
 	existing := base64.StdEncoding.EncodeToString([]byte("old"))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"content":"` + existing + `","sha":"abc123"}`))
+			_ = json.NewEncoder(w).Encode(map[string]string{"content": existing, "sha": "abc123"})
 			return
 		}
 		if r.Method == http.MethodPut {
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{}`))
+			_ = json.NewEncoder(w).Encode(map[string]any{})
 			return
 		}
 	}))

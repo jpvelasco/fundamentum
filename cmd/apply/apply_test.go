@@ -2,6 +2,7 @@ package apply
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -372,8 +373,9 @@ func TestBranchProtectionItem_FallbackOnlyOn403(t *testing.T) {
 					w.WriteHeader(http.StatusOK)
 					_, _ = w.Write([]byte(`[]`))
 				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/rulesets"):
+					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(tt.rulesetStatus)
-					_, _ = w.Write([]byte(tt.rulesetBody))
+					_, _ = io.WriteString(w, tt.rulesetBody)
 				case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/protection"):
 					classicCalled = true
 					w.WriteHeader(tt.classicStatus)

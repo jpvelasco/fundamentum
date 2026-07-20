@@ -1,6 +1,8 @@
 package github
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,8 +14,9 @@ func TestCreateRepo(t *testing.T) {
 		if r.Method == http.MethodPost && r.URL.Path == "/user/repos" {
 			called = true
 		}
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"full_name":"owner/repo"}`))
+		_ = json.NewEncoder(w).Encode(map[string]string{"full_name": "owner/repo"})
 	}))
 	defer srv.Close()
 
@@ -62,8 +65,9 @@ func TestGetRepoVisibility(t *testing.T) {
 				if r.URL.Path != "/repos/owner/repo" {
 					t.Errorf("expected /repos/owner/repo, got %s", r.URL.Path)
 				}
+				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.response))
+				_, _ = io.WriteString(w, tt.response)
 			}))
 			defer srv.Close()
 
