@@ -1,6 +1,8 @@
 # CLAUDE.md
 
-fundamentum is a focused free MIT CLI for GitHub repo hardening (community files + protection + security in one shot with a wizard). Not overblown.
+Last updated: 2026-07-20
+
+fundamentum is a focused, free, open-source CLI (MIT License) for GitHub repo hardening — community files, branch protection, and security features in one shot with an interactive wizard.
 
 ## Build / Lint / Test
 
@@ -17,17 +19,17 @@ Pre-commit hooks: `git config core.hooksPath .hooks`
 
 ## Architecture
 
-Go CLI (Cobra). Two commands: `apply OWNER/REPO` (harden existing repo), `init OWNER/REPO` (create + harden).
-- `internal/github/` — GitHub API via net/http
+Go CLI (Cobra). Two commands: `apply OWNER/REPO` (harden an existing repo), `init OWNER/REPO` (create a new repo then harden).
+`OWNER` is the GitHub username or org, `REPO` is the repository name.
+
+- `internal/github/` — GitHub API via net/http (no SDK)
 - `internal/wizard/` — summary table + Y/N interactive flow
-- `internal/templates/` — //go:embed + text/template rendering
-- `internal/templatefs/` — embed FS for templates directory
+- `internal/templates/` — `//go:embed` + `text/template` rendering
+- `internal/templatefs/` — embedded filesystem (`//go:embed`) for template files
 
 ## Conventions
 
-Mirrors ludus: two import groups (stdlib first, then third-party+internal), table-driven tests (stdlib only), `fmt.Errorf("ctx: %w", err)`, no raw exec.Command.
-
-See `planning/` for product spec, roadmap, and technical spec.
+Mirrors ludus: two import groups (stdlib first, then third-party+internal), table-driven tests (stdlib only), `fmt.Errorf("ctx: %w", err)`, no raw `exec.Command`.
 
 ## Codacy
 

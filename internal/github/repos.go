@@ -27,7 +27,7 @@ func (c *Client) CreateRepo(name string, private bool) error {
 
 // GetRepoVisibility returns the repository visibility: "public" or "private".
 func (c *Client) GetRepoVisibility(owner, repo string) (string, error) {
-	resp, err := c.get(fmt.Sprintf("/repos/%s/%s", owner, repo))
+	resp, err := c.get(repoPath(owner, repo))
 	if err != nil {
 		return "", fmt.Errorf("get repo: %w", err)
 	}

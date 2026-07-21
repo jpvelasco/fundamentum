@@ -38,7 +38,7 @@ type BranchProtectionOptions struct {
 
 // RulesetExists returns true if a ruleset with the given name already exists.
 func (c *Client) RulesetExists(owner, repo, name string) (bool, error) {
-	resp, err := c.get(fmt.Sprintf("/repos/%s/%s/rulesets", owner, repo))
+	resp, err := c.get(repoPath(owner, repo) + "/rulesets")
 	if err != nil {
 		return false, fmt.Errorf("list rulesets: %w", err)
 	}
@@ -63,11 +63,8 @@ func (c *Client) RulesetExists(owner, repo, name string) (bool, error) {
 // EnsureBranchRuleset creates the protect-main branch ruleset if it doesn't exist.
 func (c *Client) EnsureBranchRuleset(owner, repo string, statusChecks []string, opts BranchProtectionOptions) error {
 	exists, err := c.RulesetExists(owner, repo, "protect-main")
-	if err != nil {
+	if err != nil || exists {
 		return err
-	}
-	if exists {
-		return nil
 	}
 	return c.CreateBranchRuleset(owner, repo, statusChecks, opts)
 }
@@ -75,11 +72,8 @@ func (c *Client) EnsureBranchRuleset(owner, repo string, statusChecks []string, 
 // EnsureTagRuleset creates the protect-version-tags ruleset if it doesn't exist.
 func (c *Client) EnsureTagRuleset(owner, repo string) error {
 	exists, err := c.RulesetExists(owner, repo, "protect-version-tags")
-	if err != nil {
+	if err != nil || exists {
 		return err
-	}
-	if exists {
-		return nil
 	}
 	return c.CreateTagRuleset(owner, repo)
 }
@@ -127,7 +121,7 @@ func (c *Client) CreateBranchRuleset(owner, repo string, statusChecks []string, 
 		},
 		"rules": rules,
 	}
-	resp, err := c.post(fmt.Sprintf("/repos/%s/%s/rulesets", owner, repo), body)
+	resp, err := c.post(repoPath(owner, repo)+"/rulesets", body)
 	if err != nil {
 		return fmt.Errorf("create branch ruleset: %w", err)
 	}
@@ -156,7 +150,7 @@ func (c *Client) CreateTagRuleset(owner, repo string) error {
 			{"type": "non_fast_forward"},
 		},
 	}
-	resp, err := c.post(fmt.Sprintf("/repos/%s/%s/rulesets", owner, repo), body)
+	resp, err := c.post(repoPath(owner, repo)+"/rulesets", body)
 	if err != nil {
 		return fmt.Errorf("create tag ruleset: %w", err)
 	}

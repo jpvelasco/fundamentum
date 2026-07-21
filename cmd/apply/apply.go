@@ -71,13 +71,10 @@ func run(cmd *cobra.Command, args []string) error {
 	// Only ask solo/team if branch protection will actually be applied.
 	// If the ruleset already exists, the question has no effect.
 	var opts github.BranchProtectionOptions
-	needsBranchProtection := !rulesetExists
-	if needsBranchProtection {
-		fmt.Printf("fundamentum apply %s/%s\n\n", owner, repo)
+	fmt.Printf("fundamentum apply %s/%s\n\n", owner, repo)
+	if !rulesetExists {
 		opts.Solo = wizard.PromptProjectType(os.Stdin, os.Stdout)
 		fmt.Println()
-	} else {
-		fmt.Printf("fundamentum apply %s/%s\n\n", owner, repo)
 	}
 
 	items := buildItems(client, owner, repo, branch, visibility, rendered, rulesetExists, tagExists, classicExists, opts)
@@ -194,21 +191,16 @@ func buildItems(
 
 	// Security features: CodeQL only for public repos (free-tier private needs GHAS).
 	// Secret scanning and Dependabot work for all repos.
+	securityName := "Security (secret scanning, Dependabot)"
 	if visibility == "public" {
-		items = append(items, wizard.Item{
-			Name:     "Security (secret scanning, CodeQL, Dependabot)",
-			Action:   wizard.ActionCreate,
-			Optional: true,
-			Apply:    func() error { return c.EnableSecurity(owner, repo, visibility) },
-		})
-	} else {
-		items = append(items, wizard.Item{
-			Name:     "Security (secret scanning, Dependabot)",
-			Action:   wizard.ActionCreate,
-			Optional: true,
-			Apply:    func() error { return c.EnableSecurity(owner, repo, visibility) },
-		})
+		securityName = "Security (secret scanning, CodeQL, Dependabot)"
 	}
+	items = append(items, wizard.Item{
+		Name:     securityName,
+		Action:   wizard.ActionCreate,
+		Optional: true,
+		Apply:    func() error { return c.EnableSecurity(owner, repo, visibility) },
+	})
 
 	return items
 }
@@ -346,9 +338,9 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 			} else {
 				fmt.Printf("\r  %-45s  ✗ %v\n", item.Name, err)
 			}
-		} else {
-			fmt.Printf("\r  %-45s  ✓\n", item.Name)
+			continue
 		}
+		fmt.Printf("\r  %-45s  ✓\n", item.Name)
 	}
 
 	fmt.Printf("\n  Repo: https://github.com/%s/%s\n", owner, repo)
