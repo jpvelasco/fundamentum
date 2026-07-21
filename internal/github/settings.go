@@ -9,7 +9,7 @@ import (
 
 // ApplyGeneralSettings enables auto-delete of head branches and sets the default branch to main.
 func (c *Client) ApplyGeneralSettings(owner, repo string) error {
-	resp, err := c.patch(fmt.Sprintf("/repos/%s/%s", owner, repo), map[string]any{
+	resp, err := c.patch(repoPath(owner, repo), map[string]any{
 		"delete_branch_on_merge": true,
 		"default_branch":         "main",
 	})
@@ -18,8 +18,8 @@ func (c *Client) ApplyGeneralSettings(owner, repo string) error {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("apply general settings: %s: %s", resp.Status, body)
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("apply general settings: %s: %s", resp.Status, b)
 	}
 	return nil
 }
