@@ -3,9 +3,11 @@ package github
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -27,7 +29,8 @@ func IsWorkflowLocked(err error) bool {
 
 // UpsertFileOnBranch creates or updates a file on a specific branch via the Contents API.
 func (c *Client) UpsertFileOnBranch(owner, repo, branch, path string, content []byte) (string, error) {
-	apiPath := fmt.Sprintf("/repos/%s/%s/contents/%s?ref=%s", owner, repo, path, branch)
+	apiPath := fmt.Sprintf("/repos/%s/%s/contents/%s?ref=%s",
+		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(path), url.PathEscape(branch))
 
 	resp, err := c.get(apiPath)
 	if err != nil {
@@ -73,7 +76,7 @@ func (c *Client) UpsertFileOnBranch(owner, repo, branch, path string, content []
 	}
 
 	// PUT doesn't support ?ref= — use the branch in the request body instead.
-	putPath := fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, path)
+	putPath := contentsPath(owner, repo, path)
 	putResp, err := c.do(http.MethodPut, putPath, body)
 	if err != nil {
 		return "", fmt.Errorf("upsert file %s on %s: %w", path, branch, err)
@@ -94,7 +97,7 @@ func (c *Client) UpsertFileOnBranch(owner, repo, branch, path string, content []
 
 // CreatePRBranch creates a new branch from the default branch.
 func (c *Client) CreatePRBranch(owner, repo, branch, baseBranch string) error {
-	resp, err := c.get(fmt.Sprintf("/repos/%s/%s/branches/%s", owner, repo, baseBranch))
+	resp, err := c.get(repoPath(owner, repo) + "/branches/" + url.PathEscape(baseBranch))
 	if err != nil {
 		return fmt.Errorf("get branch %s: %w", baseBranch, err)
 	}
@@ -108,7 +111,7 @@ func (c *Client) CreatePRBranch(owner, repo, branch, baseBranch string) error {
 		return fmt.Errorf("decode branch %s: %w", baseBranch, err)
 	}
 
-	putResp, err := c.do(http.MethodPost, fmt.Sprintf("/repos/%s/%s/git/refs", owner, repo), map[string]any{
+	putResp, err := c.do(http.MethodPost, repoPath(owner, repo)+"/git/refs", map[string]any{
 		"ref": "refs/heads/" + branch,
 		"sha": branchInfo.Commit.SHA,
 	})
@@ -125,7 +128,7 @@ func (c *Client) CreatePRBranch(owner, repo, branch, baseBranch string) error {
 
 // CreatePullRequest opens a PR from head to base. Returns the PR number.
 func (c *Client) CreatePullRequest(owner, repo, title, body, head, base string) (int, error) {
-	resp, err := c.post(fmt.Sprintf("/repos/%s/%s/pulls", owner, repo), map[string]any{
+	resp, err := c.post(repoPath(owner, repo)+"/pulls", map[string]any{
 		"title": title,
 		"body":  body,
 		"head":  head,
@@ -181,13 +184,26 @@ func (c *Client) ApplyViaPR(owner, repo, defaultBranch string, changes []FileCha
 	return prNum, nil
 }
 
+// HTTPError wraps an error with the HTTP status code for reliable error checking.
+type HTTPError struct {
+	StatusCode int
+	Msg        string
+}
+
+func (e *HTTPError) Error() string {
+	return e.Msg
+}
+
 // IsConflict409 returns true if the error is a 409 from branch protection rules.
 func IsConflict409(err error) bool {
 	if err == nil {
 		return false
 	}
+	var he *HTTPError
+	if errors.As(err, &he) && he.StatusCode == http.StatusConflict {
+		return true
+	}
 	msg := err.Error()
-	// "409" from resp.Status is stable; "rule violations" or "GH013" from the JSON body.
 	return strings.Contains(msg, "409") && (strings.Contains(msg, "rule violations") || strings.Contains(msg, "GH013"))
 }
 
@@ -197,6 +213,9 @@ func IsForbidden403(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "403")
+	var he *HTTPError
+	if errors.As(err, &he) && he.StatusCode == http.StatusForbidden {
+		return true
+	}
+	return strings.Contains(err.Error(), "403")
 }

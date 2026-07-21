@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -36,8 +38,21 @@ func NewClient(token string, verbose bool) *Client {
 }
 
 // WithBaseURL sets the base URL for the client, useful for testing.
+// Rejects URLs with non-HTTPS schemes (except localhost/127.0.0.1 for testing)
+// to prevent SSRF and credential leakage.
 func (c *Client) WithBaseURL(baseURL string) *Client {
-	c.baseURL = baseURL
+	if baseURL == "" {
+		return c
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return c
+	}
+	// Only allow localhost for testing or HTTPS for production.
+	if u.Scheme != "https" && !strings.HasPrefix(u.Host, "localhost") && !strings.HasPrefix(u.Host, "127.0.0.1") {
+		return c
+	}
+	c.baseURL = u.String()
 	return c
 }
 
@@ -48,6 +63,12 @@ func (c *Client) base() string {
 	return defaultBase
 }
 
+// repoPath constructs a safe API path for repo-level operations,
+// URL-escaping owner and repo to prevent path traversal.
+func repoPath(owner, repo string) string {
+	return "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo)
+}
+
 func (c *Client) do(method, path string, body any) (*http.Response, error) {
 	var buf bytes.Buffer
 	if body != nil {
@@ -55,7 +76,13 @@ func (c *Client) do(method, path string, body any) (*http.Response, error) {
 			return nil, fmt.Errorf("encode request: %w", err)
 		}
 	}
-	req, err := http.NewRequest(method, c.base()+path, &buf)
+
+	url := c.base() + path
+	if c.Verbose {
+		fmt.Printf("+ %s %s\n", method, url)
+	}
+
+	req, err := http.NewRequest(method, url, &buf)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
@@ -64,9 +91,6 @@ func (c *Client) do(method, path string, body any) (*http.Response, error) {
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
-	}
-	if c.Verbose {
-		fmt.Printf("+ %s %s\n", method, c.base()+path)
 	}
 	return c.client.Do(req)
 }
