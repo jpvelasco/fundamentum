@@ -1,14 +1,22 @@
+// Package github provides a GitHub API client with authenticated HTTP operations.
 package github
 
 import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 )
+
+// branchProtectionPath constructs a safe API path for branch protection operations,
+// URL-escaping each component to prevent path traversal.
+func branchProtectionPath(owner, repo, branch string) string {
+	return repoPath(owner, repo) + "/branches/" + url.PathEscape(branch) + "/protection"
+}
 
 // ClassicProtectionExists returns true if classic branch protection is set on the given branch.
 func (c *Client) ClassicProtectionExists(owner, repo, branch string) (bool, error) {
-	resp, err := c.get(fmt.Sprintf("/repos/%s/%s/branches/%s/protection", owner, repo, branch))
+	resp, err := c.get(branchProtectionPath(owner, repo, branch))
 	if err != nil {
 		return false, fmt.Errorf("check classic protection: %w", err)
 	}
@@ -40,7 +48,7 @@ func (c *Client) ApplyClassicBranchProtection(owner, repo, branch string, status
 		"allow_force_pushes": false,
 		"allow_deletions":    false,
 	}
-	resp, err := c.do(http.MethodPut, fmt.Sprintf("/repos/%s/%s/branches/%s/protection", owner, repo, branch), body)
+	resp, err := c.do(http.MethodPut, branchProtectionPath(owner, repo, branch), body)
 	if err != nil {
 		return fmt.Errorf("apply classic branch protection: %w", err)
 	}
@@ -54,7 +62,7 @@ func (c *Client) ApplyClassicBranchProtection(owner, repo, branch string, status
 
 // RemoveClassicBranchProtection removes classic branch protection.
 func (c *Client) RemoveClassicBranchProtection(owner, repo, branch string) error {
-	resp, err := c.do(http.MethodDelete, fmt.Sprintf("/repos/%s/%s/branches/%s/protection", owner, repo, branch), nil)
+	resp, err := c.do(http.MethodDelete, branchProtectionPath(owner, repo, branch), nil)
 	if err != nil {
 		return fmt.Errorf("remove classic branch protection: %w", err)
 	}

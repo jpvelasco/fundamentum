@@ -194,31 +194,119 @@ func TestRenderVisibilityFiltering(t *testing.T) {
 			for _, f := range files {
 				pathSet[f.Path] = true
 			}
+
 			for _, want := range tt.wantPublicFiles {
 				if !pathSet[want] {
-					t.Errorf("public: missing %q in rendered files", want)
+					t.Errorf("missing %q in rendered files", want)
 				}
 			}
 			for _, want := range tt.wantPrivateFiles {
 				if !pathSet[want] {
-					t.Errorf("private: missing %q in rendered files", want)
+					t.Errorf("missing %q in rendered files", want)
 				}
 			}
+
 			// Verify opposite visibility files are excluded.
+			var excludeFiles []string
 			if tt.visibility == "public" {
-				if pathSet[".github/workflows/octocov.yml"] {
-					t.Error("public: octocov.yml should not be rendered for public repos")
-				}
+				excludeFiles = []string{".github/workflows/octocov.yml"}
 			} else {
-				if pathSet[".github/workflows/codecov.yml"] {
-					t.Error("private: codecov.yml should not be rendered for private repos")
+				excludeFiles = []string{
+					".github/workflows/codecov.yml",
+					".github/workflows/octopus.yml",
+					".github/workflows/codeql.yml",
 				}
-				if pathSet[".github/workflows/octopus.yml"] {
-					t.Error("private: octopus.yml should not be rendered for private repos")
+			}
+			for _, exclude := range excludeFiles {
+				if pathSet[exclude] {
+					t.Errorf("%s: %q should not be rendered for %s repos", tt.visibility, exclude, tt.visibility)
 				}
-				if pathSet[".github/workflows/codeql.yml"] {
-					t.Error("private: codeql.yml should not be rendered for private repos")
-				}
+			}
+		})
+	}
+}
+
+func TestSubstitute(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		data RepoData
+		want string
+	}{
+		{
+			name:   "replace all four fields",
+			in:     "{{.Owner}}/{{.RepoName}} on {{.DefaultBranch}} ({{.Visibility}})",
+			data:   RepoData{Owner: "jpvelasco", RepoName: "fundamentum", DefaultBranch: "main", Visibility: "public"},
+			want:   "jpvelasco/fundamentum on main (public)",
+		},
+		{
+			name:   "unknown placeholders preserved",
+			in:     "{{.Owner}}/{{.Unknown}}",
+			data:   RepoData{Owner: "alice"},
+			want:   "alice/{{.Unknown}}",
+		},
+		{
+			name:   "no placeholders",
+			in:     "hello world",
+			data:   RepoData{},
+			want:   "hello world",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := substitute(tt.in, tt.data)
+			if got != tt.want {
+				t.Errorf("substitute(%q, %+v) = %q, want %q", tt.in, tt.data, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRender_SanitizesXSSPayloads(t *testing.T) {
+	// Verify that raw HTML tags and script content are stripped from rendered output.
+	data := RepoData{
+		Owner:         "<img onerror=alert(1) src=x>",
+		RepoName:      "\x22><script>alert('xss')</script>",
+		DefaultBranch: "main{{.Owner}}", // template injection attempt
+		Visibility:    "public",
+	}
+	files, err := Render(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check for raw HTML tags that should not survive sanitization.
+	htmlTags := []string{
+		"<img", "<script>", "<script", "</script>",
+		"onerror=", "alert(", "javascript:",
+	}
+	for _, f := range files {
+		for _, tag := range htmlTags {
+			if strings.Contains(f.Content, tag) {
+				t.Errorf("HTML tag %q found in %s", tag, f.Path)
+			}
+		}
+	}
+}
+
+func TestSanitizeOutput(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"no html", "hello world", "hello world"},
+		{"script tag", "hello<script>alert(1)</script>world", "helloalert(1)world"},
+		{"img tag", "text<img src=x onerror=alert(1)>more", "textmore"},
+		{"your-username preserved", "git@github.com:<your-username>/repo.git", "git@github.com:<your-username>/repo.git"},
+		{"div tag", "<div class='evil'>content</div>", "content"},
+		{"onerror attribute", "<input onfocus=steal()>", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeOutput(tt.in)
+			if got != tt.want {
+				t.Errorf("sanitizeOutput(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}

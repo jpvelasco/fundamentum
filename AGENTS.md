@@ -1,6 +1,6 @@
 # AGENTS.md
 
-fundamentum is a **free, open-source (MIT) CLI** for one-shot GitHub repo hardening. Focused feature set — no cloud, no org batching, no audit subcommand.
+fundamentum is a **free, open-source CLI** (MIT License) for one-shot GitHub repo hardening. Focused feature set — no cloud, no org batching, no audit subcommand.
 
 ## Commands
 
@@ -22,6 +22,7 @@ go test ./internal/github/...
 
 # Run
 echo $env:GITHUB_TOKEN   # must be set, or pass --token
+# OWNER is the GitHub username or organization, REPO is the repository name.
 go run . apply OWNER/REPO
 go run . init OWNER/REPO
 ```
@@ -40,12 +41,15 @@ Pre-commit order: template drift → build → lint → test.
 ## PR Workflow (use with pr-auto / pr-doctor skills)
 
 For PRs: use pr-auto for full lifecycle (create, fix CI/reviews, land safely).
-- Never merge if CI red on required checks.
-- Always address/resolve review threads with substantive replies.
-- Admin actions (force, --admin merge, protection bypass) → STOP and ask human first.
-- After changes to .github/, .codacy.yml, workflows, etc.: suggest `go run . apply <owner>/<repo>` (dry-run first).
-- Load AGENTS.md + CLAUDE.md at start. Follow squash default, feature branches, CI wait.
-- Use supporting skills: check-work (verify fixes), review (findings), monitor (long CI).
+- Do not merge if CI is red on required checks. Exception: if the check is a known flaky failure unrelated to the PR changes, document the issue and proceed.
+- Address and resolve review threads with substantive replies that include code changes or clear justifications.
+- For admin actions (force-push, `--admin` merge, branch protection bypass): pause and ask the human before proceeding.
+- After changes to `.github/`, `.codacy.yml`, or workflows: suggest `go run . apply <owner>/<repo>` with a dry-run first.
+- Load AGENTS.md and CLAUDE.md at the start of a session. Follow squash-merge default, feature branches, and CI-wait rules.
+- Use supporting skills as needed:
+  - check-work — verify fixes before committing
+  - review — surface code quality findings
+  - monitor — track long-running CI jobs
 
 ## Architecture
 
@@ -71,9 +75,9 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`.
 
 ### Key behavior
 
-- **Branch protection**: tries modern ruleset first, falls back to classic protection on 403. **Limitation:** the classic protection API requires GitHub Pro — free-tier private repos must configure branch protection manually via Settings → Branches.
+- **Branch protection**: tries modern ruleset first, falls back to classic protection on 403. **Limitation:** the classic protection API requires GitHub Pro — free-tier private repos must configure branch protection manually via Settings → Branches. Use the `--no-overwrite` flag if you only want to add missing files.
 - **File aliasing** (`cmd/apply/apply.go:89`): checks path variants before deciding create/skip/update — e.g., `CODEOWNERS` at root counts as existing even though target is `.github/CODEOWNERS`
-- **Workflow 404 handling** (`internal/github/files.go`): GitHub Actions locks workflow files — PUT returns 404 when updating an existing workflow via Contents API. Detected as `ErrWorkflowLocked`, returns `action="skipped"` so apply continues.
+- **Workflow 404 handling** (`internal/github/files.go`): GitHub Actions locks workflow files — HTTP PUT returns 404 when updating an existing workflow via the Contents API. Detected as `ErrWorkflowLocked`, returns `action="skipped"` so apply continues.
 - **`--no-overwrite`**: skips any file that already exists, even if content differs
 - Auth: `--token` flag or `GITHUB_TOKEN` env var, used as Bearer token
 
@@ -99,4 +103,4 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`.
 - **Cannot disable tools via `.codacy.yml`.** The `enabled: false` option only works for languages (`languages.<lang>.enabled: false`). Disable tools on the [Code patterns page](https://docs.codacy.com/repositories-configure/configuring-code-patterns/) instead.
 - **Legacy `tools:` key ignored.** The `.codacy/codacy.yaml` format is from Codacy CLI v2 and not recognized by the current cloud config.
 - **Use npm CLIs via npx.** For local and cloud interaction, use `@codacy/codacy-cloud-cli` and `@codacy/analysis-cli`.
-- **Trivy noise:** Trivy errors with "no patterns configured" on repos without Dockerfiles/K8s manifests. Must be disabled in the Codacy UI per-repo.
+- **Trivy noise:** Trivy reports "no patterns configured" on repos without Dockerfiles or Kubernetes manifests. Disable Trivy in the Codacy UI per-repo to eliminate this noise. If the repo adds container files later, re-enable Trivy.
