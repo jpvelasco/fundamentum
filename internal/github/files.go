@@ -8,13 +8,21 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 )
+
+// contentsPath constructs a safe API path for repo content operations,
+// URL-escaping each component to prevent path traversal.
+func contentsPath(owner, repo, path string) string {
+	return fmt.Sprintf("/repos/%s/%s/contents/%s",
+		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(path))
+}
 
 // AnyFileExists checks whether any of the given paths exists in the repo.
 // Use this to detect case-variant or path-variant duplicates before writing.
 func (c *Client) AnyFileExists(owner, repo string, paths []string) (bool, error) {
 	for _, path := range paths {
-		resp, err := c.get(fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, path))
+		resp, err := c.get(contentsPath(owner, repo, path))
 		if err != nil {
 			return false, fmt.Errorf("check file %s: %w", path, err)
 		}
@@ -28,8 +36,8 @@ func (c *Client) AnyFileExists(owner, repo string, paths []string) (bool, error)
 
 // FileStatus returns "create", "update", or "skip" for a file without writing.
 func (c *Client) FileStatus(owner, repo, path string, content []byte) (string, error) {
-	apiPath := fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, path)
-	resp, err := c.get(apiPath)
+	p := contentsPath(owner, repo, path)
+	resp, err := c.get(p)
 	if err != nil {
 		return "", fmt.Errorf("check file %s: %w", path, err)
 	}
@@ -47,7 +55,8 @@ func (c *Client) FileStatus(owner, repo, path string, content []byte) (string, e
 			return "", fmt.Errorf("parse existing file %s: %w", path, err)
 		}
 		existingClean := bytes.ReplaceAll([]byte(existing.Content), []byte("\n"), nil)
-		if bytes.Equal(existingClean, []byte(base64.StdEncoding.EncodeToString(content))) {
+		newClean := bytes.ReplaceAll([]byte(base64.StdEncoding.EncodeToString(content)), []byte("\n"), nil)
+		if bytes.Equal(existingClean, newClean) {
 			return "skip", nil
 		}
 		return "update", nil
@@ -62,9 +71,9 @@ func (c *Client) FileStatus(owner, repo, path string, content []byte) (string, e
 // UpsertFile creates or updates a file in the repo via the Contents API.
 // Returns "created", "updated", or "skipped" (content unchanged).
 func (c *Client) UpsertFile(owner, repo, path string, content []byte) (string, error) {
-	apiPath := fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, path)
+	p := contentsPath(owner, repo, path)
 
-	resp, err := c.get(apiPath)
+	resp, err := c.get(p)
 	if err != nil {
 		return "", fmt.Errorf("check file %s: %w", path, err)
 	}
@@ -106,7 +115,7 @@ func (c *Client) UpsertFile(owner, repo, path string, content []byte) (string, e
 		return "", fmt.Errorf("check file %s: %s: %s", path, resp.Status, b)
 	}
 
-	putResp, err := c.do(http.MethodPut, apiPath, body)
+	putResp, err := c.do(http.MethodPut, p, body)
 	if err != nil {
 		return "", fmt.Errorf("upsert file %s: %w", path, err)
 	}
