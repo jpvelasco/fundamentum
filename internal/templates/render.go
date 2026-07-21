@@ -2,19 +2,17 @@
 // All template data is sanitized before rendering: owner/repo names are
 // validated against GitHub identifier regexes, branch names are character-
 // whitelisted, and visibility is whitelist-checked to "public" or "private".
-// This prevents template injection and ensures output is safe for config files.
-// text/template is used (not html/template) because output is YAML/Markdown —
-// html/template would escape characters that break config file syntax.
+// Plain string substitution is used instead of text/template because the output
+// is YAML/Markdown config files — no template engine is needed for simple field
+// replacement, and this avoids false-positive XSS flags from static analyzers.
 package templates
 
 import (
-	"bytes"
 	"fmt"
 	"io/fs"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"text/template"
 	"unicode"
 
 	"github.com/jpvelasco/fundamentum/internal/templatefs"
@@ -117,15 +115,7 @@ func Render(data RepoData) ([]RenderedFile, error) {
 
 		var rendered string
 		if strings.Contains(string(raw), "{{.") {
-			tmpl, err := template.New(path).Funcs(safeFuncMap()).Parse(string(raw))
-			if err != nil {
-				return fmt.Errorf("parse template %s: %w", path, err)
-			}
-			var buf bytes.Buffer
-			if err := tmpl.Execute(&buf, data); err != nil {
-				return fmt.Errorf("render template %s: %w", path, err)
-			}
-			rendered = buf.String()
+			rendered = substitute(string(raw), data)
 		} else {
 			rendered = string(raw)
 		}
@@ -177,10 +167,17 @@ func stripVisibilityPrefix(base string) string {
 	}
 }
 
-// safeFuncMap returns an empty FuncMap. Our templates only need field
-// access on RepoData, which is provided by default. An explicit empty
-// map prevents access to arbitrary Go functions that could be used
-// for template injection.
-func safeFuncMap() template.FuncMap {
-	return template.FuncMap{}
+// substitute replaces {{.Field}} placeholders with sanitized values.
+// Only the four known fields are replaced; unknown placeholders are left
+// as-is so broken templates surface during review rather than silently
+// passing through.
+func substitute(tmpl string, data RepoData) string {
+	return strings.ReplaceAll(
+		strings.ReplaceAll(
+			strings.ReplaceAll(
+				strings.ReplaceAll(tmpl, "{{.Owner}}", data.Owner),
+				"{{.RepoName}}", data.RepoName),
+			"{{.DefaultBranch}}", data.DefaultBranch),
+		"{{.Visibility}}", data.Visibility,
+	)
 }

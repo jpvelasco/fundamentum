@@ -226,14 +226,39 @@ func TestRenderVisibilityFiltering(t *testing.T) {
 	}
 }
 
-func TestSafeFuncMap_NoUnsafeFunctions(t *testing.T) {
-	// Verify the safe func map is empty — our templates only need
-	// field access on RepoData, which is provided by default.
-	// If new functions are added, ensure they do not accept user input
-	// that could control execution flow.
-	fm := safeFuncMap()
-	if len(fm) > 0 {
-		t.Errorf("safe func map should be empty, got %d functions", len(fm))
+func TestSubstitute(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		data RepoData
+		want string
+	}{
+		{
+			name:   "replace all four fields",
+			in:     "{{.Owner}}/{{.RepoName}} on {{.DefaultBranch}} ({{.Visibility}})",
+			data:   RepoData{Owner: "jpvelasco", RepoName: "fundamentum", DefaultBranch: "main", Visibility: "public"},
+			want:   "jpvelasco/fundamentum on main (public)",
+		},
+		{
+			name:   "unknown placeholders preserved",
+			in:     "{{.Owner}}/{{.Unknown}}",
+			data:   RepoData{Owner: "alice"},
+			want:   "alice/{{.Unknown}}",
+		},
+		{
+			name:   "no placeholders",
+			in:     "hello world",
+			data:   RepoData{},
+			want:   "hello world",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := substitute(tt.in, tt.data)
+			if got != tt.want {
+				t.Errorf("substitute(%q, %+v) = %q, want %q", tt.in, tt.data, got, tt.want)
+			}
+		})
 	}
 }
 
