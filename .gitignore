@@ -6,6 +6,10 @@ coverage.out
 docs/superpowers/
 planning/
 
+# Local secrets
+.env
+.env.*
+
 # Local AI/tooling cruft
 .claude/
 .remember/
