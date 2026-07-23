@@ -2,13 +2,12 @@
 #
 # Upload: Linux Test job in .github/workflows/ci.yml (OIDC + optional CODECOV_TOKEN).
 # CI must send override_commit/override_branch on every run (including push to
-# main) so Codecov stores base reports — otherwise PRs hit "Missing base commit"
-# / "Coverage data is unknown" (docs.codecov.com/docs/error-reference).
+# the default branch) so Codecov stores base reports — otherwise PRs hit
+# "Missing base commit" / "Coverage data is unknown" (docs.codecov.com/docs/error-reference).
 #
 # PR visibility: Codecov GitHub App posts `codecov/patch` + often a PR comment
-# only after BOTH base (main) and head reports process. codecov/project often
-# never posts (probe PR #25). Branch protection requires `codecov/patch` only —
-# soft gate, kept resilient to App lag/outage.
+# only after BOTH base and head reports process. Soft gate — keep it OUT of the
+# ruleset required checks so App lag/outage cannot deadlock merges.
 #
 # Gates:
 #   - project: overall coverage may not drop more than the threshold vs base
@@ -17,14 +16,12 @@ coverage:
   status:
     project:
       default:
-        target: auto        # compare against the base commit's coverage
-        threshold: 1%        # tolerate <=1% drift before failing
-        if_not_found: success
+        target: auto      # compare against the base commit's coverage
+        threshold: 1%      # tolerate <=1% drift before failing
     patch:
       default:
-        target: 90%          # new/changed lines must be >=90% covered (no new
-                             # function ships untested; strive for 100%)
-        if_not_found: success
+        target: 90%        # new/changed lines must be >=90% covered (no new
+                           # function ships untested; strive for 100%)
 
 # Inline annotations on the PR Files tab (when the GitHub App is installed).
 github_checks:
@@ -32,6 +29,7 @@ github_checks:
 
 # Virtual coverage groupings by path — no upload changes required. Lets the
 # dashboard and PR comment break coverage down by architectural layer.
+# Adjust the component paths to match this repo's package layout.
 component_management:
   default_rules:
     statuses:
@@ -51,7 +49,7 @@ component_management:
 comment:
   layout: "reach, diff, flags, components, files"
   behavior: default
-  require_changes: false     # still comment when coverage is unaffected (docs PRs)
+  require_changes: false   # still comment when coverage is unaffected (docs PRs)
 
 # Paths excluded from coverage math.
 ignore:

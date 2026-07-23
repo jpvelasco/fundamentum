@@ -169,17 +169,21 @@ func TestRenderVisibilityFiltering(t *testing.T) {
 			name:       "public repo",
 			visibility: "public",
 			wantPublicFiles: []string{
-				".github/workflows/codecov.yml",
+				".github/workflows/ci.yml",
+				"codecov.yml",
 				".github/workflows/octopus.yml",
 				".github/workflows/codeql.yml",
 				".github/codeql/codeql-config.yml",
+				"socket.yml",
 			},
 		},
 		{
 			name:       "private repo",
 			visibility: "private",
 			wantPrivateFiles: []string{
+				".github/workflows/ci.yml",
 				".github/workflows/octocov.yml",
+				"socket.yml",
 			},
 		},
 	}
@@ -207,12 +211,15 @@ func TestRenderVisibilityFiltering(t *testing.T) {
 			}
 
 			// Verify opposite visibility files are excluded.
+			// Note: ci.yml and socket.yml render for BOTH visibilities (from
+			// public_ci.yml / private_ci.yml and the shared socket.yml), so they
+			// must not appear in either exclude list.
 			var excludeFiles []string
 			if tt.visibility == "public" {
 				excludeFiles = []string{".github/workflows/octocov.yml"}
 			} else {
 				excludeFiles = []string{
-					".github/workflows/codecov.yml",
+					"codecov.yml",
 					".github/workflows/octopus.yml",
 					".github/workflows/codeql.yml",
 				}
