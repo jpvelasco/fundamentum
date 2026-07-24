@@ -8,6 +8,29 @@ import (
 	"testing"
 )
 
+// newJSONResponseHandler returns an http.HandlerFunc that responds with the given
+// status code and JSON-unmarshalled response body (if non-empty).
+func newJSONResponseHandler(status int, responseJSON string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		if responseJSON != "" {
+			var out any
+			_ = json.Unmarshal([]byte(responseJSON), &out)
+			_ = json.NewEncoder(w).Encode(out)
+		}
+	}
+}
+
+// newErrorResponseHandler returns an http.HandlerFunc that responds with the given
+// status code and a generic error message in JSON.
+func newErrorResponseHandler(status int) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]string{"message": "error"})
+	}
+}
+
 func TestAnyFileExists(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -106,15 +129,7 @@ func TestFileStatus(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(tt.status)
-				if tt.response != "" {
-					var out any
-					_ = json.Unmarshal([]byte(tt.response), &out)
-					_ = json.NewEncoder(w).Encode(out)
-				}
-			}))
+			srv := httptest.NewServer(newJSONResponseHandler(tt.status, tt.response))
 			defer srv.Close()
 
 			c := NewClient("t", false).WithBaseURL(srv.URL)
@@ -225,15 +240,7 @@ func TestRulesetExists(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(tt.statusCode)
-				if tt.response != "" {
-					var out any
-					_ = json.Unmarshal([]byte(tt.response), &out)
-					_ = json.NewEncoder(w).Encode(out)
-				}
-			}))
+			srv := httptest.NewServer(newJSONResponseHandler(tt.statusCode, tt.response))
 			defer srv.Close()
 
 			c := NewClient("t", false).WithBaseURL(srv.URL)
@@ -345,10 +352,7 @@ func TestCreateRulesetErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusUnprocessableEntity)
-				_ = json.NewEncoder(w).Encode(map[string]string{"message": "validation failed"})
-			}))
+			srv := httptest.NewServer(newErrorResponseHandler(http.StatusUnprocessableEntity))
 			defer srv.Close()
 
 			c := NewClient("t", false).WithBaseURL(srv.URL)
@@ -518,10 +522,7 @@ func TestErrorResponses(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(tt.status)
-				_ = json.NewEncoder(w).Encode(map[string]string{"message": "error"})
-			}))
+			srv := httptest.NewServer(newErrorResponseHandler(tt.status))
 			defer srv.Close()
 
 			c := NewClient("t", false).WithBaseURL(srv.URL)
