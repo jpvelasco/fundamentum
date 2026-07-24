@@ -243,124 +243,148 @@ func TestApplyItems_NonFileItemsApplyDirectly(t *testing.T) {
 	}
 }
 
-func TestApplyItems_DryRun_SkipsApply(t *testing.T) {
-	// Dry run should not call any Apply functions.
-	applyCalled := false
-	items := []wizard.Item{
-		{Name: ".github/CODEOWNERS", Action: wizard.ActionCreate, Content: []byte("me"), Apply: func() error {
-			applyCalled = true
-			return nil
-		}},
-	}
-	c := github.NewClient("", false)
-	err := applyItems(c, "owner", "repo", "main", items, true, false)
-	if err != nil {
-		t.Errorf("expected no error, got: %v", err)
-	}
-	if applyCalled {
-		t.Error("expected Apply not to be called in dry run")
-	}
-}
-
-func TestApplyItems_SkippedItems_NotApplied(t *testing.T) {
-	// Skipped items should not be applied.
-	applyCalled := false
-	items := []wizard.Item{
-		{Name: ".github/CODEOWNERS", Action: wizard.ActionSkip, Content: []byte("me"), Apply: func() error {
-			applyCalled = true
-			return nil
-		}},
-	}
-	c := github.NewClient("", false)
-	err := applyItems(c, "owner", "repo", "main", items, false, false)
-	if err != nil {
-		t.Errorf("expected no error, got: %v", err)
-	}
-	if applyCalled {
-		t.Error("expected Apply not to be called for skipped item")
-	}
-}
-
-func TestApplyItems_OptionalError_NonFatal(t *testing.T) {
-	// Optional items that fail should not cause a fatal error.
-	items := []wizard.Item{
+func TestApplyItems_SkippedOrDryRun(t *testing.T) {
+	// Items are not applied when: dry run is enabled OR action is Skip.
+	tests := []struct {
+		name   string
+		dryRun bool
+		action wizard.Action
+	}{
 		{
-			Name:     "Security (secret scanning, CodeQL, Dependabot)",
-			Action:   wizard.ActionCreate,
-			Optional: true,
-			Apply:    func() error { return fmt.Errorf("some error") },
+			name:   "dry run skips Apply",
+			dryRun: true,
+			action: wizard.ActionCreate,
+		},
+		{
+			name:   "skipped item not applied",
+			dryRun: false,
+			action: wizard.ActionSkip,
 		},
 	}
-	c := github.NewClient("", false)
-	err := applyItems(c, "owner", "repo", "main", items, false, false)
-	if err != nil {
-		t.Errorf("expected no error for optional failure, got: %v", err)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			applyCalled := false
+			items := []wizard.Item{
+				{Name: ".github/CODEOWNERS", Action: tt.action, Content: []byte("me"), Apply: func() error {
+					applyCalled = true
+					return nil
+				}},
+			}
+			c := github.NewClient("", false)
+			err := applyItems(c, "owner", "repo", "main", items, tt.dryRun, false)
+			if err != nil {
+				t.Errorf("expected no error, got: %v", err)
+			}
+			if applyCalled {
+				t.Error("expected Apply not to be called")
+			}
+		})
+	}
+}
+
+func TestApplyItems_ErrorHandling_NonFatal(t *testing.T) {
+	// Item errors don't cause fatal errors: optional items are always non-fatal,
+	// non-optional non-file items are non-fatal (only file items can be fatal).
+	tests := []struct {
+		name     string
+		itemName string
+		optional bool
+	}{
+		{
+			name:     "optional item error is non-fatal",
+			itemName: "Security (secret scanning, CodeQL, Dependabot)",
+			optional: true,
+		},
+		{
+			name:     "non-optional non-file item error is non-fatal",
+			itemName: "General settings (auto-delete branches)",
+			optional: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			items := []wizard.Item{
+				{
+					Name:     tt.itemName,
+					Action:   wizard.ActionCreate,
+					Optional: tt.optional,
+					Apply:    func() error { return fmt.Errorf("API error") },
+				},
+			}
+			c := github.NewClient("", false)
+			err := applyItems(c, "owner", "repo", "main", items, false, false)
+			if err != nil {
+				t.Errorf("expected no error return (non-fatal item failure), got: %v", err)
+			}
+		})
 	}
 }
 
 func TestBranchProtectionItem_FallbackOnlyOn403(t *testing.T) {
 	tests := []struct {
-		name           string
-		visibility     string
-		rulesetStatus  int
-		rulesetBody    string
-		classicStatus  int
-		wantErr        bool
+		name            string
+		visibility      string
+		rulesetStatus   int
+		rulesetBody     string
+		classicStatus   int
+		wantErr         bool
 		wantErrContains string
-		wantClassic    bool // true if classic API should be called
+		wantClassic     bool // true if classic API should be called
 	}{
 		{
-			name: "403 private falls back to classic",
-			visibility: "private",
+			name:          "403 private falls back to classic",
+			visibility:    "private",
 			rulesetStatus: http.StatusForbidden,
-			rulesetBody: `{"message":"Forbidden"}`,
+			rulesetBody:   `{"message":"Forbidden"}`,
 			classicStatus: http.StatusOK,
-			wantErr: false,
-			wantClassic: true,
+			wantErr:       false,
+			wantClassic:   true,
 		},
 		{
-			name: "403 public returns error",
-			visibility: "public",
-			rulesetStatus: http.StatusForbidden,
-			rulesetBody: `{"message":"Forbidden"}`,
-			wantErr: true,
+			name:            "403 public returns error",
+			visibility:      "public",
+			rulesetStatus:   http.StatusForbidden,
+			rulesetBody:     `{"message":"Forbidden"}`,
+			wantErr:         true,
 			wantErrContains: "403",
-			wantClassic: false,
+			wantClassic:     false,
 		},
 		{
-			name: "422 private returns error no fallback",
-			visibility: "private",
-			rulesetStatus: http.StatusUnprocessableEntity,
-			rulesetBody: `{"message":"validation failed"}`,
-			wantErr: true,
+			name:            "422 private returns error no fallback",
+			visibility:      "private",
+			rulesetStatus:   http.StatusUnprocessableEntity,
+			rulesetBody:     `{"message":"validation failed"}`,
+			wantErr:         true,
 			wantErrContains: "422",
-			wantClassic: false,
+			wantClassic:     false,
 		},
 		{
-			name: "404 private returns error no fallback",
-			visibility: "private",
-			rulesetStatus: http.StatusNotFound,
-			rulesetBody: `{"message":"not found"}`,
-			wantErr: true,
+			name:            "404 private returns error no fallback",
+			visibility:      "private",
+			rulesetStatus:   http.StatusNotFound,
+			rulesetBody:     `{"message":"not found"}`,
+			wantErr:         true,
 			wantErrContains: "404",
-			wantClassic: false,
+			wantClassic:     false,
 		},
 		{
-			name: "500 private returns error no fallback",
-			visibility: "private",
-			rulesetStatus: http.StatusInternalServerError,
-			rulesetBody: `{"message":"internal error"}`,
-			wantErr: true,
+			name:            "500 private returns error no fallback",
+			visibility:      "private",
+			rulesetStatus:   http.StatusInternalServerError,
+			rulesetBody:     `{"message":"internal error"}`,
+			wantErr:         true,
 			wantErrContains: "500",
-			wantClassic: false,
+			wantClassic:     false,
 		},
 		{
-			name: "201 private ruleset succeeds no fallback",
-			visibility: "private",
+			name:          "201 private ruleset succeeds no fallback",
+			visibility:    "private",
 			rulesetStatus: http.StatusCreated,
-			rulesetBody: `{"id":1}`,
-			wantErr: false,
-			wantClassic: false,
+			rulesetBody:   `{"id":1}`,
+			wantErr:       false,
+			wantClassic:   false,
 		},
 	}
 
@@ -432,30 +456,12 @@ func TestApplyItems_WorkflowLocked_Skipped(t *testing.T) {
 			Name:    ".github/CODEOWNERS",
 			Action:  wizard.ActionCreate,
 			Content: []byte("me"),
-			Apply: func() error { return nil },
+			Apply:   func() error { return nil },
 		},
 	}
 	err := applyItems(c, "owner", "repo", "main", items, false, false)
 	if err != nil {
 		t.Errorf("expected no error, got: %v", err)
-	}
-}
-
-func TestApplyItems_NonFileFatalError(t *testing.T) {
-	// Non-optional non-file item that fails should print error but not return fatal.
-	// (applyItems does not return errors for individual item failures — it continues.)
-	items := []wizard.Item{
-		{
-			Name:     "General settings (auto-delete branches)",
-			Action:   wizard.ActionCreate,
-			Optional: false,
-			Apply:    func() error { return fmt.Errorf("API error") },
-		},
-	}
-	c := github.NewClient("", false)
-	err := applyItems(c, "owner", "repo", "main", items, false, false)
-	if err != nil {
-		t.Errorf("expected no error return (non-fatal item failure), got: %v", err)
 	}
 }
 
