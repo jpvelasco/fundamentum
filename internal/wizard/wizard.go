@@ -41,22 +41,37 @@ func ConfirmDefaults(r io.Reader, w io.Writer) bool {
 	return input == "" || strings.EqualFold(input, "y")
 }
 
+// ShouldSkipOrDryRun prints and reports whether item should be skipped rather
+// than applied — either because it already exists (IsSkip) or because dryRun
+// is set (prints the dry-run label instead of applying).
+func ShouldSkipOrDryRun(item Item, dryRun bool) bool {
+	if item.IsSkip() {
+		fmt.Printf("  %-45s  skipped\n", item.Name)
+		return true
+	}
+	if dryRun {
+		fmt.Printf("  %-45s  %s\n", item.Name, item.DryRunLabel())
+		return true
+	}
+	return false
+}
+
+// applyAndPrint runs item.Apply and prints the outcome.
+func applyAndPrint(item Item) {
+	if err := item.Apply(); err != nil {
+		PrintItemError(item, err)
+		return
+	}
+	fmt.Printf("  %-45s  ✓\n", item.Name)
+}
+
 // RunItems applies each item's Apply func, printing status as it goes.
 func RunItems(items []Item, dryRun bool) error {
 	for _, item := range items {
-		if item.IsSkip() {
-			fmt.Printf("  %-45s  skipped\n", item.Name)
+		if ShouldSkipOrDryRun(item, dryRun) {
 			continue
 		}
-		if dryRun {
-			fmt.Printf("  %-45s  %s\n", item.Name, item.DryRunLabel())
-			continue
-		}
-		if err := item.Apply(); err != nil {
-			printItemError(item, err)
-			continue
-		}
-		fmt.Printf("  %-45s  ✓\n", item.Name)
+		applyAndPrint(item)
 	}
 	return nil
 }
@@ -81,18 +96,14 @@ func RunInteractive(items []Item, dryRun bool, r io.Reader) error {
 			fmt.Printf("  %-45s  %s\n", item.Name, item.DryRunLabel())
 			continue
 		}
-		if err := item.Apply(); err != nil {
-			printItemError(item, err)
-			continue
-		}
-		fmt.Printf("  %-45s  ✓\n", item.Name)
+		applyAndPrint(item)
 	}
 	return nil
 }
 
-// printItemError formats an error for a wizard item.
+// PrintItemError formats an error for a wizard item to stdout.
 // Optional items show a warning; required items show an error.
-func printItemError(item Item, err error) {
+func PrintItemError(item Item, err error) {
 	if item.Optional {
 		fmt.Printf("  %-45s  ⚠ requires GitHub Pro or public repo\n", item.Name)
 	} else {
