@@ -2,13 +2,12 @@ package github
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
 func TestApplyGeneralSettings(t *testing.T) {
 	called := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPatch && r.URL.Path == "/repos/owner/repo" {
 			called = true
 		}
@@ -16,8 +15,6 @@ func TestApplyGeneralSettings(t *testing.T) {
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
 	if err := c.ApplyGeneralSettings("owner", "repo"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

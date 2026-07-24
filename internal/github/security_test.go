@@ -3,7 +3,6 @@ package github
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -28,14 +27,12 @@ func TestEnableSecurity(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			paths := map[string]bool{}
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				paths[r.Method+":"+r.URL.Path] = true
 				w.WriteHeader(http.StatusOK)
 				_ = json.NewEncoder(w).Encode(map[string]any{})
 			}))
 			defer srv.Close()
-
-			c := NewClient("t", false).WithBaseURL(srv.URL)
 			if err := c.EnableSecurity("owner", "repo", tt.visibility); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -108,7 +105,7 @@ func TestEnableSecurity_Errors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(tt.handler)
+			srv, _ := newTestServer(tt.handler)
 			defer srv.Close()
 
 			var c *Client

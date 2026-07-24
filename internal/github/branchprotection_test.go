@@ -3,7 +3,6 @@ package github
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
@@ -26,15 +25,13 @@ func TestClassicProtectionExists(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/repos/owner/repo/branches/main/protection" {
 					t.Errorf("unexpected path: %s", r.URL.Path)
 				}
 				w.WriteHeader(tt.status)
 			}))
 			defer srv.Close()
-
-			c := NewClient("t", false).WithBaseURL(srv.URL)
 			exists, err := c.ClassicProtectionExists("owner", "repo", "main")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -56,7 +53,7 @@ func TestClassicProtectionExists_NetworkError(t *testing.T) {
 
 func TestApplyClassicBranchProtection(t *testing.T) {
 	called := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut && r.URL.Path == "/repos/owner/repo/branches/main/protection" {
 			called = true
 		}
@@ -64,8 +61,6 @@ func TestApplyClassicBranchProtection(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{})
 	}))
 	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
 	if err := c.ApplyClassicBranchProtection("owner", "repo", "main", DefaultStatusChecks, BranchProtectionOptions{Solo: true}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -84,15 +79,13 @@ func TestApplyClassicBranchProtection_NetworkError(t *testing.T) {
 
 func TestRemoveClassicBranchProtection(t *testing.T) {
 	called := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete && r.URL.Path == "/repos/owner/repo/branches/main/protection" {
 			called = true
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
 	if err := c.RemoveClassicBranchProtection("owner", "repo", "main"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -3,13 +3,12 @@ package github
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
 func TestCreateRepo(t *testing.T) {
 	called := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/user/repos" {
 			called = true
 		}
@@ -18,8 +17,6 @@ func TestCreateRepo(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"full_name": "owner/repo"})
 	}))
 	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
 	if err := c.CreateRepo("repo", false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -57,7 +54,7 @@ func TestGetRepoVisibility(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodGet {
 					t.Errorf("expected GET, got %s", r.Method)
 				}
@@ -73,8 +70,6 @@ func TestGetRepoVisibility(t *testing.T) {
 				}
 			}))
 			defer srv.Close()
-
-			c := NewClient("t", false).WithBaseURL(srv.URL)
 			got, err := c.GetRepoVisibility("owner", "repo")
 			if tt.wantErr {
 				if err == nil {
