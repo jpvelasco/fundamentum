@@ -54,12 +54,7 @@ func TestExecute_SubcommandHelp(t *testing.T) {
 
 func TestExecute_FlagOrder(t *testing.T) {
 	// Verify flags are reset properly between runs
-	t.Cleanup(func() {
-		globals.DryRun = false
-		globals.Verbose = false
-		globals.Token = ""
-		globals.NoOverwrite = false
-	})
+	resetRootGlobals(t)
 
 	cmd := newRootCmd()
 	cmd.SetArgs([]string{"--dry-run", "--verbose", "--token", "abc123", "--no-overwrite", "--help"})
