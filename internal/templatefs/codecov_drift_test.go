@@ -131,6 +131,11 @@ func TestDiffCodecovFunctional_ReportsEachField(t *testing.T) {
 		CoverageFiles: "coverage.out", Coverprofile: "coverage.out",
 	}
 	diffs := DiffCodecovFunctional(live, tpl)
+	// Sanity floor: the fully-mismatched template should surface at least the
+	// distinct fields listed below (guards against Diff silently collapsing).
+	if len(diffs) < 12 {
+		t.Fatalf("expected >=12 drifts, got %d: %v", len(diffs), diffs)
+	}
 	joined := strings.Join(diffs, "\n")
 	for _, need := range []string{
 		"id-token: write",
