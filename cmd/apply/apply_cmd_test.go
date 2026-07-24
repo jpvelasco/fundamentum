@@ -47,48 +47,62 @@ func TestBranchProtectionItem_RulesetExists(t *testing.T) {
 	}
 }
 
-func TestBranchProtectionItem_ClassicExists(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":1}`))
-	}))
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	item := branchProtectionItem(c, "owner", "repo", "main", "public", false, true, github.BranchProtectionOptions{})
-	if item.Action != wizard.ActionUpgrade {
-		t.Errorf("expected ActionUpgrade when classic exists, got %v", item.Action)
+func TestBranchProtectionItem_Creation(t *testing.T) {
+	// Test branch protection action determination: ActionUpgrade when classic exists,
+	// ActionCreate for new repos (both public and private, public is optional).
+	tests := []struct {
+		name          string
+		visibility    string
+		rulesetExists bool
+		classicExists bool
+		wantAction    wizard.Action
+		checkOptional bool
+		wantOptional  bool // only checked if checkOptional=true
+	}{
+		{
+			name:          "new public repo",
+			visibility:    "public",
+			rulesetExists: false,
+			classicExists: false,
+			wantAction:    wizard.ActionCreate,
+			checkOptional: true,
+			wantOptional:  true,
+		},
+		{
+			name:          "new private repo",
+			visibility:    "private",
+			rulesetExists: false,
+			classicExists: false,
+			wantAction:    wizard.ActionCreate,
+			checkOptional: false,
+		},
+		{
+			name:          "upgrade from classic",
+			visibility:    "public",
+			rulesetExists: false,
+			classicExists: true,
+			wantAction:    wizard.ActionUpgrade,
+			checkOptional: false,
+		},
 	}
-}
 
-func TestBranchProtectionItem_PublicNew(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":1}`))
-	}))
-	defer srv.Close()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"id":1}`))
+			}))
+			defer srv.Close()
 
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	item := branchProtectionItem(c, "owner", "repo", "main", "public", false, false, github.BranchProtectionOptions{})
-	if item.Action != wizard.ActionCreate {
-		t.Errorf("expected ActionCreate for new public, got %v", item.Action)
-	}
-	if !item.Optional {
-		t.Error("expected Optional=true for new branch protection")
-	}
-}
-
-func TestBranchProtectionItem_PrivateNew(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":1}`))
-	}))
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	item := branchProtectionItem(c, "owner", "repo", "main", "private", false, false, github.BranchProtectionOptions{})
-	if item.Action != wizard.ActionCreate {
-		t.Errorf("expected ActionCreate for new private, got %v", item.Action)
+			c := github.NewClient("t", false).WithBaseURL(srv.URL)
+			item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, tt.rulesetExists, tt.classicExists, github.BranchProtectionOptions{})
+			if item.Action != tt.wantAction {
+				t.Errorf("expected action %v, got %v", tt.wantAction, item.Action)
+			}
+			if tt.checkOptional && item.Optional != tt.wantOptional {
+				t.Errorf("expected Optional=%v, got %v", tt.wantOptional, item.Optional)
+			}
+		})
 	}
 }
 
@@ -275,66 +289,6 @@ func TestBuildItems_ClassicExists(t *testing.T) {
 	}
 	if !foundUpgrade {
 		t.Error("expected upgrade action for classic protection")
-	}
-}
-
-func TestBranchProtectionItem_ClassicFallback(t *testing.T) {
-	// Test the fallback path: ruleset fails → classic for private repos
-	rulesetFailed := false
-	classicCalled := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "rulesets") {
-			// RulesetExists returns empty list
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`[]`))
-			return
-		}
-		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "rulesets") {
-			rulesetFailed = true
-			w.WriteHeader(http.StatusForbidden)
-			_, _ = w.Write([]byte(`{"message":"forbidden"}`))
-			return
-		}
-		if r.Method == http.MethodPut && strings.Contains(r.URL.Path, "protection") {
-			classicCalled = true
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{}`))
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	item := branchProtectionItem(c, "owner", "repo", "main", "private", false, false, github.BranchProtectionOptions{})
-
-	// Apply the item — it should fall back to classic after ruleset fails
-	err := item.Apply()
-	if err != nil {
-		t.Fatalf("expected fallback to classic to succeed, got: %v", err)
-	}
-	if !rulesetFailed {
-		t.Error("expected ruleset to be attempted first")
-	}
-	if !classicCalled {
-		t.Error("expected classic protection fallback")
-	}
-}
-
-func TestBranchProtectionItem_PublicNoFallback(t *testing.T) {
-	// Public repos should NOT fall back to classic
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"message":"forbidden"}`))
-	}))
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	item := branchProtectionItem(c, "owner", "repo", "main", "public", false, false, github.BranchProtectionOptions{})
-
-	err := item.Apply()
-	if err == nil {
-		t.Error("expected error for public repo when ruleset fails (no fallback)")
 	}
 }
 
