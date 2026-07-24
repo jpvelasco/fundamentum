@@ -115,6 +115,17 @@ func TestParseCodecovFunctional_OIDCExpression(t *testing.T) {
 	if !ParseCodecovFunctional(literal).UseOIDC {
 		t.Fatal("use_oidc: true should count as enabled")
 	}
+	// Only literal true or the exact XOR expression count — an arbitrary
+	// expression must NOT satisfy the gate (would silently disable OIDC).
+	for _, bad := range []string{
+		"\n    with:\n      use_oidc: ${{ false }}\n",
+		"\n    with:\n      use_oidc: ${{ secrets.CODECOV_TOKEN != '' }}\n",
+		"\n    with:\n      use_oidc: false\n",
+	} {
+		if ParseCodecovFunctional(bad).UseOIDC {
+			t.Errorf("unsupported use_oidc form should not count as enabled: %q", bad)
+		}
+	}
 }
 
 func TestDiffCodecovFunctional_Parity(t *testing.T) {

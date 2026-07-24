@@ -31,8 +31,12 @@ type CodecovFunctional struct {
 }
 
 var (
-	reIDTokenWrite    = regexp.MustCompile(`(?m)^\s*id-token:\s*write\s*$`)
-	reUseOIDC         = regexp.MustCompile(`(?m)^\s*use_oidc:\s*(true|\$\{\{.*\}\})\s*$`)
+	reIDTokenWrite = regexp.MustCompile(`(?m)^\s*id-token:\s*write\s*$`)
+	// use_oidc must be either literal true or the exact XOR-auth expression
+	// ${{ secrets.CODECOV_TOKEN == '' }}. A bare ${{ ... }} blob is NOT accepted:
+	// expressions like ${{ false }} or the inverted token check would silently
+	// disable OIDC while still passing the drift gate.
+	reUseOIDC = regexp.MustCompile(`(?m)^\s*use_oidc:\s*(true|\$\{\{\s*secrets\.CODECOV_TOKEN\s*==\s*''\s*\}\})\s*$`)
 	reUsePyPI         = regexp.MustCompile(`(?m)^\s*use_pypi:\s*true\s*$`)
 	reFailCIIfError   = regexp.MustCompile(`(?m)^\s*fail_ci_if_error:\s*true\s*$`)
 	reCoverageFiles   = regexp.MustCompile(`(?m)^\s*files:\s*(\S+)\s*$`)

@@ -143,11 +143,10 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Run gosec
-        # Exclusions mirror the .golangci.yml gosec rationale (adjust per project):
-        #   G204 command execution, G304 file inclusion via variable,
-        #   G702/G703 command-injection / path-traversal taint analysis — noisy
-        #   for CLI subprocess calls and config/state file reads.
-        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.27.1 -exclude=G204,G304,G702,G703 ./...
+        # Keep this -exclude set in sync with .golangci.yml gosec.excludes
+        # (single source of truth) so gosec and golangci suppress the same IDs.
+        # Adjust the set to match the target repo's .golangci.yml.
+        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.27.1 -exclude=G104,G204,G304,G704 ./...
 
   trivy:
     name: Trivy
