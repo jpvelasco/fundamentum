@@ -39,7 +39,10 @@ var (
 	reUseOIDC = regexp.MustCompile(`(?m)^\s*use_oidc:\s*(true|\$\{\{\s*secrets\.CODECOV_TOKEN\s*==\s*''\s*\}\})\s*$`)
 	reUsePyPI         = regexp.MustCompile(`(?m)^\s*use_pypi:\s*true\s*$`)
 	reFailCIIfError   = regexp.MustCompile(`(?m)^\s*fail_ci_if_error:\s*true\s*$`)
-	reCoverageFiles   = regexp.MustCompile(`(?m)^\s*files:\s*(\S+)\s*$`)
+	// Pin to the coverage filename specifically so a two-upload workflow
+	// (coverage + test_results) can't have CoverageFiles capture ./junit.xml
+	// if the upload steps are ever reordered.
+	reCoverageFiles   = regexp.MustCompile(`(?m)^\s*files:\s*(\./coverage\.out|coverage\.out|coverage)\s*$`)
 	reCoverprofile    = regexp.MustCompile(`-coverprofile=(\S+)`)
 	reCovermodeAtomic = regexp.MustCompile(`-covermode=atomic`)
 	reOverrideCommit  = regexp.MustCompile(`(?m)^\s*override_commit:\s*\S`)

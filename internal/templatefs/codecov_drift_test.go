@@ -138,14 +138,14 @@ func TestDiffCodecovFunctional_Parity(t *testing.T) {
 
 func TestDiffCodecovFunctional_ReportsEachField(t *testing.T) {
 	live := fullParity
-	tpl := CodecovFunctional{
-		CoverageFiles: "coverage.out", Coverprofile: "coverage.out",
-	}
+	// Zero-value tpl differs from live on every field (including coverprofile),
+	// so each field's diff string must appear.
+	tpl := CodecovFunctional{}
 	diffs := DiffCodecovFunctional(live, tpl)
 	// Sanity floor: the fully-mismatched template should surface at least the
 	// distinct fields listed below (guards against Diff silently collapsing).
-	if len(diffs) < 12 {
-		t.Fatalf("expected >=12 drifts, got %d: %v", len(diffs), diffs)
+	if len(diffs) < 13 {
+		t.Fatalf("expected >=13 drifts, got %d: %v", len(diffs), diffs)
 	}
 	joined := strings.Join(diffs, "\n")
 	for _, need := range []string{
@@ -154,6 +154,7 @@ func TestDiffCodecovFunctional_ReportsEachField(t *testing.T) {
 		"use_pypi",
 		"fail_ci_if_error",
 		"files",
+		"coverprofile",
 		"covermode=atomic",
 		"override_commit",
 		"override_branch",
