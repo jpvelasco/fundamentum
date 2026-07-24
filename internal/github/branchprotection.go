@@ -3,7 +3,6 @@ package github
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 )
@@ -53,11 +52,7 @@ func (c *Client) ApplyClassicBranchProtection(owner, repo, branch string, status
 		return fmt.Errorf("apply classic branch protection: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("apply classic branch protection: %s: %s", resp.Status, b)
-	}
-	return nil
+	return expectStatus("apply classic branch protection", resp, http.StatusOK)
 }
 
 // RemoveClassicBranchProtection removes classic branch protection.
@@ -67,9 +62,5 @@ func (c *Client) RemoveClassicBranchProtection(owner, repo, branch string) error
 		return fmt.Errorf("remove classic branch protection: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusNoContent {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("remove classic branch protection: %s: %s", resp.Status, b)
-	}
-	return nil
+	return expectStatus("remove classic branch protection", resp, http.StatusNoContent)
 }

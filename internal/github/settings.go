@@ -3,7 +3,6 @@ package github
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 )
 
@@ -17,9 +16,8 @@ func (c *Client) ApplyGeneralSettings(owner, repo string) error {
 		return fmt.Errorf("apply general settings: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("apply general settings: %s: %s", resp.Status, b)
+	if err := expectStatus("apply general settings", resp, http.StatusOK); err != nil {
+		return err
 	}
 	return nil
 }

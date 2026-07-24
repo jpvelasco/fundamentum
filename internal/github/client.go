@@ -3,11 +3,14 @@ package github
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -109,4 +112,117 @@ func (c *Client) post(path string, body any) (*http.Response, error) {
 
 func (c *Client) put(path string) (*http.Response, error) {
 	return c.do(http.MethodPut, path, nil)
+}
+
+// expectStatus returns a wrapped error naming action if resp's status code is
+// not one of want. Does not close resp.Body — callers still own that.
+func expectStatus(action string, resp *http.Response, want ...int) error {
+	if slices.Contains(want, resp.StatusCode) {
+		return nil
+	}
+	b, _ := io.ReadAll(resp.Body)
+	return fmt.Errorf("%s: %s: %s", action, resp.Status, b)
+}
+
+// existingContentsFile is the subset of the Contents API GET response used to
+// detect whether new content differs from what's already committed.
+type existingContentsFile struct {
+	Content string `json:"content"`
+	SHA     string `json:"sha"`
+}
+
+// decodeExistingContentsFile reads and parses a Contents API GET response body.
+func decodeExistingContentsFile(resp *http.Response, path string) (existingContentsFile, error) {
+	var existing existingContentsFile
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return existing, fmt.Errorf("read existing file %s: %w", path, err)
+	}
+	if err := json.Unmarshal(raw, &existing); err != nil {
+		return existing, fmt.Errorf("parse existing file %s: %w", path, err)
+	}
+	return existing, nil
+}
+
+// contentsUnchanged reports whether existingContent (base64, possibly
+// newline-wrapped by the GitHub API) matches newContent once re-encoded.
+func contentsUnchanged(existingContent string, newContent []byte) bool {
+	existingClean := strings.ReplaceAll(existingContent, "\n", "")
+	newEncoded := base64.StdEncoding.EncodeToString(newContent)
+	return existingClean == newEncoded
+}
+
+// fileAction indicates whether a file needs to be created, updated, or left alone.
+type fileAction int
+
+const (
+	fileActionCreate fileAction = iota
+	fileActionUpdate
+	fileActionSkip
+)
+
+// checkExistingFile GETs getPath and determines whether content differs from
+// what's already committed at that path. sha is the existing file's SHA
+// (needed for the update request), empty when the file doesn't exist yet.
+func (c *Client) checkExistingFile(getPath, path string, content []byte) (action fileAction, sha string, err error) {
+	resp, err := c.get(getPath)
+	if err != nil {
+		return fileActionSkip, "", fmt.Errorf("check file %s: %w", path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		existing, err := decodeExistingContentsFile(resp, path)
+		if err != nil {
+			return fileActionSkip, "", err
+		}
+		if contentsUnchanged(existing.Content, content) {
+			return fileActionSkip, "", nil
+		}
+		return fileActionUpdate, existing.SHA, nil
+	case http.StatusNotFound:
+		return fileActionCreate, "", nil
+	default:
+		return fileActionSkip, "", expectStatus("check file "+path, resp, http.StatusOK, http.StatusNotFound)
+	}
+}
+
+// upsertBody builds the Contents API request body for creating or updating
+// path with content. sha (required for updates) is empty for a create.
+func upsertBody(path string, content []byte, sha string, wasUpdate bool) map[string]any {
+	body := map[string]any{
+		"message": "chore: add " + path,
+		"content": base64.StdEncoding.EncodeToString(content),
+	}
+	if wasUpdate {
+		body["sha"] = sha
+		body["message"] = "chore: update " + path
+	}
+	return body
+}
+
+// putFileContents PUTs body to putPath and interprets the result as an
+// upsert outcome ("created"/"updated"/"skipped"), given wasUpdate (whether
+// the caller determined this is an update rather than a create) and a
+// describe function for error messages (e.g. "upsert file %s" or
+// "upsert file %s on %s").
+func (c *Client) putFileContents(putPath string, body map[string]any, wasUpdate bool, describe func() string) (string, error) {
+	putResp, err := c.do(http.MethodPut, putPath, body)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", describe(), err)
+	}
+	defer func() { _ = putResp.Body.Close() }()
+
+	// GitHub Actions locks workflow files — PUT returns 404 when trying to
+	// overwrite an existing workflow via the Contents API.
+	if putResp.StatusCode == http.StatusNotFound && wasUpdate {
+		return "skipped", fmt.Errorf("%s: %w", describe(), ErrWorkflowLocked)
+	}
+	if err := expectStatus(describe(), putResp, http.StatusCreated, http.StatusOK); err != nil {
+		return "", err
+	}
+	if wasUpdate {
+		return "updated", nil
+	}
+	return "created", nil
 }

@@ -1,7 +1,6 @@
 package github
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,70 +28,7 @@ func IsWorkflowLocked(err error) bool {
 
 // UpsertFileOnBranch creates or updates a file on a specific branch via the Contents API.
 func (c *Client) UpsertFileOnBranch(owner, repo, branch, path string, content []byte) (string, error) {
-	apiPath := fmt.Sprintf("/repos/%s/%s/contents/%s?ref=%s",
-		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(path), url.PathEscape(branch))
-
-	resp, err := c.get(apiPath)
-	if err != nil {
-		return "", fmt.Errorf("check file %s on %s: %w", path, branch, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body := map[string]any{
-		"message": "chore: add " + path,
-		"content": base64.StdEncoding.EncodeToString(content),
-		"branch":  branch,
-	}
-
-	var action string
-	switch resp.StatusCode {
-	case http.StatusOK:
-		var existing struct {
-			Content string `json:"content"`
-			SHA     string `json:"sha"`
-		}
-		raw, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return "", fmt.Errorf("read existing file %s on %s: %w", path, branch, err)
-		}
-		if err := json.Unmarshal(raw, &existing); err != nil {
-			return "", fmt.Errorf("parse existing file %s on %s: %w", path, branch, err)
-		}
-		existingClean := strings.ReplaceAll(existing.Content, "\n", "")
-		newEncoded := base64.StdEncoding.EncodeToString(content)
-		if existingClean == newEncoded {
-			return "skipped", nil
-		}
-		body["sha"] = existing.SHA
-		body["message"] = "chore: update " + path
-		action = "updated"
-
-	case http.StatusNotFound:
-		action = "created"
-
-	default:
-		b, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("check file %s on %s: %s: %s", path, branch, resp.Status, b)
-	}
-
-	// PUT doesn't support ?ref= — use the branch in the request body instead.
-	putPath := contentsPath(owner, repo, path)
-	putResp, err := c.do(http.MethodPut, putPath, body)
-	if err != nil {
-		return "", fmt.Errorf("upsert file %s on %s: %w", path, branch, err)
-	}
-	defer func() { _ = putResp.Body.Close() }()
-
-	// GitHub Actions locks workflow files — PUT returns 404 when trying to
-	// overwrite an existing workflow via the Contents API.
-	if putResp.StatusCode == http.StatusNotFound && action == "updated" {
-		return "skipped", fmt.Errorf("upsert file %s on %s: %w", path, branch, ErrWorkflowLocked)
-	}
-	if putResp.StatusCode != http.StatusCreated && putResp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(putResp.Body)
-		return "", fmt.Errorf("upsert file %s on %s: %s: %s", path, branch, putResp.Status, b)
-	}
-	return action, nil
+	return c.upsertFile(owner, repo, branch, path, content)
 }
 
 // CreatePRBranch creates a new branch from the default branch.
@@ -194,13 +130,18 @@ func (e *HTTPError) Error() string {
 	return e.Msg
 }
 
+// hasStatusCode reports whether err wraps an HTTPError with the given status code.
+func hasStatusCode(err error, code int) bool {
+	var he *HTTPError
+	return errors.As(err, &he) && he.StatusCode == code
+}
+
 // IsConflict409 returns true if the error is a 409 from branch protection rules.
 func IsConflict409(err error) bool {
 	if err == nil {
 		return false
 	}
-	var he *HTTPError
-	if errors.As(err, &he) && he.StatusCode == http.StatusConflict {
+	if hasStatusCode(err, http.StatusConflict) {
 		return true
 	}
 	msg := err.Error()
@@ -213,8 +154,7 @@ func IsForbidden403(err error) bool {
 	if err == nil {
 		return false
 	}
-	var he *HTTPError
-	if errors.As(err, &he) && he.StatusCode == http.StatusForbidden {
+	if hasStatusCode(err, http.StatusForbidden) {
 		return true
 	}
 	return strings.Contains(err.Error(), "403")
