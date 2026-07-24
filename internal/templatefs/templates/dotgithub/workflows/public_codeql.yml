@@ -20,14 +20,15 @@ jobs:
       fail-fast: false
       matrix:
         # actions covers workflows; go uses autobuild so CodeQL analyzes compiled
-        # code rather than source-only extraction; javascript-typescript covers any
-        # npm/release shim. Drop languages this repo does not use.
+        # code rather than source-only extraction. Add languages this repo uses.
         include:
           - language: actions
           - language: go
             build-mode: autobuild
-          - language: javascript-typescript
-            build-mode: none
+          # Uncomment when this repo contains JavaScript or TypeScript (e.g. an
+          # npm/release shim). Leaving it on with no JS/TS makes CodeQL error.
+          # - language: javascript-typescript
+          #   build-mode: none
 
     steps:
       - name: Checkout repository
