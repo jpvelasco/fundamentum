@@ -63,6 +63,19 @@ func newFileItems(names []string, content [][]byte, applies []func() error) []wi
 	return items
 }
 
+// runApplyItemsExpectNoError closes srv when done, applies items against a
+// client pointed at it, and fails the test if applyItems returns an error.
+// Shared by the many TestApplyItems_* cases that only differ in server and
+// item setup, not in how the result is checked.
+func runApplyItemsExpectNoError(t *testing.T, srv *httptest.Server, items []wizard.Item, dryRun, viaPR bool) {
+	t.Helper()
+	defer srv.Close()
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+	if err := applyItems(c, "owner", "repo", "main", items, dryRun, viaPR); err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+}
+
 func TestBuildItems(t *testing.T) {
 	// Mock server that returns file not found for all files
 	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -124,116 +137,63 @@ func TestActionFromExists(t *testing.T) {
 
 func TestApplyItems_No409(t *testing.T) {
 	// All files apply directly without 409 — no PR created.
-	srv := newSimpleFileServer()
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 	items := newFileItems(
 		[]string{".github/CODEOWNERS", ".github/SECURITY.md"},
 		[][]byte{[]byte("me"), []byte("sec")},
 		[]func() error{func() error { return nil }, func() error { return nil }},
 	)
-	err := applyItems(c, "owner", "repo", "main", items, false, false)
-	if err != nil {
-		t.Errorf("expected no error, got: %v", err)
-	}
+	runApplyItemsExpectNoError(t, newSimpleFileServer(), items, false, false)
+}
+
+// err409 is a stand-in Apply for an item that triggers PR-mode fallback.
+func err409() error {
+	return fmt.Errorf("409 Conflict: Repository rule violations found — GH013")
 }
 
 func TestApplyItems_FirstFile409_FallbackToPR(t *testing.T) {
 	// First file returns 409 — triggers fallback. Remaining files collected for PR.
 	// The 409 comes from the item.Apply() closure, not the server.
 	// Server only handles PR flow: CreatePRBranch → UpsertFileOnBranch × N → CreatePullRequest.
-	srv := newPRMockServer()
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	// First item.Apply() returns 409, second item.Apply() is never called (fallback collects it)
-	items := []wizard.Item{
-		{
-			Name:    ".github/CODEOWNERS",
-			Action:  wizard.ActionCreate,
-			Content: []byte("me"),
-			Apply: func() error {
-				return fmt.Errorf("409 Conflict: Repository rule violations found — GH013")
-			},
-		},
-		{
-			Name:    ".github/SECURITY.md",
-			Action:  wizard.ActionCreate,
-			Content: []byte("sec"),
-			Apply:   func() error { return nil },
-		},
-	}
-	err := applyItems(c, "owner", "repo", "main", items, false, false)
-	if err != nil {
-		t.Errorf("expected no error, got: %v", err)
-	}
+	// First item.Apply() returns 409, second item.Apply() is never called (fallback collects it).
+	items := newFileItems(
+		[]string{".github/CODEOWNERS", ".github/SECURITY.md"},
+		[][]byte{[]byte("me"), []byte("sec")},
+		[]func() error{err409, func() error { return nil }},
+	)
+	runApplyItemsExpectNoError(t, newPRMockServer(), items, false, false)
 }
 
 func TestApplyItems_All409_AllToPR(t *testing.T) {
 	// All files return 409 — first triggers fallback, rest collected directly via fallback flag.
-	srv := newPRMockServer()
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	// Both item.Apply() closures return 409 — only first is actually called (second collected via fallback)
-	items := []wizard.Item{
-		{
-			Name:    ".github/CODEOWNERS",
-			Action:  wizard.ActionCreate,
-			Content: []byte("me"),
-			Apply: func() error {
-				return fmt.Errorf("409 Conflict: Repository rule violations found — GH013")
-			},
-		},
-		{
-			Name:    ".github/SECURITY.md",
-			Action:  wizard.ActionCreate,
-			Content: []byte("sec"),
-			Apply: func() error {
-				return fmt.Errorf("409 Conflict: Repository rule violations found — GH013")
-			},
-		},
-	}
-	err := applyItems(c, "owner", "repo", "main", items, false, false)
-	if err != nil {
-		t.Errorf("expected no error, got: %v", err)
-	}
+	// Both item.Apply() closures return 409 — only first is actually called (second collected via fallback).
+	items := newFileItems(
+		[]string{".github/CODEOWNERS", ".github/SECURITY.md"},
+		[][]byte{[]byte("me"), []byte("sec")},
+		[]func() error{err409, err409},
+	)
+	runApplyItemsExpectNoError(t, newPRMockServer(), items, false, false)
 }
 
 func TestApplyItems_ViaPRFromStart(t *testing.T) {
 	// viaPR=true — all files go directly to PR without trying direct apply.
-	srv := newPRMockServer()
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 	items := newFileItems(
 		[]string{".github/CODEOWNERS", ".github/SECURITY.md"},
 		[][]byte{[]byte("me"), []byte("sec")},
 		[]func() error{func() error { return nil }, func() error { return nil }},
 	)
-	err := applyItems(c, "owner", "repo", "main", items, false, true)
-	if err != nil {
-		t.Errorf("expected no error, got: %v", err)
-	}
+	runApplyItemsExpectNoError(t, newPRMockServer(), items, false, true)
 }
 
 func TestApplyItems_NonFileItemsApplyDirectly(t *testing.T) {
 	// Non-file items (no Content) apply directly even when fallback is triggered.
 	// First file 409 → fallback → non-file items still apply directly after PR batch.
 	nonFileApplied := false
-	srv := newPRMockServer()
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 	items := []wizard.Item{
 		{
 			Name:    ".github/CODEOWNERS",
 			Action:  wizard.ActionCreate,
 			Content: []byte("me"),
-			Apply: func() error {
-				return fmt.Errorf("409 Conflict: Repository rule violations found — GH013")
-			},
+			Apply:   err409,
 		},
 		{
 			Name:   "General settings (auto-delete branches)",
@@ -244,10 +204,7 @@ func TestApplyItems_NonFileItemsApplyDirectly(t *testing.T) {
 			},
 		},
 	}
-	err := applyItems(c, "owner", "repo", "main", items, false, false)
-	if err != nil {
-		t.Errorf("expected no error, got: %v", err)
-	}
+	runApplyItemsExpectNoError(t, newPRMockServer(), items, false, false)
 	if !nonFileApplied {
 		t.Error("expected non-file item to be applied directly after PR batch")
 	}
@@ -452,10 +409,6 @@ func TestBranchProtectionItem_FallbackOnlyOn403(t *testing.T) {
 
 func TestApplyItems_WorkflowLocked_Skipped(t *testing.T) {
 	// Workflow lock error should be treated as skip and processing continues.
-	srv := newSimpleFileServer()
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 	items := []wizard.Item{
 		{
 			Name:    ".github/workflows/ci.yml",
@@ -472,20 +425,13 @@ func TestApplyItems_WorkflowLocked_Skipped(t *testing.T) {
 			Apply:   func() error { return nil },
 		},
 	}
-	err := applyItems(c, "owner", "repo", "main", items, false, false)
-	if err != nil {
-		t.Errorf("expected no error, got: %v", err)
-	}
+	runApplyItemsExpectNoError(t, newSimpleFileServer(), items, false, false)
 }
 
 func TestApplyItems_MixedFileAndNonFile(t *testing.T) {
 	// Mix of file items and non-file items: files apply directly, non-files defer.
 	fileApplied := false
 	nonFileApplied := false
-	srv := newSimpleFileServer()
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 	items := []wizard.Item{
 		{
 			Name:    ".github/CODEOWNERS",
@@ -505,10 +451,7 @@ func TestApplyItems_MixedFileAndNonFile(t *testing.T) {
 			},
 		},
 	}
-	err := applyItems(c, "owner", "repo", "main", items, false, false)
-	if err != nil {
-		t.Errorf("expected no error, got: %v", err)
-	}
+	runApplyItemsExpectNoError(t, newSimpleFileServer(), items, false, false)
 	if !fileApplied {
 		t.Error("expected file item to be applied directly")
 	}
