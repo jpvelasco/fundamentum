@@ -12,6 +12,15 @@ import (
 	"github.com/jpvelasco/fundamentum/internal/wizard"
 )
 
+// newCreatedServer returns a test server that returns 201 + {"id":1} for all requests.
+// Useful for branch protection tests that don't care about request details.
+func newCreatedServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":1}`))
+	}))
+}
+
 // newBuildItemsTest is a shared setup helper for TestBuildItems_* tests.
 // It creates a mock HTTP server with the given handler, renders templates with the specified visibility,
 // and calls buildItems, returning the resulting items for assertion in the test.
@@ -113,10 +122,7 @@ func TestBranchProtectionItem_Creation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusCreated)
-				_, _ = w.Write([]byte(`{"id":1}`))
-			}))
+			srv := newCreatedServer()
 			defer srv.Close()
 
 			c := github.NewClient("t", false).WithBaseURL(srv.URL)
