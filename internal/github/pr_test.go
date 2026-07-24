@@ -19,6 +19,12 @@ func newTestClient(srv *httptest.Server, client func(srv string) *Client) *Clien
 	return NewClient("t", false).WithBaseURL(srv.URL)
 }
 
+// extractFilePathFromContents extracts the file path from a GitHub API /contents/ URL.
+// For example, "/repos/owner/repo/contents/README.md" returns "README.md".
+func extractFilePathFromContents(path string) string {
+	return strings.TrimPrefix(path, "/repos/owner/repo/contents/")
+}
+
 func TestCreatePRBranch(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -459,11 +465,8 @@ func TestApplyViaPR(t *testing.T) {
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				// Track which file is being upserted
 				path := ""
-				if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/") {
-					path = strings.TrimPrefix(r.URL.Path, "/repos/owner/repo/contents/")
-				}
-				if r.Method == http.MethodPut {
-					path = strings.TrimPrefix(r.URL.Path, "/repos/owner/repo/contents/")
+				if (r.Method == http.MethodGet || r.Method == http.MethodPut) && strings.Contains(r.URL.Path, "/contents/") {
+					path = extractFilePathFromContents(r.URL.Path)
 				}
 				switch r.Method {
 				case http.MethodGet:
@@ -509,11 +512,8 @@ func TestApplyViaPR(t *testing.T) {
 			name: "upsert error returns immediately",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				path := ""
-				if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/") {
-					path = strings.TrimPrefix(r.URL.Path, "/repos/owner/repo/contents/")
-				}
-				if r.Method == http.MethodPut {
-					path = strings.TrimPrefix(r.URL.Path, "/repos/owner/repo/contents/")
+				if (r.Method == http.MethodGet || r.Method == http.MethodPut) && strings.Contains(r.URL.Path, "/contents/") {
+					path = extractFilePathFromContents(r.URL.Path)
 				}
 				switch r.Method {
 				case http.MethodGet:
@@ -599,11 +599,8 @@ func TestApplyViaPR(t *testing.T) {
 			name: "skipped file no print",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				path := ""
-				if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/") {
-					path = strings.TrimPrefix(r.URL.Path, "/repos/owner/repo/contents/")
-				}
-				if r.Method == http.MethodPut {
-					path = strings.TrimPrefix(r.URL.Path, "/repos/owner/repo/contents/")
+				if (r.Method == http.MethodGet || r.Method == http.MethodPut) && strings.Contains(r.URL.Path, "/contents/") {
+					path = extractFilePathFromContents(r.URL.Path)
 				}
 				switch r.Method {
 				case http.MethodGet:
