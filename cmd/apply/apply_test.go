@@ -39,6 +39,30 @@ func newPRMockServer() *httptest.Server {
 	}))
 }
 
+// newSimpleFileServer returns a test server that returns 201 + {"content":{}} for all requests.
+// Useful for tests that don't care about request details.
+func newSimpleFileServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"content":{}}`))
+	}))
+}
+
+// newFileItems builds a wizard.Item slice with the given names, content, and Apply closures.
+// names, content, and applies must be of equal length.
+func newFileItems(names []string, content [][]byte, applies []func() error) []wizard.Item {
+	items := make([]wizard.Item, len(names))
+	for i, name := range names {
+		items[i] = wizard.Item{
+			Name:    name,
+			Action:  wizard.ActionCreate,
+			Content: content[i],
+			Apply:   applies[i],
+		}
+	}
+	return items
+}
+
 func TestBuildItems(t *testing.T) {
 	// Mock server that returns file not found for all files
 	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -100,17 +124,15 @@ func TestActionFromExists(t *testing.T) {
 
 func TestApplyItems_No409(t *testing.T) {
 	// All files apply directly without 409 — no PR created.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"content":{}}`))
-	}))
+	srv := newSimpleFileServer()
 	defer srv.Close()
 
 	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	items := []wizard.Item{
-		{Name: ".github/CODEOWNERS", Action: wizard.ActionCreate, Content: []byte("me"), Apply: func() error { return nil }},
-		{Name: ".github/SECURITY.md", Action: wizard.ActionCreate, Content: []byte("sec"), Apply: func() error { return nil }},
-	}
+	items := newFileItems(
+		[]string{".github/CODEOWNERS", ".github/SECURITY.md"},
+		[][]byte{[]byte("me"), []byte("sec")},
+		[]func() error{func() error { return nil }, func() error { return nil }},
+	)
 	err := applyItems(c, "owner", "repo", "main", items, false, false)
 	if err != nil {
 		t.Errorf("expected no error, got: %v", err)
@@ -185,10 +207,11 @@ func TestApplyItems_ViaPRFromStart(t *testing.T) {
 	defer srv.Close()
 
 	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	items := []wizard.Item{
-		{Name: ".github/CODEOWNERS", Action: wizard.ActionCreate, Content: []byte("me"), Apply: func() error { return nil }},
-		{Name: ".github/SECURITY.md", Action: wizard.ActionCreate, Content: []byte("sec"), Apply: func() error { return nil }},
-	}
+	items := newFileItems(
+		[]string{".github/CODEOWNERS", ".github/SECURITY.md"},
+		[][]byte{[]byte("me"), []byte("sec")},
+		[]func() error{func() error { return nil }, func() error { return nil }},
+	)
 	err := applyItems(c, "owner", "repo", "main", items, false, true)
 	if err != nil {
 		t.Errorf("expected no error, got: %v", err)
@@ -253,10 +276,15 @@ func TestApplyItems_SkippedOrDryRun(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			applyCalled := false
 			items := []wizard.Item{
-				{Name: ".github/CODEOWNERS", Action: tt.action, Content: []byte("me"), Apply: func() error {
-					applyCalled = true
-					return nil
-				}},
+				{
+					Name:    ".github/CODEOWNERS",
+					Action:  tt.action,
+					Content: []byte("me"),
+					Apply: func() error {
+						applyCalled = true
+						return nil
+					},
+				},
 			}
 			c := github.NewClient("", false)
 			err := applyItems(c, "owner", "repo", "main", items, tt.dryRun, false)
@@ -290,6 +318,7 @@ func TestApplyItems_ErrorHandling_NonFatal(t *testing.T) {
 		},
 	}
 
+	errFunc := func() error { return fmt.Errorf("API error") }
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			items := []wizard.Item{
@@ -297,7 +326,7 @@ func TestApplyItems_ErrorHandling_NonFatal(t *testing.T) {
 					Name:     tt.itemName,
 					Action:   wizard.ActionCreate,
 					Optional: tt.optional,
-					Apply:    func() error { return fmt.Errorf("API error") },
+					Apply:    errFunc,
 				},
 			}
 			c := github.NewClient("", false)
@@ -423,10 +452,7 @@ func TestBranchProtectionItem_FallbackOnlyOn403(t *testing.T) {
 
 func TestApplyItems_WorkflowLocked_Skipped(t *testing.T) {
 	// Workflow lock error should be treated as skip and processing continues.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"content":{}}`))
-	}))
+	srv := newSimpleFileServer()
 	defer srv.Close()
 
 	c := github.NewClient("t", false).WithBaseURL(srv.URL)
@@ -456,10 +482,7 @@ func TestApplyItems_MixedFileAndNonFile(t *testing.T) {
 	// Mix of file items and non-file items: files apply directly, non-files defer.
 	fileApplied := false
 	nonFileApplied := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{}`))
-	}))
+	srv := newSimpleFileServer()
 	defer srv.Close()
 
 	c := github.NewClient("t", false).WithBaseURL(srv.URL)
