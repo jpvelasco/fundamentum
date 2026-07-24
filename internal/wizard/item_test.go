@@ -12,6 +12,7 @@ func TestItemActionString(t *testing.T) {
 		{ActionCreate, "create"},
 		{ActionUpdate, "update"},
 		{ActionSkip, "skip"},
+		{Action(99), "unknown"}, // invalid action defaults to "unknown"
 	}
 	for _, tt := range tests {
 		if got := tt.action.String(); got != tt.want {
