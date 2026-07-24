@@ -48,6 +48,31 @@ func TestCreatePRBranch_GetError(t *testing.T) {
 	}
 }
 
+func TestCreatePRBranch_NetworkError(t *testing.T) {
+	c := newErroringClient()
+	err := c.CreatePRBranch("owner", "repo", "test-branch", "main")
+	if err == nil {
+		t.Fatal("expected error on network failure")
+	}
+}
+
+func TestCreatePRBranch_PostNetworkError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"commit": map[string]any{"sha": "aaaa1111"},
+		})
+	}))
+	defer srv.Close()
+
+	// GET succeeds; the POST to create the ref fails at the transport level.
+	c := newSplitTransportClient(srv.URL, "/git/refs")
+	err := c.CreatePRBranch("owner", "repo", "test-branch", "main")
+	if err == nil {
+		t.Fatal("expected error when POST fails at the transport level")
+	}
+}
+
 func TestCreatePullRequest(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -93,6 +118,37 @@ func TestCreatePullRequest_Error(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "create PR") {
 		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestCreatePullRequest_NetworkError(t *testing.T) {
+	c := newErroringClient()
+	_, err := c.CreatePullRequest("owner", "repo", "title", "body", "head", "main")
+	if err == nil {
+		t.Fatal("expected error on network failure")
+	}
+}
+
+func TestUpsertFileOnBranch_GetNetworkError(t *testing.T) {
+	c := newErroringClient()
+	_, err := c.UpsertFileOnBranch("owner", "repo", "feature", "test.md", []byte("hello"))
+	if err == nil {
+		t.Fatal("expected error on network failure")
+	}
+}
+
+func TestUpsertFileOnBranch_PutNetworkError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	// GET (existence check) succeeds with 404 (file doesn't exist); the PUT
+	// to create it fails at the transport level.
+	c := newMethodSplitTransportClient(srv.URL, http.MethodPut)
+	_, err := c.UpsertFileOnBranch("owner", "repo", "feature", "test.md", []byte("hello"))
+	if err == nil {
+		t.Fatal("expected error when PUT fails at the transport level")
 	}
 }
 
@@ -293,6 +349,31 @@ func TestIsForbidden403(t *testing.T) {
 type testErr struct{ msg string }
 
 func (e *testErr) Error() string { return e.msg }
+
+func TestHTTPError_Error(t *testing.T) {
+	e := &HTTPError{StatusCode: http.StatusConflict, Msg: "409 Conflict: rule violations"}
+	if e.Error() != "409 Conflict: rule violations" {
+		t.Errorf("Error() = %q, want %q", e.Error(), "409 Conflict: rule violations")
+	}
+}
+
+func TestIsConflict409_HTTPError(t *testing.T) {
+	if !IsConflict409(&HTTPError{StatusCode: http.StatusConflict, Msg: "conflict"}) {
+		t.Error("expected true for HTTPError with StatusCode 409")
+	}
+	if IsConflict409(&HTTPError{StatusCode: http.StatusForbidden, Msg: "forbidden"}) {
+		t.Error("expected false for HTTPError with a non-409 StatusCode")
+	}
+}
+
+func TestIsForbidden403_HTTPError(t *testing.T) {
+	if !IsForbidden403(&HTTPError{StatusCode: http.StatusForbidden, Msg: "forbidden"}) {
+		t.Error("expected true for HTTPError with StatusCode 403")
+	}
+	if IsForbidden403(&HTTPError{StatusCode: http.StatusConflict, Msg: "conflict"}) {
+		t.Error("expected false for HTTPError with a non-403 StatusCode")
+	}
+}
 
 func TestApplyViaPR(t *testing.T) {
 	tests := []struct {
