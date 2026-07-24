@@ -2,11 +2,7 @@
 package github
 
 import (
-	"bytes"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 )
@@ -36,99 +32,52 @@ func (c *Client) AnyFileExists(owner, repo string, paths []string) (bool, error)
 
 // FileStatus returns "create", "update", or "skip" for a file without writing.
 func (c *Client) FileStatus(owner, repo, path string, content []byte) (string, error) {
-	p := contentsPath(owner, repo, path)
-	resp, err := c.get(p)
+	action, _, err := c.checkExistingFile(contentsPath(owner, repo, path), path, content)
 	if err != nil {
-		return "", fmt.Errorf("check file %s: %w", path, err)
+		return "", err
 	}
-	defer func() { _ = resp.Body.Close() }()
-	switch resp.StatusCode {
-	case http.StatusOK:
-		var existing struct {
-			Content string `json:"content"`
-		}
-		raw, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return "", fmt.Errorf("read existing file %s: %w", path, err)
-		}
-		if err := json.Unmarshal(raw, &existing); err != nil {
-			return "", fmt.Errorf("parse existing file %s: %w", path, err)
-		}
-		existingClean := bytes.ReplaceAll([]byte(existing.Content), []byte("\n"), nil)
-		newClean := bytes.ReplaceAll([]byte(base64.StdEncoding.EncodeToString(content)), []byte("\n"), nil)
-		if bytes.Equal(existingClean, newClean) {
-			return "skip", nil
-		}
+	switch action {
+	case fileActionUpdate:
 		return "update", nil
-	case http.StatusNotFound:
+	case fileActionCreate:
 		return "create", nil
 	default:
-		b, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("check file %s: %s: %s", path, resp.Status, b)
+		return "skip", nil
 	}
 }
 
 // UpsertFile creates or updates a file in the repo via the Contents API.
 // Returns "created", "updated", or "skipped" (content unchanged).
 func (c *Client) UpsertFile(owner, repo, path string, content []byte) (string, error) {
-	p := contentsPath(owner, repo, path)
+	return c.upsertFile(owner, repo, "", path, content)
+}
 
-	resp, err := c.get(p)
+// upsertFile creates or updates path via the Contents API. When branch is
+// empty, operates on the default branch (root Contents API, no ?ref=); when
+// set, targets that branch (used by UpsertFileOnBranch for PR workflows).
+func (c *Client) upsertFile(owner, repo, branch, path string, content []byte) (string, error) {
+	getPath := contentsPath(owner, repo, path)
+	describe := func() string { return "upsert file " + path }
+	if branch != "" {
+		getPath = fmt.Sprintf("/repos/%s/%s/contents/%s?ref=%s",
+			url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(path), url.PathEscape(branch))
+		describe = func() string { return fmt.Sprintf("upsert file %s on %s", path, branch) }
+	}
+
+	action, sha, err := c.checkExistingFile(getPath, path, content)
 	if err != nil {
-		return "", fmt.Errorf("check file %s: %w", path, err)
+		return "", err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body := map[string]any{
-		"message": "chore: add " + path,
-		"content": base64.StdEncoding.EncodeToString(content),
+	if action == fileActionSkip {
+		return "skipped", nil
 	}
 
-	var action string
-	switch resp.StatusCode {
-	case http.StatusOK:
-		var existing struct {
-			Content string `json:"content"`
-			SHA     string `json:"sha"`
-		}
-		raw, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return "", fmt.Errorf("read existing file %s: %w", path, err)
-		}
-		if err := json.Unmarshal(raw, &existing); err != nil {
-			return "", fmt.Errorf("parse existing file %s: %w", path, err)
-		}
-		existingClean := bytes.ReplaceAll([]byte(existing.Content), []byte("\n"), nil)
-		newEncoded := []byte(base64.StdEncoding.EncodeToString(content))
-		if bytes.Equal(existingClean, newEncoded) {
-			return "skipped", nil
-		}
-		body["sha"] = existing.SHA
-		body["message"] = "chore: update " + path
-		action = "updated"
-
-	case http.StatusNotFound:
-		action = "created"
-
-	default:
-		b, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("check file %s: %s: %s", path, resp.Status, b)
+	wasUpdate := action == fileActionUpdate
+	body := upsertBody(path, content, sha, wasUpdate)
+	if branch != "" {
+		body["branch"] = branch
 	}
 
-	putResp, err := c.do(http.MethodPut, p, body)
-	if err != nil {
-		return "", fmt.Errorf("upsert file %s: %w", path, err)
-	}
-	defer func() { _ = putResp.Body.Close() }()
-
-	// GitHub Actions locks workflow files — PUT returns 404 when trying to
-	// overwrite an existing workflow via the Contents API.
-	if putResp.StatusCode == http.StatusNotFound && action == "updated" {
-		return "skipped", fmt.Errorf("upsert file %s: %w", path, ErrWorkflowLocked)
-	}
-	if putResp.StatusCode != http.StatusCreated && putResp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(putResp.Body)
-		return "", fmt.Errorf("upsert file %s: %s: %s", path, putResp.Status, b)
-	}
-	return action, nil
+	// PUT doesn't support ?ref= — always target the root Contents path.
+	return c.putFileContents(contentsPath(owner, repo, path), body, wasUpdate, describe)
 }

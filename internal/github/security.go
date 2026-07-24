@@ -3,7 +3,6 @@ package github
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 )
 
@@ -20,9 +19,10 @@ func (c *Client) EnableSecurity(owner, repo, visibility string) error {
 		if err != nil {
 			return fmt.Errorf("enable security %s: %w", path, err)
 		}
+		statusErr := expectStatus("enable security "+path, resp, http.StatusOK, http.StatusNoContent)
 		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-			return fmt.Errorf("enable security %s: unexpected status %s", path, resp.Status)
+		if statusErr != nil {
+			return statusErr
 		}
 	}
 
@@ -36,9 +36,8 @@ func (c *Client) EnableSecurity(owner, repo, visibility string) error {
 		return fmt.Errorf("enable secret scanning: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("enable secret scanning: %s: %s", resp.Status, body)
+	if err := expectStatus("enable secret scanning", resp, http.StatusOK); err != nil {
+		return err
 	}
 
 	if visibility == "public" {
@@ -60,9 +59,5 @@ func (c *Client) enableCodeQL(base string) error {
 		return fmt.Errorf("enable CodeQL: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("enable CodeQL: %s: %s", resp.Status, body)
-	}
-	return nil
+	return expectStatus("enable CodeQL", resp, http.StatusOK, http.StatusAccepted)
 }

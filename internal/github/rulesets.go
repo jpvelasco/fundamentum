@@ -4,7 +4,6 @@ package github
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 )
 
@@ -126,11 +125,7 @@ func (c *Client) CreateBranchRuleset(owner, repo string, statusChecks []string, 
 		return fmt.Errorf("create branch ruleset: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusCreated {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("create branch ruleset: %s: %s", resp.Status, b)
-	}
-	return nil
+	return expectStatus("create branch ruleset", resp, http.StatusCreated)
 }
 
 // CreateTagRuleset creates the protect-version-tags tag ruleset.
@@ -155,9 +150,5 @@ func (c *Client) CreateTagRuleset(owner, repo string) error {
 		return fmt.Errorf("create tag ruleset: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusCreated {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("create tag ruleset: %s: %s", resp.Status, b)
-	}
-	return nil
+	return expectStatus("create tag ruleset", resp, http.StatusCreated)
 }
