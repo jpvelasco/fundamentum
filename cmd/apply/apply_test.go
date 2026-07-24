@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/jpvelasco/fundamentum/internal/github"
-	"github.com/jpvelasco/fundamentum/internal/templates"
 	"github.com/jpvelasco/fundamentum/internal/wizard"
 )
 
@@ -42,21 +41,9 @@ func newPRMockServer() *httptest.Server {
 
 func TestBuildItems(t *testing.T) {
 	// Mock server that returns file not found for all files
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-
-	// Render templates to get files
-	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"}
-	rendered, err := templates.Render(data)
-	if err != nil {
-		t.Fatalf("Render() error = %v", err)
-	}
-
-	items := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{})
+	}), "private")
 
 	// Should have file items + general settings + branch protection + tag ruleset + security
 	if len(items) < 5 {
@@ -509,7 +496,7 @@ func TestApplyItems_MixedFileAndNonFile(t *testing.T) {
 
 func TestBuildItems_AliasFormatVariants(t *testing.T) {
 	// Test alias detection for format variants (.yml vs .md for issue templates).
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// bug_report.md exists as alias (yml target)
 		if strings.Contains(r.URL.Path, "/bug_report.md") {
 			w.WriteHeader(http.StatusOK)
@@ -523,17 +510,7 @@ func TestBuildItems_AliasFormatVariants(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"}
-	rendered, err := templates.Render(data)
-	if err != nil {
-		t.Fatalf("Render() error: %v", err)
-	}
-
-	items := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{})
+	}), "private")
 
 	// bug_report.yml should be skipped because .md alias exists
 	for _, item := range items {
