@@ -31,12 +31,17 @@ func TestRun_InvalidArg(t *testing.T) {
 	}
 }
 
-func TestRun_DryRunPath(t *testing.T) {
+// resetGlobals restores package-level flag state after a test mutates it.
+func resetGlobals(t *testing.T) {
 	t.Cleanup(func() {
 		globals.DryRun = false
 		globals.Token = ""
 		globals.Verbose = false
 	})
+}
+
+func TestRun_DryRunPath(t *testing.T) {
+	resetGlobals(t)
 
 	globals.DryRun = true
 	err := run("owner/repo", false)
@@ -48,38 +53,34 @@ func TestRun_DryRunPath(t *testing.T) {
 	}
 }
 
-func TestRun_NonDryRun_ReturnsError(t *testing.T) {
-	t.Cleanup(func() {
-		globals.DryRun = false
-		globals.Token = ""
-		globals.Verbose = false
-	})
-
-	// With no token and no mock server, CreateRepo will fail with a
-	// network error. The error should contain "create repo".
-	err := run("owner/repo", false)
-	if err == nil {
-		t.Error("expected error when CreateRepo fails")
+func TestRun_CreateRepo_Fails(t *testing.T) {
+	tests := []struct {
+		name    string
+		private bool
+	}{
+		{
+			name:    "private=false",
+			private: false,
+		},
+		{
+			name:    "private=true",
+			private: true,
+		},
 	}
-	if !strings.Contains(err.Error(), "create repo") {
-		t.Errorf("expected 'create repo' in error, got: %v", err)
-	}
-}
 
-func TestRun_PrivateFlag(t *testing.T) {
-	t.Cleanup(func() {
-		globals.DryRun = false
-		globals.Token = ""
-		globals.Verbose = false
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetGlobals(t)
 
-	// private=true should fail with no token, but the error should
-	// come from the create repo path (not a different error path).
-	err := run("owner/repo", true)
-	if err == nil {
-		t.Error("expected error when CreateRepo fails with private=true")
-	}
-	if !strings.Contains(err.Error(), "create repo") {
-		t.Errorf("expected 'create repo' in error for private=true, got: %v", err)
+			// With no token and no mock server, CreateRepo will fail with a
+			// network error. The error should contain "create repo".
+			err := run("owner/repo", tt.private)
+			if err == nil {
+				t.Error("expected error when CreateRepo fails")
+			}
+			if !strings.Contains(err.Error(), "create repo") {
+				t.Errorf("expected 'create repo' in error, got: %v", err)
+			}
+		})
 	}
 }
