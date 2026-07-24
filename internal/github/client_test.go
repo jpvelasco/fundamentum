@@ -1,6 +1,7 @@
 package github
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,7 +13,9 @@ func TestClientGet(t *testing.T) {
 			t.Errorf("missing or wrong Authorization header: %q", r.Header.Get("Authorization"))
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"id":1}`))
+		var out any
+		_ = json.Unmarshal([]byte(`{"id":1}`), &out)
+		_ = json.NewEncoder(w).Encode(out)
 	}))
 	defer srv.Close()
 
@@ -67,7 +70,7 @@ func TestClientPatch(t *testing.T) {
 			t.Errorf("expected PATCH, got %s", r.Method)
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{}`))
+		_ = json.NewEncoder(w).Encode(map[string]any{})
 	}))
 	defer srv.Close()
 

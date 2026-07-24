@@ -248,21 +248,49 @@ func TestRulesetExists(t *testing.T) {
 	}
 }
 
-func TestEnsureBranchRuleset(t *testing.T) {
+func TestEnsureRulesets(t *testing.T) {
 	tests := []struct {
 		name     string
+		ruleType string
 		response string
 		wantPost bool
+		fn       func(*Client) error
 	}{
 		{
-			name:     "already exists",
+			name:     "branch - already exists",
+			ruleType: "branch",
 			response: `[{"name":"protect-main"}]`,
 			wantPost: false,
+			fn: func(c *Client) error {
+				return c.EnsureBranchRuleset("owner", "repo", []string{}, BranchProtectionOptions{})
+			},
 		},
 		{
-			name:     "creates new",
+			name:     "branch - creates new",
+			ruleType: "branch",
 			response: `[]`,
 			wantPost: true,
+			fn: func(c *Client) error {
+				return c.EnsureBranchRuleset("owner", "repo", []string{}, BranchProtectionOptions{})
+			},
+		},
+		{
+			name:     "tag - already exists",
+			ruleType: "tag",
+			response: `[{"name":"protect-version-tags"}]`,
+			wantPost: false,
+			fn: func(c *Client) error {
+				return c.EnsureTagRuleset("owner", "repo")
+			},
+		},
+		{
+			name:     "tag - creates new",
+			ruleType: "tag",
+			response: `[]`,
+			wantPost: true,
+			fn: func(c *Client) error {
+				return c.EnsureTagRuleset("owner", "repo")
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -286,56 +314,7 @@ func TestEnsureBranchRuleset(t *testing.T) {
 			defer srv.Close()
 
 			c := NewClient("t", false).WithBaseURL(srv.URL)
-			err := c.EnsureBranchRuleset("owner", "repo", []string{}, BranchProtectionOptions{})
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if postCalled != tt.wantPost {
-				t.Errorf("POST called: %v, want %v", postCalled, tt.wantPost)
-			}
-		})
-	}
-}
-
-func TestEnsureTagRuleset(t *testing.T) {
-	tests := []struct {
-		name     string
-		response string
-		wantPost bool
-	}{
-		{
-			name:     "already exists",
-			response: `[{"name":"protect-version-tags"}]`,
-			wantPost: false,
-		},
-		{
-			name:     "creates new",
-			response: `[]`,
-			wantPost: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			postCalled := false
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == http.MethodGet {
-					w.WriteHeader(http.StatusOK)
-					var out any
-					_ = json.Unmarshal([]byte(tt.response), &out)
-					_ = json.NewEncoder(w).Encode(out)
-					return
-				}
-				if r.Method == http.MethodPost {
-					postCalled = true
-					w.WriteHeader(http.StatusCreated)
-					_ = json.NewEncoder(w).Encode(map[string]any{"id": 2})
-					return
-				}
-			}))
-			defer srv.Close()
-
-			c := NewClient("t", false).WithBaseURL(srv.URL)
-			err := c.EnsureTagRuleset("owner", "repo")
+			err := tt.fn(c)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -368,7 +347,7 @@ func TestCreateRulesetErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusUnprocessableEntity)
-				_, _ = w.Write([]byte(`{"message":"validation failed"}`))
+				_ = json.NewEncoder(w).Encode(map[string]string{"message": "validation failed"})
 			}))
 			defer srv.Close()
 
@@ -389,7 +368,7 @@ func TestCreateBranchRuleset_WithStatusChecks(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		postBody = body
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":1}`))
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 1})
 	}))
 	defer srv.Close()
 
@@ -447,7 +426,7 @@ func TestCreateBranchRuleset_DedupStatusChecks(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_ = json.NewDecoder(r.Body).Decode(&postBody)
 				w.WriteHeader(http.StatusCreated)
-				_, _ = w.Write([]byte(`{"id":1}`))
+				_ = json.NewEncoder(w).Encode(map[string]any{"id": 1})
 			}))
 			defer srv.Close()
 
@@ -541,7 +520,7 @@ func TestErrorResponses(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tt.status)
-				_, _ = w.Write([]byte(`{"message":"error"}`))
+				_ = json.NewEncoder(w).Encode(map[string]string{"message": "error"})
 			}))
 			defer srv.Close()
 
