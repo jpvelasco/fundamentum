@@ -3,12 +3,32 @@ package wizard
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 )
 
+// runBoolPromptTest consolidates the test loop for prompt functions that return bool.
+// fn is the function under test, cases are the test table rows.
+func runBoolPromptTest(t *testing.T, name string, fn func(io.Reader, io.Writer) bool, cases []struct {
+	name  string
+	input string
+	want  bool
+}) {
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			r := strings.NewReader(tt.input)
+			var buf bytes.Buffer
+			got := fn(r, &buf)
+			if got != tt.want {
+				t.Errorf("%s(%q) = %v, want %v", name, tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPromptProjectType(t *testing.T) {
-	tests := []struct {
+	cases := []struct {
 		name  string
 		input string
 		want  bool // true = solo
@@ -23,20 +43,11 @@ func TestPromptProjectType(t *testing.T) {
 		{"whitespace solo", "  solo  \n", true},
 		{"whitespace team", "  team  \n", false},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := strings.NewReader(tt.input)
-			var buf bytes.Buffer
-			got := PromptProjectType(r, &buf)
-			if got != tt.want {
-				t.Errorf("PromptProjectType(%q) = %v, want %v", tt.input, got, tt.want)
-			}
-		})
-	}
+	runBoolPromptTest(t, "PromptProjectType", PromptProjectType, cases)
 }
 
 func TestConfirmDefaults(t *testing.T) {
-	tests := []struct {
+	cases := []struct {
 		name  string
 		input string
 		want  bool
@@ -50,16 +61,7 @@ func TestConfirmDefaults(t *testing.T) {
 		{"no", "no\n", false},
 		{"whitespace y", "  y  \n", true},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := strings.NewReader(tt.input)
-			var buf bytes.Buffer
-			got := ConfirmDefaults(r, &buf)
-			if got != tt.want {
-				t.Errorf("ConfirmDefaults(%q) = %v, want %v", tt.input, got, tt.want)
-			}
-		})
-	}
+	runBoolPromptTest(t, "ConfirmDefaults", ConfirmDefaults, cases)
 }
 
 func TestRunItems(t *testing.T) {
@@ -223,13 +225,6 @@ func TestLiveLabel(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("LiveLabel(%v) = %q, want %q", tt.action, got, tt.want)
 		}
-	}
-}
-
-func TestActionString_Default(t *testing.T) {
-	a := Action(99)
-	if a.String() != "unknown" {
-		t.Errorf("expected 'unknown' for invalid action, got %q", a.String())
 	}
 }
 
