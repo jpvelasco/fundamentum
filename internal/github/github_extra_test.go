@@ -10,10 +10,10 @@ import (
 
 func TestAnyFileExists(t *testing.T) {
 	tests := []struct {
-		name   string
-		paths  []string
-		resps  map[string]int // path -> status code
-		want   bool
+		name    string
+		paths   []string
+		resps   map[string]int // path -> status code
+		want    bool
 		wantErr bool
 	}{
 		{
@@ -83,25 +83,25 @@ func TestFileStatus(t *testing.T) {
 			want:    "create",
 		},
 		{
-			name:    "skip - same content",
-			content: "hello",
-			status:  http.StatusOK,
+			name:     "skip - same content",
+			content:  "hello",
+			status:   http.StatusOK,
 			response: `{"content":"` + base64.StdEncoding.EncodeToString([]byte("hello")) + `","sha":"abc"}`,
-			want:    "skip",
+			want:     "skip",
 		},
 		{
-			name:    "update - different content",
-			content: "new content",
-			status:  http.StatusOK,
+			name:     "update - different content",
+			content:  "new content",
+			status:   http.StatusOK,
 			response: `{"content":"` + base64.StdEncoding.EncodeToString([]byte("old content")) + `","sha":"abc"}`,
-			want:    "update",
+			want:     "update",
 		},
 		{
-			name:    "error - 500",
-			content: "hello",
-			status:  http.StatusInternalServerError,
+			name:     "error - 500",
+			content:  "hello",
+			status:   http.StatusInternalServerError,
 			response: `{"message":"Internal Server Error"}`,
-			wantErr: true,
+			wantErr:  true,
 		},
 	}
 	for _, tt := range tests {
@@ -271,13 +271,15 @@ func TestEnsureBranchRuleset(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
 					w.WriteHeader(http.StatusOK)
-					_, _ = w.Write([]byte(tt.response))
+					var out any
+					_ = json.Unmarshal([]byte(tt.response), &out)
+					_ = json.NewEncoder(w).Encode(out)
 					return
 				}
 				if r.Method == http.MethodPost {
 					postCalled = true
 					w.WriteHeader(http.StatusCreated)
-					_, _ = w.Write([]byte(`{"id":1}`))
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": 1})
 					return
 				}
 			}))
@@ -318,13 +320,15 @@ func TestEnsureTagRuleset(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
 					w.WriteHeader(http.StatusOK)
-					_, _ = w.Write([]byte(tt.response))
+					var out any
+					_ = json.Unmarshal([]byte(tt.response), &out)
+					_ = json.NewEncoder(w).Encode(out)
 					return
 				}
 				if r.Method == http.MethodPost {
 					postCalled = true
 					w.WriteHeader(http.StatusCreated)
-					_, _ = w.Write([]byte(`{"id":2}`))
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": 2})
 					return
 				}
 			}))
@@ -401,39 +405,39 @@ func TestCreateBranchRuleset_WithStatusChecks(t *testing.T) {
 
 func TestCreateBranchRuleset_DedupStatusChecks(t *testing.T) {
 	tests := []struct {
-		name        string
+		name         string
 		statusChecks []string
-		wantCount   int // number of required_status_checks entries
+		wantCount    int // number of required_status_checks entries
 	}{
 		{
-			name:        "no duplicates",
+			name:         "no duplicates",
 			statusChecks: []string{"ci", "lint"},
-			wantCount:   3, // Codacy + ci + lint
+			wantCount:    3, // Codacy + ci + lint
 		},
 		{
-			name:        "duplicate with default",
+			name:         "duplicate with default",
 			statusChecks: []string{"Codacy Static Code Analysis"},
-			wantCount:   1, // Codacy deduped
+			wantCount:    1, // Codacy deduped
 		},
 		{
-			name:        "empty",
+			name:         "empty",
 			statusChecks: nil,
-			wantCount:   1, // Codacy only
+			wantCount:    1, // Codacy only
 		},
 		{
-			name:        "empty string slice",
+			name:         "empty string slice",
 			statusChecks: []string{},
-			wantCount:   1, // Codacy only
+			wantCount:    1, // Codacy only
 		},
 		{
-			name:        "self duplicate",
+			name:         "self duplicate",
 			statusChecks: []string{"ci", "ci"},
-			wantCount:   2, // Codacy + ci
+			wantCount:    2, // Codacy + ci
 		},
 		{
-			name:        "all duplicates",
+			name:         "all duplicates",
 			statusChecks: []string{"Codacy Static Code Analysis", "Codacy Static Code Analysis"},
-			wantCount:   1,
+			wantCount:    1,
 		},
 	}
 
@@ -493,9 +497,9 @@ func TestNewClient_EmptyToken(t *testing.T) {
 
 func TestErrorResponses(t *testing.T) {
 	tests := []struct {
-		name       string
-		status     int
-		fn         func(*Client) error
+		name   string
+		status int
+		fn     func(*Client) error
 	}{
 		{
 			name:   "CreateRepo 422",
