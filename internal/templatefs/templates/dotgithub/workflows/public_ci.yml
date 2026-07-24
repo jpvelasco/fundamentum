@@ -2,27 +2,14 @@ name: CI
 
 on:
   push:
-    branches: ["main"]
+    branches: ["{{.DefaultBranch}}"]
   pull_request:
-    branches: ["main"]
+    branches: ["{{.DefaultBranch}}"]
 
 permissions:
   contents: read
 
 jobs:
-  # fundamentum-specific: proves the live Codecov settings in this file match the
-  # shipped embed template (public_ci.yml). See internal/templatefs/codecov_drift.go.
-  template-drift:
-    name: Template drift
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: Check Codecov template drift
-        run: go test ./internal/templatefs/ -run TestCodecovTemplateDrift -count=1 -v
-
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -51,8 +38,8 @@ jobs:
   build:
     name: Build
     strategy:
-      # Full 3-OS matrix on push to main; PRs skip macOS (10x minutes on the
-      # free tier) — Linux + Windows already cover the cross-platform risk.
+      # Full 3-OS matrix on push to the default branch; PRs skip macOS (10x minutes
+      # on the free tier) — Linux + Windows already cover the cross-platform risk.
       matrix:
         os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
     runs-on: ${{ matrix.os }}
@@ -67,7 +54,7 @@ jobs:
   test:
     name: Test
     strategy:
-      # Full 3-OS matrix on push to main; PRs skip macOS to conserve minutes.
+      # Full 3-OS matrix on push to the default branch; PRs skip macOS to conserve minutes.
       matrix:
         os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
     runs-on: ${{ matrix.os }}
@@ -78,7 +65,7 @@ jobs:
       id-token: write
     steps:
       # fetch-depth: 0 so Codecov can walk git history for path mapping and so
-      # parent/base SHAs exist when the App compares PR head vs main
+      # parent/base SHAs exist when the App compares PR head vs the default branch
       # (avoids "Missing base commit" / unusable reports on shallow clones).
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
@@ -111,7 +98,7 @@ jobs:
       #     (codecov-action: use_oidc ignores any token if both are enabled.)
       #   - Explicit override_* so push uploads are tagged with the real SHA/branch
       #     (the action only auto-fills those for pull_request events; empty CC_SHA
-      #     on push leaves main without a usable base report).
+      #     on push leaves the default branch without a usable base report).
       #   - Do NOT add codecov/patch to ruleset required checks (soft gate).
       - name: Upload coverage to Codecov
         # Skip fork PRs: OIDC tokens aren't issued to forked-repo runs.
@@ -124,7 +111,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           use_pypi: true
           files: ./coverage.out
-          slug: jpvelasco/fundamentum
+          slug: {{.Owner}}/{{.RepoName}}
           # PR head SHA on pull_request; otherwise the push SHA.
           override_commit: ${{ github.event.pull_request.head.sha || github.sha }}
           override_branch: ${{ github.head_ref || github.ref_name }}
@@ -141,7 +128,7 @@ jobs:
           use_pypi: true
           report_type: test_results
           files: ./junit.xml
-          slug: jpvelasco/fundamentum
+          slug: {{.Owner}}/{{.RepoName}}
           override_commit: ${{ github.event.pull_request.head.sha || github.sha }}
           override_branch: ${{ github.head_ref || github.ref_name }}
           override_pr: ${{ github.event.pull_request.number }}
@@ -156,10 +143,9 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Run gosec
-        # Exclusions match .golangci.yml (single source of truth):
-        #   G104 unhandled errors, G204 subprocess launched with variable,
-        #   G304 file inclusion via variable, G704 (reserved) — intentionally
-        #   suppressed for CLI subprocess calls and config/state file reads.
+        # Keep this -exclude set in sync with .golangci.yml gosec.excludes
+        # (single source of truth) so gosec and golangci suppress the same IDs.
+        # Adjust the set to match the target repo's .golangci.yml.
         run: go run github.com/securego/gosec/v2/cmd/gosec@v2.27.1 -exclude=G104,G204,G304,G704 ./...
 
   trivy:

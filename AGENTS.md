@@ -29,7 +29,7 @@ go run . init OWNER/REPO
 
 Pre-commit order: template drift → build → lint → test.
 
-**Codecov template drift gate:** `TestCodecovTemplateDrift` compares live `.github/workflows/codecov.yml` upload settings against the embed template `public_codecov.yml` (auth, Python uploader, coverage flags, pinned action versions). Runs in pre-commit (fail-fast) and CI job `Template drift`. Action pins may differ intentionally.
+**Codecov template drift gate:** `TestCodecovTemplateDrift` compares live `.github/workflows/ci.yml` Codecov upload settings against the embed template `public_ci.yml` (Codecov is folded into the CI Test job, fabrica standard). Checks: `id-token: write`, `use_oidc` (literal `true` or the XOR `${{ secrets.CODECOV_TOKEN == '' }}` expression), `use_pypi`, `fail_ci_if_error`, `-covermode=atomic`, coverage `files`/`-coverprofile`, `override_commit`/`override_branch`/`override_pr`, `slug`, `report_type: test_results`, and SHA-pinned `codecov/codecov-action`. Runs in pre-commit (fail-fast) and CI job `Template drift`. Action SHAs and branch names may differ intentionally.
 
 **Codecov required check (current):** branch protection uses `codecov/patch`.
 
@@ -37,6 +37,13 @@ Pre-commit order: template drift → build → lint → test.
 - GitHub only received `codecov/patch`, not `codecov/project`.
 - Prefer not re-adding `codecov/project` as required until a PR shows that check posting.
 - Exception: re-add if Codecov starts emitting `codecov/project` and you want a project gate.
+
+**CI job names (fabrica standard):** `.github/workflows/ci.yml` jobs are `Template drift`, `Lint`,
+`Vulnerability scan`, `Build (ubuntu-latest|windows-latest|macos-latest)`, `Test (ubuntu-latest|…)`,
+`gosec`, `Trivy`. CodeQL runs as `Analyze (actions|go)` in `codeql.yml`. macOS legs run only on push to
+`main` (PRs skip them to save minutes), so **do not** require macOS contexts in branch protection.
+When renaming/adding jobs, update the branch-protection required-status-checks list to match, or PRs
+deadlock on contexts that never report.
 
 ## PR Workflow (use with pr-auto / pr-doctor skills)
 
@@ -70,8 +77,8 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`.
 - `cmd/util` — shared utilities (ParseOwnerRepo)
 - `internal/github` — thin HTTP client for GitHub API (net/http, no SDK)
 - `internal/wizard` — interactive summary table + Y/N apply flow
-- `internal/templates` — renders embedded templates via text/template
-- `internal/templatefs` — `//go:embed` of template files; `dotgithub/` maps to `.github/`, `dotcodacy.yml` to `.codacy.yml`
+- `internal/templates` — renders embedded templates via plain string substitution (not `text/template`; see `render.go`)
+- `internal/templatefs` — `//go:embed` of template files; `dotgithub/` maps to `.github/`, `dotcodacy.yml` to `.codacy.yml`; `public_`/`private_` filename prefixes gate by visibility and are stripped from the target
 
 ### Key behavior
 

@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: ["{{.DefaultBranch}}"]
+  pull_request:
+    branches: ["{{.DefaultBranch}}"]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a  # v9
+        with:
+          version: v2.12.2
+
+  vuln:
+    name: Vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          govulncheck ./...
+
+  build:
+    name: Build
+    strategy:
+      # Full 3-OS matrix on push to the default branch; PRs skip macOS (10x minutes
+      # on the free tier) — Linux + Windows already cover the cross-platform risk.
+      matrix:
+        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go build -v ./...
+      - run: go vet ./...
+
+  test:
+    name: Test
+    strategy:
+      # Full 3-OS matrix on push to the default branch; PRs skip macOS to conserve minutes.
+      matrix:
+        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Run tests with race detection and coverage (Linux)
+        if: runner.os == 'Linux'
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+      - name: Run tests with race detection (macOS)
+        if: runner.os == 'macOS'
+        run: go test -race -v ./...
+      - name: Run tests with race detection (Windows)
+        if: runner.os == 'Windows'
+        run: go test -race -v ./...
+      - name: Display coverage summary
+        if: runner.os == 'Linux'
+        run: go tool cover -func=coverage.out
+      # Private repos publish coverage through octocov (.github/workflows/octocov.yml),
+      # not Codecov — the Codecov App/PR features assume a public repo. See octocov.yml.
+
+  gosec:
+    name: gosec
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Run gosec
+        # Keep this -exclude set in sync with .golangci.yml gosec.excludes
+        # (single source of truth) so gosec and golangci suppress the same IDs.
+        # Adjust the set to match the target repo's .golangci.yml.
+        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.27.1 -exclude=G104,G204,G304,G704 ./...
+
+  trivy:
+    name: Trivy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true

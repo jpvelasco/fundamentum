@@ -14,12 +14,18 @@ permissions:
 
 jobs:
   analyze:
-    name: Analyze ${{ matrix.language }}
+    name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        language: [go]
+        # actions covers workflows; go uses autobuild so CodeQL analyzes compiled
+        # code rather than source-only extraction. No javascript-typescript leg —
+        # this repo has no JS/TS yet (npm shim planned post-v1.0); add it then.
+        include:
+          - language: actions
+          - language: go
+            build-mode: autobuild
 
     steps:
       - name: Checkout repository
@@ -30,6 +36,10 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Autobuild
+        if: matrix.build-mode == 'autobuild'
+        uses: github/codeql-action/autobuild@7188fc363630916deb702c7fdcf4e481b751f97a  # v4.37.1
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@7188fc363630916deb702c7fdcf4e481b751f97a  # v4.37.1
