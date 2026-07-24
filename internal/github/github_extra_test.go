@@ -130,81 +130,109 @@ func TestFileStatus(t *testing.T) {
 	}
 }
 
-func TestUpsertFile_Update(t *testing.T) {
-	existing := base64.StdEncoding.EncodeToString([]byte("old"))
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]string{"content": existing, "sha": "abc123"})
-			return
-		}
-		if r.Method == http.MethodPut {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(map[string]any{})
-			return
-		}
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	action, err := c.UpsertFile("owner", "repo", "test.md", []byte("new"))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestUpsertFile_UpdateAndErrorStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		handler    http.HandlerFunc
+		wantErr    bool
+		wantAction string
+	}{
+		{
+			name: "update",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				existing := base64.StdEncoding.EncodeToString([]byte("old"))
+				if r.Method == http.MethodGet {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_ = json.NewEncoder(w).Encode(map[string]string{"content": existing, "sha": "abc123"})
+					return
+				}
+				if r.Method == http.MethodPut {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusCreated)
+					_ = json.NewEncoder(w).Encode(map[string]any{})
+					return
+				}
+			},
+			wantAction: "updated",
+		},
+		{
+			name: "error status",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					w.WriteHeader(http.StatusInternalServerError)
+					_, _ = w.Write([]byte(`{"message":"error"}`))
+					return
+				}
+			},
+			wantErr: true,
+		},
 	}
-	if action != "updated" {
-		t.Errorf("expected action=updated, got %q", action)
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(tt.handler)
+			defer srv.Close()
 
-func TestUpsertFile_ErrorStatus(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{"message":"error"}`))
-			return
-		}
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	_, err := c.UpsertFile("owner", "repo", "test.md", []byte("hello"))
-	if err == nil {
-		t.Error("expected error for 500 status")
+			c := NewClient("t", false).WithBaseURL(srv.URL)
+			action, err := c.UpsertFile("owner", "repo", "test.md", []byte("new"))
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error")
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if action != tt.wantAction {
+					t.Errorf("expected action=%q, got %q", tt.wantAction, action)
+				}
+			}
+		})
 	}
 }
 
 func TestRulesetExists(t *testing.T) {
 	tests := []struct {
-		name     string
-		response string
-		want     bool
+		name       string
+		statusCode int
+		response   string
+		want       bool
 	}{
 		{
-			name:     "found",
-			response: `[{"name":"protect-main"}]`,
-			want:     true,
+			name:       "found",
+			statusCode: http.StatusOK,
+			response:   `[{"name":"protect-main"}]`,
+			want:       true,
 		},
 		{
-			name:     "not found in list",
-			response: `[{"name":"other-ruleset"}]`,
-			want:     false,
+			name:       "not found in list",
+			statusCode: http.StatusOK,
+			response:   `[{"name":"other-ruleset"}]`,
+			want:       false,
 		},
 		{
-			name:     "empty list",
-			response: `[]`,
-			want:     false,
+			name:       "empty list",
+			statusCode: http.StatusOK,
+			response:   `[]`,
+			want:       false,
+		},
+		{
+			name:       "non-200 status",
+			statusCode: http.StatusForbidden,
+			response:   ``,
+			want:       false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				var out any
-				_ = json.Unmarshal([]byte(tt.response), &out)
-				_ = json.NewEncoder(w).Encode(out)
+				w.WriteHeader(tt.statusCode)
+				if tt.response != "" {
+					var out any
+					_ = json.Unmarshal([]byte(tt.response), &out)
+					_ = json.NewEncoder(w).Encode(out)
+				}
 			}))
 			defer srv.Close()
 
@@ -220,138 +248,132 @@ func TestRulesetExists(t *testing.T) {
 	}
 }
 
-func TestRulesetExists_Non200(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	got, err := c.RulesetExists("owner", "repo", "protect-main")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestEnsureBranchRuleset(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		wantPost bool
+	}{
+		{
+			name:     "already exists",
+			response: `[{"name":"protect-main"}]`,
+			wantPost: false,
+		},
+		{
+			name:     "creates new",
+			response: `[]`,
+			wantPost: true,
+		},
 	}
-	if got {
-		t.Error("expected false for non-200 response")
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			postCalled := false
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte(tt.response))
+					return
+				}
+				if r.Method == http.MethodPost {
+					postCalled = true
+					w.WriteHeader(http.StatusCreated)
+					_, _ = w.Write([]byte(`{"id":1}`))
+					return
+				}
+			}))
+			defer srv.Close()
 
-func TestEnsureBranchRuleset_AlreadyExists(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`[{"name":"protect-main"}]`))
-			return
-		}
-		// Should not reach POST
-		t.Error("unexpected POST — ruleset already exists")
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	err := c.EnsureBranchRuleset("owner", "repo", []string{}, BranchProtectionOptions{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestEnsureBranchRuleset_CreatesNew(t *testing.T) {
-	postCalled := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`[]`))
-			return
-		}
-		if r.Method == http.MethodPost {
-			postCalled = true
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"id":1}`))
-			return
-		}
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	err := c.EnsureBranchRuleset("owner", "repo", []string{}, BranchProtectionOptions{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !postCalled {
-		t.Error("expected POST to create ruleset")
+			c := NewClient("t", false).WithBaseURL(srv.URL)
+			err := c.EnsureBranchRuleset("owner", "repo", []string{}, BranchProtectionOptions{})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if postCalled != tt.wantPost {
+				t.Errorf("POST called: %v, want %v", postCalled, tt.wantPost)
+			}
+		})
 	}
 }
 
-func TestEnsureTagRuleset_AlreadyExists(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`[{"name":"protect-version-tags"}]`))
-			return
-		}
-		t.Error("unexpected POST — tag ruleset already exists")
-	}))
-	defer srv.Close()
+func TestEnsureTagRuleset(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		wantPost bool
+	}{
+		{
+			name:     "already exists",
+			response: `[{"name":"protect-version-tags"}]`,
+			wantPost: false,
+		},
+		{
+			name:     "creates new",
+			response: `[]`,
+			wantPost: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			postCalled := false
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte(tt.response))
+					return
+				}
+				if r.Method == http.MethodPost {
+					postCalled = true
+					w.WriteHeader(http.StatusCreated)
+					_, _ = w.Write([]byte(`{"id":2}`))
+					return
+				}
+			}))
+			defer srv.Close()
 
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	err := c.EnsureTagRuleset("owner", "repo")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+			c := NewClient("t", false).WithBaseURL(srv.URL)
+			err := c.EnsureTagRuleset("owner", "repo")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if postCalled != tt.wantPost {
+				t.Errorf("POST called: %v, want %v", postCalled, tt.wantPost)
+			}
+		})
 	}
 }
 
-func TestEnsureTagRuleset_CreatesNew(t *testing.T) {
-	postCalled := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`[]`))
-			return
-		}
-		if r.Method == http.MethodPost {
-			postCalled = true
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"id":2}`))
-			return
-		}
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	err := c.EnsureTagRuleset("owner", "repo")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestCreateRulesetErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		fn   func(*Client) error
+	}{
+		{
+			name: "branch ruleset error",
+			fn: func(c *Client) error {
+				return c.CreateBranchRuleset("owner", "repo", []string{}, BranchProtectionOptions{})
+			},
+		},
+		{
+			name: "tag ruleset error",
+			fn: func(c *Client) error {
+				return c.CreateTagRuleset("owner", "repo")
+			},
+		},
 	}
-	if !postCalled {
-		t.Error("expected POST to create tag ruleset")
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				_, _ = w.Write([]byte(`{"message":"validation failed"}`))
+			}))
+			defer srv.Close()
 
-func TestCreateBranchRuleset_Error(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		_, _ = w.Write([]byte(`{"message":"validation failed"}`))
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	err := c.CreateBranchRuleset("owner", "repo", []string{}, BranchProtectionOptions{})
-	if err == nil {
-		t.Error("expected error for 422 response")
-	}
-}
-
-func TestCreateTagRuleset_Error(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		_, _ = w.Write([]byte(`{"message":"validation failed"}`))
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	err := c.CreateTagRuleset("owner", "repo")
-	if err == nil {
-		t.Error("expected error for 422 response")
+			c := NewClient("t", false).WithBaseURL(srv.URL)
+			err := tt.fn(c)
+			if err == nil {
+				t.Error("expected error for 422 response")
+			}
+		})
 	}
 }
 
@@ -469,73 +491,62 @@ func TestNewClient_EmptyToken(t *testing.T) {
 	}
 }
 
-func TestCreateRepo_Error(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		_, _ = w.Write([]byte(`{"message":"name already exists"}`))
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	err := c.CreateRepo("taken", false)
-	if err == nil {
-		t.Error("expected error for 422 response")
+func TestErrorResponses(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     int
+		fn         func(*Client) error
+	}{
+		{
+			name:   "CreateRepo 422",
+			status: http.StatusUnprocessableEntity,
+			fn: func(c *Client) error {
+				return c.CreateRepo("taken", false)
+			},
+		},
+		{
+			name:   "ApplyGeneralSettings 404",
+			status: http.StatusNotFound,
+			fn: func(c *Client) error {
+				return c.ApplyGeneralSettings("owner", "repo")
+			},
+		},
+		{
+			name:   "ApplyClassicBranchProtection 403",
+			status: http.StatusForbidden,
+			fn: func(c *Client) error {
+				return c.ApplyClassicBranchProtection("owner", "repo", "main", DefaultStatusChecks, BranchProtectionOptions{})
+			},
+		},
+		{
+			name:   "RemoveClassicBranchProtection 404",
+			status: http.StatusNotFound,
+			fn: func(c *Client) error {
+				return c.RemoveClassicBranchProtection("owner", "repo", "main")
+			},
+		},
+		{
+			name:   "EnableSecurity 403",
+			status: http.StatusForbidden,
+			fn: func(c *Client) error {
+				return c.EnableSecurity("owner", "repo", "private")
+			},
+		},
 	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(`{"message":"error"}`))
+			}))
+			defer srv.Close()
 
-func TestApplyGeneralSettings_Error(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"message":"Not Found"}`))
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	err := c.ApplyGeneralSettings("owner", "repo")
-	if err == nil {
-		t.Error("expected error for 404 response")
-	}
-}
-
-func TestApplyClassicBranchProtection_Error(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"message":"forbidden"}`))
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	err := c.ApplyClassicBranchProtection("owner", "repo", "main", DefaultStatusChecks, BranchProtectionOptions{})
-	if err == nil {
-		t.Error("expected error for 403 response")
-	}
-}
-
-func TestRemoveClassicBranchProtection_Error(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"message":"Not Found"}`))
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	err := c.RemoveClassicBranchProtection("owner", "repo", "main")
-	if err == nil {
-		t.Error("expected error for 404 response")
-	}
-}
-
-func TestEnableSecurity_Error(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"message":"forbidden"}`))
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	err := c.EnableSecurity("owner", "repo", "private")
-	if err == nil {
-		t.Error("expected error for 403 response")
+			c := NewClient("t", false).WithBaseURL(srv.URL)
+			err := tt.fn(c)
+			if err == nil {
+				t.Error("expected error")
+			}
+		})
 	}
 }
 
