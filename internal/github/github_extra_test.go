@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
@@ -68,7 +67,7 @@ func TestAnyFileExists(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				status, ok := tt.resps[r.URL.Path]
 				if !ok {
 					status = http.StatusNotFound
@@ -76,8 +75,6 @@ func TestAnyFileExists(t *testing.T) {
 				w.WriteHeader(status)
 			}))
 			defer srv.Close()
-
-			c := NewClient("t", false).WithBaseURL(srv.URL)
 			got, err := c.AnyFileExists("owner", "repo", tt.paths)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("AnyFileExists() error = %v, wantErr %v", err, tt.wantErr)
@@ -129,10 +126,8 @@ func TestFileStatus(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(newJSONResponseHandler(tt.status, tt.response))
+			srv, c := newTestServer(newJSONResponseHandler(tt.status, tt.response))
 			defer srv.Close()
-
-			c := NewClient("t", false).WithBaseURL(srv.URL)
 			got, err := c.FileStatus("owner", "repo", "test.md", []byte(tt.content))
 			if (err != nil) != tt.wantErr {
 				t.Errorf("FileStatus() error = %v, wantErr %v", err, tt.wantErr)
@@ -185,10 +180,9 @@ func TestUpsertFile_UpdateAndErrorStatus(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(tt.handler)
+			srv, c := newTestServer(tt.handler)
 			defer srv.Close()
 
-			c := NewClient("t", false).WithBaseURL(srv.URL)
 			action, err := c.UpsertFile("owner", "repo", "test.md", []byte("new"))
 			if tt.wantErr {
 				if err == nil {
@@ -240,10 +234,8 @@ func TestRulesetExists(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(newJSONResponseHandler(tt.statusCode, tt.response))
+			srv, c := newTestServer(newJSONResponseHandler(tt.statusCode, tt.response))
 			defer srv.Close()
-
-			c := NewClient("t", false).WithBaseURL(srv.URL)
 			got, err := c.RulesetExists("owner", "repo", "protect-main")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -303,7 +295,7 @@ func TestEnsureRulesets(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			postCalled := false
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
 					w.WriteHeader(http.StatusOK)
 					var out any
@@ -319,8 +311,6 @@ func TestEnsureRulesets(t *testing.T) {
 				}
 			}))
 			defer srv.Close()
-
-			c := NewClient("t", false).WithBaseURL(srv.URL)
 			err := tt.fn(c)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -352,10 +342,8 @@ func TestCreateRulesetErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(newErrorResponseHandler(http.StatusUnprocessableEntity))
+			srv, c := newTestServer(newErrorResponseHandler(http.StatusUnprocessableEntity))
 			defer srv.Close()
-
-			c := NewClient("t", false).WithBaseURL(srv.URL)
 			err := tt.fn(c)
 			if err == nil {
 				t.Error("expected error for 422 response")
@@ -366,7 +354,7 @@ func TestCreateRulesetErrors(t *testing.T) {
 
 func TestCreateBranchRuleset_WithStatusChecks(t *testing.T) {
 	var postBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Decode the body to inspect
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -375,8 +363,6 @@ func TestCreateBranchRuleset_WithStatusChecks(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": 1})
 	}))
 	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
 	err := c.CreateBranchRuleset("owner", "repo", []string{"ci"}, BranchProtectionOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -427,14 +413,12 @@ func TestCreateBranchRuleset_DedupStatusChecks(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var postBody map[string]any
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_ = json.NewDecoder(r.Body).Decode(&postBody)
 				w.WriteHeader(http.StatusCreated)
 				_ = json.NewEncoder(w).Encode(map[string]any{"id": 1})
 			}))
 			defer srv.Close()
-
-			c := NewClient("t", false).WithBaseURL(srv.URL)
 			err := c.CreateBranchRuleset("owner", "repo", tt.statusChecks, BranchProtectionOptions{})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -522,10 +506,9 @@ func TestErrorResponses(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(newErrorResponseHandler(tt.status))
+			srv, c := newTestServer(newErrorResponseHandler(tt.status))
 			defer srv.Close()
 
-			c := NewClient("t", false).WithBaseURL(srv.URL)
 			err := tt.fn(c)
 			if err == nil {
 				t.Error("expected error")
@@ -537,12 +520,10 @@ func TestErrorResponses(t *testing.T) {
 func TestClassicProtectionExists_Error(t *testing.T) {
 	// The function doesn't return an error for non-200 status — it just returns false
 	// Test that API errors still propagate
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
 	exists, err := c.ClassicProtectionExists("owner", "repo", "main")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -553,7 +534,7 @@ func TestClassicProtectionExists_Error(t *testing.T) {
 }
 
 func TestClient_DoVerbose(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, _ := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()

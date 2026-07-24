@@ -3,7 +3,6 @@ package github
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
@@ -35,7 +34,7 @@ func TestCreateRulesets(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			called := false
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if tt.pathCheck(r.Method, r.URL.Path) {
 					called = true
 				}
@@ -43,8 +42,6 @@ func TestCreateRulesets(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"id": 1})
 			}))
 			defer srv.Close()
-
-			c := NewClient("t", false).WithBaseURL(srv.URL)
 			if err := tt.fn(c); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

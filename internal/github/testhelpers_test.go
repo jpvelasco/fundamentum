@@ -3,6 +3,7 @@ package github
 import (
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 )
 
@@ -70,4 +71,12 @@ func newMethodSplitTransportClient(baseURL, failOnMethod string) *Client {
 	c := NewClient("t", false).WithBaseURL(baseURL)
 	c.client = &http.Client{Transport: methodFailingTransport{base: http.DefaultTransport, failOnMethod: failOnMethod}}
 	return c
+}
+
+// newTestServer creates an httptest.Server with the given handler and returns
+// the server plus a Client configured to point at it. The caller must defer
+// the returned server's Close() call.
+func newTestServer(handler http.HandlerFunc) (*httptest.Server, *Client) {
+	srv := httptest.NewServer(handler)
+	return srv, NewClient("t", false).WithBaseURL(srv.URL)
 }

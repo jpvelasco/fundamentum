@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
@@ -95,10 +94,8 @@ func TestUpsertFile(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(tt.handler)
+			srv, c := newTestServer(tt.handler)
 			defer srv.Close()
-
-			c := NewClient("t", false).WithBaseURL(srv.URL)
 			action, err := c.UpsertFile("owner", "repo", tt.filePath, tt.content)
 
 			if tt.wantErr {
