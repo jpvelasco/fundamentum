@@ -12,6 +12,31 @@ import (
 	"github.com/jpvelasco/fundamentum/internal/wizard"
 )
 
+// newBuildItemsTest is a shared setup helper for TestBuildItems_* tests.
+// It creates a mock HTTP server with the given handler, renders templates with the specified visibility,
+// and calls buildItems, returning the resulting items for assertion in the test.
+func newBuildItemsTest(t *testing.T, handler http.HandlerFunc, visibility string) []wizard.Item {
+	t.Helper()
+	return newBuildItemsTestFull(t, handler, visibility, false, false, false)
+}
+
+// newBuildItemsTestFull is newBuildItemsTest with explicit control over the
+// rulesetExists/tagExists/classicExists inputs to buildItems.
+func newBuildItemsTestFull(t *testing.T, handler http.HandlerFunc, visibility string, rulesetExists, tagExists, classicExists bool) []wizard.Item {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: visibility}
+	rendered, err := templates.Render(data)
+	if err != nil {
+		t.Fatalf("Render() error: %v", err)
+	}
+
+	return buildItems(c, "owner", "repo", "main", visibility, rendered, rulesetExists, tagExists, classicExists, github.BranchProtectionOptions{})
+}
+
 func TestNewCmd(t *testing.T) {
 	cmd := NewCmd()
 	if cmd.Use != "apply OWNER/REPO" {
@@ -107,19 +132,9 @@ func TestBranchProtectionItem_Creation(t *testing.T) {
 }
 
 func TestBuildItems_Public(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"}
-	rendered, err := templates.Render(data)
-	if err != nil {
-		t.Fatalf("Render() error: %v", err)
-	}
-
-	items := buildItems(c, "owner", "repo", "main", "public", rendered, false, false, false, github.BranchProtectionOptions{})
+	}), "public")
 
 	// Check that CodeQL is in the security item name for public repos
 	foundSecurity := false
@@ -135,19 +150,9 @@ func TestBuildItems_Public(t *testing.T) {
 }
 
 func TestBuildItems_Private(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"}
-	rendered, err := templates.Render(data)
-	if err != nil {
-		t.Fatalf("Render() error: %v", err)
-	}
-
-	items := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{})
+	}), "private")
 
 	// Check that CodeQL is NOT in the security item for private repos
 	for _, item := range items {
@@ -174,21 +179,11 @@ func TestBuildItems_NoOverwrite(t *testing.T) {
 	t.Cleanup(func() { globals.NoOverwrite = false })
 	globals.NoOverwrite = true
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Return existing file with different content
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"content":"b2xkCg==","sha":"abc"}`))
-	}))
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"}
-	rendered, err := templates.Render(data)
-	if err != nil {
-		t.Fatalf("Render() error: %v", err)
-	}
-
-	items := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{})
+	}), "private")
 
 	// With --no-overwrite, files that exist should be skipped (not updated)
 	for _, item := range items {
@@ -202,24 +197,14 @@ func TestBuildItems_AliasExists(t *testing.T) {
 	t.Cleanup(func() { globals.NoOverwrite = false })
 
 	// Mock: CODEOWNERS at root exists (alias of .github/CODEOWNERS)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/contents/CODEOWNERS") && !strings.Contains(r.URL.Path, ".github") {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"content":"d29ybGQ="}`))
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"}
-	rendered, err := templates.Render(data)
-	if err != nil {
-		t.Fatalf("Render() error: %v", err)
-	}
-
-	items := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{})
+	}), "private")
 
 	// CODEOWNERS should be skipped because the alias at root exists
 	for _, item := range items {
@@ -235,20 +220,10 @@ func TestBuildItems_FileStatusUpdate(t *testing.T) {
 	t.Cleanup(func() { globals.NoOverwrite = false })
 
 	// All files return "update" status (exist with different content)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"content":"b2xkCg==","sha":"abc"}`))
-	}))
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"}
-	rendered, err := templates.Render(data)
-	if err != nil {
-		t.Fatalf("Render() error: %v", err)
-	}
-
-	items := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{})
+	}), "private")
 
 	// Non-alias files should be ActionUpdate
 	foundUpdate := false
@@ -264,20 +239,10 @@ func TestBuildItems_FileStatusUpdate(t *testing.T) {
 }
 
 func TestBuildItems_ClassicExists(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	items := newBuildItemsTestFull(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"id":1}`))
-	}))
-	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"}
-	rendered, err := templates.Render(data)
-	if err != nil {
-		t.Fatalf("Render() error: %v", err)
-	}
-
-	items := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, true, github.BranchProtectionOptions{})
+	}), "private", false, false, true)
 
 	// Branch protection should be ActionUpgrade
 	foundUpgrade := false
