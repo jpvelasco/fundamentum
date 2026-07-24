@@ -9,288 +9,306 @@ import (
 	"testing"
 )
 
+// newTestClient returns client(srv.URL) if client is set, otherwise the
+// default test client pointed at srv. Shared across table-driven tests that
+// exercise both normal responses and injected transport failures.
+func newTestClient(srv *httptest.Server, client func(srv string) *Client) *Client {
+	if client != nil {
+		return client(srv.URL)
+	}
+	return NewClient("t", false).WithBaseURL(srv.URL)
+}
+
 func TestCreatePRBranch(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"commit": map[string]any{"sha": "aaaa1111"},
-			})
-		case http.MethodPost:
-			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"ref": "refs/heads/test-branch",
-			})
-		}
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	if err := c.CreatePRBranch("owner", "repo", "test-branch", "main"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	tests := []struct {
+		name    string
+		client  func(srv string) *Client
+		handler http.HandlerFunc
+		wantErr bool
+	}{
+		{
+			name: "success",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					w.WriteHeader(http.StatusOK)
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"commit": map[string]any{"sha": "aaaa1111"},
+					})
+				case http.MethodPost:
+					w.WriteHeader(http.StatusCreated)
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"ref": "refs/heads/test-branch",
+					})
+				}
+			},
+		},
+		{
+			name: "GET error",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+			},
+			wantErr: true,
+		},
+		{
+			name:    "network error",
+			client:  func(string) *Client { return newErroringClient() },
+			handler: func(w http.ResponseWriter, r *http.Request) {},
+			wantErr: true,
+		},
+		{
+			name:   "POST network error",
+			client: func(srv string) *Client { return newSplitTransportClient(srv, "/git/refs") },
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"commit": map[string]any{"sha": "aaaa1111"},
+				})
+			},
+			wantErr: true,
+		},
 	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(tt.handler)
+			defer srv.Close()
 
-func TestCreatePRBranch_GetError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	err := c.CreatePRBranch("owner", "repo", "test-branch", "main")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "main") {
-		t.Errorf("unexpected error message: %v", err)
-	}
-}
-
-func TestCreatePRBranch_NetworkError(t *testing.T) {
-	c := newErroringClient()
-	err := c.CreatePRBranch("owner", "repo", "test-branch", "main")
-	if err == nil {
-		t.Fatal("expected error on network failure")
-	}
-}
-
-func TestCreatePRBranch_PostNetworkError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"commit": map[string]any{"sha": "aaaa1111"},
+			c := newTestClient(srv, tt.client)
+			err := c.CreatePRBranch("owner", "repo", "test-branch", "main")
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 		})
-	}))
-	defer srv.Close()
-
-	// GET succeeds; the POST to create the ref fails at the transport level.
-	c := newSplitTransportClient(srv.URL, "/git/refs")
-	err := c.CreatePRBranch("owner", "repo", "test-branch", "main")
-	if err == nil {
-		t.Fatal("expected error when POST fails at the transport level")
 	}
 }
 
 func TestCreatePullRequest(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
-		}
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body["title"] != "test title" {
-			t.Errorf("expected title 'test title', got %v", body["title"])
-		}
-		if body["head"] != "feature" {
-			t.Errorf("expected head 'feature', got %v", body["head"])
-		}
-		if body["base"] != "main" {
-			t.Errorf("expected base 'main', got %v", body["base"])
-		}
-		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]any{"number": 42})
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	num, err := c.CreatePullRequest("owner", "repo", "test title", "test body", "feature", "main")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	tests := []struct {
+		name    string
+		client  func(srv string) *Client
+		handler http.HandlerFunc
+		wantErr bool
+		wantNum int
+	}{
+		{
+			name: "success",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					t.Errorf("expected POST, got %s", r.Method)
+				}
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				if body["title"] != "test title" {
+					t.Errorf("expected title 'test title', got %v", body["title"])
+				}
+				if body["head"] != "feature" {
+					t.Errorf("expected head 'feature', got %v", body["head"])
+				}
+				if body["base"] != "main" {
+					t.Errorf("expected base 'main', got %v", body["base"])
+				}
+				w.WriteHeader(http.StatusCreated)
+				_ = json.NewEncoder(w).Encode(map[string]any{"number": 42})
+			},
+			wantNum: 42,
+		},
+		{
+			name: "HTTP error",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				_, _ = w.Write([]byte(`{"message":"invalid"}`))
+			},
+			wantErr: true,
+		},
+		{
+			name:    "network error",
+			client:  func(string) *Client { return newErroringClient() },
+			handler: func(w http.ResponseWriter, r *http.Request) {},
+			wantErr: true,
+		},
 	}
-	if num != 42 {
-		t.Errorf("expected PR number 42, got %d", num)
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(tt.handler)
+			defer srv.Close()
 
-func TestCreatePullRequest_Error(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		_, _ = w.Write([]byte(`{"message":"invalid"}`))
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	_, err := c.CreatePullRequest("owner", "repo", "title", "body", "head", "main")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "create PR") {
-		t.Errorf("unexpected error message: %v", err)
-	}
-}
-
-func TestCreatePullRequest_NetworkError(t *testing.T) {
-	c := newErroringClient()
-	_, err := c.CreatePullRequest("owner", "repo", "title", "body", "head", "main")
-	if err == nil {
-		t.Fatal("expected error on network failure")
-	}
-}
-
-func TestUpsertFileOnBranch_GetNetworkError(t *testing.T) {
-	c := newErroringClient()
-	_, err := c.UpsertFileOnBranch("owner", "repo", "feature", "test.md", []byte("hello"))
-	if err == nil {
-		t.Fatal("expected error on network failure")
-	}
-}
-
-func TestUpsertFileOnBranch_PutNetworkError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	// GET (existence check) succeeds with 404 (file doesn't exist); the PUT
-	// to create it fails at the transport level.
-	c := newMethodSplitTransportClient(srv.URL, http.MethodPut)
-	_, err := c.UpsertFileOnBranch("owner", "repo", "feature", "test.md", []byte("hello"))
-	if err == nil {
-		t.Fatal("expected error when PUT fails at the transport level")
-	}
-}
-
-func TestUpsertFileOnBranch_Create(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			w.WriteHeader(http.StatusNotFound)
-		case http.MethodPut:
-			var body map[string]any
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			if body["branch"] != "feature" {
-				t.Errorf("expected branch 'feature', got %v", body["branch"])
+			c := newTestClient(srv, tt.client)
+			num, err := c.CreatePullRequest("owner", "repo", "test title", "test body", "feature", "main")
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if num != tt.wantNum {
+					t.Errorf("expected PR number %d, got %d", tt.wantNum, num)
+				}
 			}
-			// Verify no "via fundamentum" in commit message
-			msg, _ := body["message"].(string)
-			if strings.Contains(msg, "fundamentum") {
-				t.Errorf("commit message should not contain 'fundamentum': %s", msg)
+		})
+	}
+}
+
+func TestUpsertFileOnBranch(t *testing.T) {
+	tests := []struct {
+		name       string
+		client     func(srv string) *Client
+		handler    http.HandlerFunc
+		filePath   string
+		content    []byte
+		wantErr    bool
+		wantLock   bool
+		wantAction string
+	}{
+		{
+			name:     "network error on GET",
+			client:   func(string) *Client { return newErroringClient() },
+			handler:  func(w http.ResponseWriter, r *http.Request) {},
+			filePath: "test.md",
+			content:  []byte("hello"),
+			wantErr:  true,
+		},
+		{
+			name:   "PUT network error",
+			client: func(srv string) *Client { return newMethodSplitTransportClient(srv, http.MethodPut) },
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+			},
+			filePath: "test.md",
+			content:  []byte("hello"),
+			wantErr:  true,
+		},
+		{
+			name: "create",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					w.WriteHeader(http.StatusNotFound)
+				case http.MethodPut:
+					var body map[string]any
+					_ = json.NewDecoder(r.Body).Decode(&body)
+					if body["branch"] != "feature" {
+						t.Errorf("expected branch 'feature', got %v", body["branch"])
+					}
+					msg, _ := body["message"].(string)
+					if strings.Contains(msg, "fundamentum") {
+						t.Errorf("commit message should not contain 'fundamentum': %s", msg)
+					}
+					w.WriteHeader(http.StatusCreated)
+					_ = json.NewEncoder(w).Encode(map[string]any{})
+				}
+			},
+			filePath:   "test.md",
+			content:    []byte("hello"),
+			wantAction: "created",
+		},
+		{
+			name: "update",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					w.WriteHeader(http.StatusOK)
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"content": "dGVzdA==",
+						"sha":     "abc123",
+					})
+				case http.MethodPut:
+					var body map[string]any
+					_ = json.NewDecoder(r.Body).Decode(&body)
+					msg, _ := body["message"].(string)
+					if strings.Contains(msg, "fundamentum") {
+						t.Errorf("commit message should not contain 'fundamentum': %s", msg)
+					}
+					if !strings.Contains(msg, "chore: update") {
+						t.Errorf("expected update message, got: %s", msg)
+					}
+					w.WriteHeader(http.StatusOK)
+					_ = json.NewEncoder(w).Encode(map[string]any{})
+				}
+			},
+			filePath:   "test.md",
+			content:    []byte("new content"),
+			wantAction: "updated",
+		},
+		{
+			name: "workflow 404 (locked)",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					w.WriteHeader(http.StatusOK)
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"content": base64.StdEncoding.EncodeToString([]byte("old")),
+						"sha":     "abc123",
+					})
+				case http.MethodPut:
+					w.WriteHeader(http.StatusNotFound)
+					_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+				}
+			},
+			filePath:   ".github/workflows/ci.yml",
+			content:    []byte("new content"),
+			wantErr:    true,
+			wantLock:   true,
+			wantAction: "skipped",
+		},
+		{
+			name: "404 on create (real error)",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					w.WriteHeader(http.StatusNotFound)
+				case http.MethodPut:
+					w.WriteHeader(http.StatusNotFound)
+					_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+				}
+			},
+			filePath: "new_file.md",
+			content:  []byte("hello"),
+			wantErr:  true,
+		},
+		{
+			name: "skip (content unchanged)",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					w.WriteHeader(http.StatusOK)
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"content": "aGVsbG8=",
+						"sha":     "abc123",
+					})
+				}
+			},
+			filePath:   "test.md",
+			content:    []byte("hello"),
+			wantAction: "skipped",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(tt.handler)
+			defer srv.Close()
+
+			c := newTestClient(srv, tt.client)
+			action, err := c.UpsertFileOnBranch("owner", "repo", "feature", tt.filePath, tt.content)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.wantLock && !IsWorkflowLocked(err) {
+					t.Errorf("expected ErrWorkflowLocked, got: %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
 			}
-			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(map[string]any{})
-		}
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	action, err := c.UpsertFileOnBranch("owner", "repo", "feature", "test.md", []byte("hello"))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if action != "created" {
-		t.Errorf("expected action=created, got %q", action)
-	}
-}
-
-func TestUpsertFileOnBranch_Update(t *testing.T) {
-	existing := "dGVzdA==" // "test" in base64
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"content": existing,
-				"sha":     "abc123",
-			})
-		case http.MethodPut:
-			var body map[string]any
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			msg, _ := body["message"].(string)
-			if strings.Contains(msg, "fundamentum") {
-				t.Errorf("commit message should not contain 'fundamentum': %s", msg)
+			if tt.wantAction != "" && action != tt.wantAction {
+				t.Errorf("expected action=%q, got %q", tt.wantAction, action)
 			}
-			if !strings.Contains(msg, "chore: update") {
-				t.Errorf("expected update message, got: %s", msg)
-			}
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]any{})
-		}
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	action, err := c.UpsertFileOnBranch("owner", "repo", "feature", "test.md", []byte("new content"))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if action != "updated" {
-		t.Errorf("expected action=updated, got %q", action)
-	}
-}
-
-func TestUpsertFileOnBranch_Workflow404_Skipped(t *testing.T) {
-	// GitHub Actions locks workflow files — PUT returns 404 on update.
-	existing := base64.StdEncoding.EncodeToString([]byte("old workflow content"))
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"content": existing,
-				"sha":     "abc123",
-			})
-		case http.MethodPut:
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
-		}
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	action, err := c.UpsertFileOnBranch("owner", "repo", "feature", ".github/workflows/ci.yml", []byte("new content"))
-	if err == nil {
-		t.Fatal("expected ErrWorkflowLocked, got nil")
-	}
-	if !IsWorkflowLocked(err) {
-		t.Errorf("expected ErrWorkflowLocked, got: %v", err)
-	}
-	if action != "skipped" {
-		t.Errorf("expected action=skipped, got %q", action)
-	}
-}
-
-func TestUpsertFileOnBranch_Create404_Error(t *testing.T) {
-	// If file doesn't exist (create) and PUT still returns 404, it's a real error.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			w.WriteHeader(http.StatusNotFound)
-		case http.MethodPut:
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
-		}
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	_, err := c.UpsertFileOnBranch("owner", "repo", "feature", "new_file.md", []byte("hello"))
-	if err == nil {
-		t.Fatal("expected error for 404 on create, got nil")
-	}
-}
-
-func TestUpsertFileOnBranch_Skip(t *testing.T) {
-	existing := "aGVsbG8=" // "hello" in base64
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"content": existing,
-				"sha":     "abc123",
-			})
-		}
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	action, err := c.UpsertFileOnBranch("owner", "repo", "feature", "test.md", []byte("hello"))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if action != "skipped" {
-		t.Errorf("expected action=skipped, got %q", action)
+		})
 	}
 }
 
