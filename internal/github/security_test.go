@@ -1,6 +1,7 @@
 package github
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -30,7 +31,7 @@ func TestEnableSecurity(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				paths[r.Method+":"+r.URL.Path] = true
 				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`{}`))
+				_ = json.NewEncoder(w).Encode(map[string]any{})
 			}))
 			defer srv.Close()
 
@@ -55,65 +56,71 @@ func TestEnableSecurity(t *testing.T) {
 	}
 }
 
-func TestEnableSecurity_NetworkError(t *testing.T) {
-	c := newErroringClient()
-	err := c.EnableSecurity("owner", "repo", "private")
-	if err == nil {
-		t.Fatal("expected error on network failure")
+func TestEnableSecurity_Errors(t *testing.T) {
+	tests := []struct {
+		name       string
+		visibility string
+		handler    http.HandlerFunc
+		client     func(srv string) *Client
+	}{
+		{
+			name:       "network error",
+			visibility: "private",
+			client:     func(string) *Client { return newErroringClient() },
+			handler:    func(w http.ResponseWriter, r *http.Request) {},
+		},
+		{
+			name:       "secret scanning bad status",
+			visibility: "private",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodPut:
+					w.WriteHeader(http.StatusOK)
+				case http.MethodPatch:
+					w.WriteHeader(http.StatusInternalServerError)
+					_ = json.NewEncoder(w).Encode(map[string]string{"message": "internal error"})
+				}
+			},
+		},
+		{
+			name:       "CodeQL network error",
+			visibility: "public",
+			client:     func(srv string) *Client { return newSplitTransportClient(srv, "code-scanning") },
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			},
+		},
+		{
+			name:       "CodeQL bad status",
+			visibility: "public",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodPut:
+					w.WriteHeader(http.StatusOK)
+				case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "code-scanning"):
+					w.WriteHeader(http.StatusForbidden)
+					_ = json.NewEncoder(w).Encode(map[string]string{"message": "Advanced Security required"})
+				case r.Method == http.MethodPatch:
+					w.WriteHeader(http.StatusOK)
+				}
+			},
+		},
 	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(tt.handler)
+			defer srv.Close()
 
-func TestEnableSecurity_SecretScanningBadStatus(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodPut:
-			w.WriteHeader(http.StatusOK)
-		case http.MethodPatch:
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{"message":"internal error"}`))
-		}
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	err := c.EnableSecurity("owner", "repo", "private")
-	if err == nil {
-		t.Fatal("expected error for bad secret-scanning status")
-	}
-}
-
-func TestEnableCodeQL_NetworkError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-
-	// PUTs and the first PATCH (secret scanning) succeed; the code-scanning
-	// PATCH fails at the transport level, exercising enableCodeQL's err != nil branch.
-	c := newSplitTransportClient(srv.URL, "code-scanning")
-	err := c.EnableSecurity("owner", "repo", "public")
-	if err == nil {
-		t.Fatal("expected error when CodeQL enable fails at the transport level")
-	}
-}
-
-func TestEnableCodeQL_BadStatus(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPut:
-			w.WriteHeader(http.StatusOK)
-		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "code-scanning"):
-			w.WriteHeader(http.StatusForbidden)
-			_, _ = w.Write([]byte(`{"message":"Advanced Security required"}`))
-		case r.Method == http.MethodPatch:
-			w.WriteHeader(http.StatusOK)
-		}
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", false).WithBaseURL(srv.URL)
-	err := c.EnableSecurity("owner", "repo", "public")
-	if err == nil {
-		t.Fatal("expected error for bad CodeQL status")
+			var c *Client
+			if tt.client != nil {
+				c = tt.client(srv.URL)
+			} else {
+				c = NewClient("t", false).WithBaseURL(srv.URL)
+			}
+			err := c.EnableSecurity("owner", "repo", tt.visibility)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+		})
 	}
 }

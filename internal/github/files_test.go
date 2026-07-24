@@ -10,12 +10,12 @@ import (
 
 func TestUpsertFile(t *testing.T) {
 	tests := []struct {
-		name     string
-		handler  http.HandlerFunc
-		filePath string
-		content  []byte
-		wantErr  bool
-		wantLock bool
+		name       string
+		handler    http.HandlerFunc
+		filePath   string
+		content    []byte
+		wantErr    bool
+		wantLock   bool
 		wantAction string
 	}{
 		{
@@ -31,8 +31,8 @@ func TestUpsertFile(t *testing.T) {
 					return
 				}
 			},
-			filePath: "CONTRIBUTING.md",
-			content: []byte("hello"),
+			filePath:   "CONTRIBUTING.md",
+			content:    []byte("hello"),
 			wantAction: "created",
 		},
 		{
@@ -53,10 +53,10 @@ func TestUpsertFile(t *testing.T) {
 					return
 				}
 			},
-			filePath: ".github/workflows/ci.yml",
-			content: []byte("new content"),
-			wantErr: true,
-			wantLock: true,
+			filePath:   ".github/workflows/ci.yml",
+			content:    []byte("new content"),
+			wantErr:    true,
+			wantLock:   true,
 			wantAction: "skipped",
 		},
 		{
@@ -73,8 +73,8 @@ func TestUpsertFile(t *testing.T) {
 				}
 			},
 			filePath: "new_file.md",
-			content: []byte("hello"),
-			wantErr: true,
+			content:  []byte("hello"),
+			wantErr:  true,
 		},
 		{
 			name: "skip (content unchanged)",
@@ -88,8 +88,8 @@ func TestUpsertFile(t *testing.T) {
 					return
 				}
 			},
-			filePath: "CONTRIBUTING.md",
-			content: []byte("hello"),
+			filePath:   "CONTRIBUTING.md",
+			content:    []byte("hello"),
 			wantAction: "skipped",
 		},
 	}
