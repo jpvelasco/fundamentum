@@ -3,6 +3,7 @@ package github
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -51,5 +52,68 @@ func TestEnableSecurity(t *testing.T) {
 				t.Errorf("CodeQL: got %v, want %v", hasCodeQL, tt.wantCodeQL)
 			}
 		})
+	}
+}
+
+func TestEnableSecurity_NetworkError(t *testing.T) {
+	c := newErroringClient()
+	err := c.EnableSecurity("owner", "repo", "private")
+	if err == nil {
+		t.Fatal("expected error on network failure")
+	}
+}
+
+func TestEnableSecurity_SecretScanningBadStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPut:
+			w.WriteHeader(http.StatusOK)
+		case http.MethodPatch:
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"message":"internal error"}`))
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient("t", false).WithBaseURL(srv.URL)
+	err := c.EnableSecurity("owner", "repo", "private")
+	if err == nil {
+		t.Fatal("expected error for bad secret-scanning status")
+	}
+}
+
+func TestEnableCodeQL_NetworkError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// PUTs and the first PATCH (secret scanning) succeed; the code-scanning
+	// PATCH fails at the transport level, exercising enableCodeQL's err != nil branch.
+	c := newSplitTransportClient(srv.URL, "code-scanning")
+	err := c.EnableSecurity("owner", "repo", "public")
+	if err == nil {
+		t.Fatal("expected error when CodeQL enable fails at the transport level")
+	}
+}
+
+func TestEnableCodeQL_BadStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut:
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "code-scanning"):
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"message":"Advanced Security required"}`))
+		case r.Method == http.MethodPatch:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient("t", false).WithBaseURL(srv.URL)
+	err := c.EnableSecurity("owner", "repo", "public")
+	if err == nil {
+		t.Fatal("expected error for bad CodeQL status")
 	}
 }

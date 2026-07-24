@@ -61,6 +61,30 @@ func TestApplyClassicBranchProtection(t *testing.T) {
 	}
 }
 
+func TestClassicProtectionExists_NetworkError(t *testing.T) {
+	c := newErroringClient()
+	_, err := c.ClassicProtectionExists("owner", "repo", "main")
+	if err == nil {
+		t.Fatal("expected error on network failure")
+	}
+}
+
+func TestApplyClassicBranchProtection_NetworkError(t *testing.T) {
+	c := newErroringClient()
+	err := c.ApplyClassicBranchProtection("owner", "repo", "main", DefaultStatusChecks, BranchProtectionOptions{})
+	if err == nil {
+		t.Fatal("expected error on network failure")
+	}
+}
+
+func TestRemoveClassicBranchProtection_NetworkError(t *testing.T) {
+	c := newErroringClient()
+	err := c.RemoveClassicBranchProtection("owner", "repo", "main")
+	if err == nil {
+		t.Fatal("expected error on network failure")
+	}
+}
+
 func TestRemoveClassicBranchProtection(t *testing.T) {
 	called := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
