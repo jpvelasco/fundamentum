@@ -149,7 +149,7 @@ jobs:
         #   G104 unhandled errors, G204 subprocess launched with variable,
         #   G304 file inclusion via variable, G704 (reserved) — intentionally
         #   suppressed for CLI subprocess calls and config/state file reads.
-        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.27.1 -exclude=G104,G204,G304,G704 ./...
+        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.28.0 -exclude=G104,G204,G304,G704 ./...
 
   trivy:
     name: Trivy
