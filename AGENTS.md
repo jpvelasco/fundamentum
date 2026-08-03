@@ -20,6 +20,9 @@ go test ./...
 # Test single package
 go test ./internal/github/...
 
+# Template drift gate (also runs first in pre-commit)
+go test ./internal/templatefs/ -run TestCodecovTemplateDrift -count=1
+
 # Run
 echo $env:GITHUB_TOKEN   # must be set, or pass --token
 # OWNER is the GitHub username or organization, REPO is the repository name.
@@ -29,21 +32,17 @@ go run . init OWNER/REPO
 
 Pre-commit order: template drift → build → lint → test.
 
-**Codecov template drift gate:** `TestCodecovTemplateDrift` compares live `.github/workflows/ci.yml` Codecov upload settings against the embed template `public_ci.yml` (Codecov is folded into the CI Test job, fabrica standard). Checks: `id-token: write`, `use_oidc` (literal `true` or the XOR `${{ secrets.CODECOV_TOKEN == '' }}` expression), `use_pypi`, `fail_ci_if_error`, `-covermode=atomic`, coverage `files`/`-coverprofile`, `override_commit`/`override_branch`/`override_pr`, `slug`, `report_type: test_results`, and SHA-pinned `codecov/codecov-action`. Runs in pre-commit (fail-fast) and CI job `Template drift`. Action SHAs and branch names may differ intentionally.
+**Codecov template drift gate:** `TestCodecovTemplateDrift` (`internal/templatefs/codecov_drift_test.go`) compares live `.github/workflows/ci.yml` Codecov upload settings against the embed template `public_ci.yml` (Codecov is folded into the CI Test job, fabrica standard). Checks: `id-token: write`, `use_oidc` (literal `true` or the XOR `${{ secrets.CODECOV_TOKEN == '' }}` expression), `use_pypi`, `fail_ci_if_error`, `-covermode=atomic`, coverage `files`/`-coverprofile`, `override_commit`/`override_branch`/`override_pr`, `slug`, `report_type: test_results`, and SHA-pinned `codecov/codecov-action`. Runs in pre-commit (fail-fast) and CI job `Template drift`. Action SHAs and branch names may differ intentionally.
 
-**Codecov required check (current):** branch protection uses `codecov/patch`.
-
-- Probe PR #25: uploads succeeded and Codecov had project totals.
-- GitHub only received `codecov/patch`, not `codecov/project`.
-- Prefer not re-adding `codecov/project` as required until a PR shows that check posting.
-- Exception: re-add if Codecov starts emitting `codecov/project` and you want a project gate.
+**Codecov required check (current):** branch protection requires `codecov/patch`, not `codecov/project` — Codecov only posts the former on PRs, so requiring the latter would deadlock merges. Re-add `codecov/project` only if Codecov starts posting that check.
 
 **CI job names (fabrica standard):** `.github/workflows/ci.yml` jobs are `Template drift`, `Lint`,
 `Vulnerability scan`, `Build (ubuntu-latest|windows-latest|macos-latest)`, `Test (ubuntu-latest|…)`,
-`gosec`, `Trivy`. CodeQL runs as `Analyze (actions|go)` in `codeql.yml`. macOS legs run only on push to
-`main` (PRs skip them to save minutes), so **do not** require macOS contexts in branch protection.
-When renaming/adding jobs, update the branch-protection required-status-checks list to match, or PRs
-deadlock on contexts that never report.
+`gosec`, `Trivy`, plus `Codacy Analysis` (push-to-main only — PR-level checks come from the GitHub
+integration webhook). CodeQL runs as `Analyze (actions|go)` in `codeql.yml`. macOS legs run only on
+push to `main` (PRs skip them to save minutes), so **do not** require macOS contexts in branch
+protection. When renaming/adding jobs, update the branch-protection required-status-checks list to
+match, or PRs deadlock on contexts that never report.
 
 ## PR Workflow (use with pr-auto / pr-doctor skills)
 
@@ -66,14 +65,15 @@ Two subcommands:
 - **apply OWNER/REPO** — harden an existing repo: upsert community health files, set branch protection, enable security features
 - **init OWNER/REPO** — create a new repo then apply hardening
 
-Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`.
+Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`, `--pr`.
+`init` also takes `--private` (default `true`; pass `--private=false` for public).
 
 ### Packages
 
 - `cmd/root` — root Cobra command, flags
 - `cmd/apply` — apply logic: renders templates, checks existing state, builds item list, runs wizard
 - `cmd/repoinit` — creates repo via API, then delegates to apply
-- `cmd/globals` — shared mutable flag state (DryRun, Token, Verbose, NoOverwrite)
+- `cmd/globals` — shared mutable flag state (DryRun, Token, Verbose, NoOverwrite, ViaPR)
 - `cmd/util` — shared utilities (ParseOwnerRepo)
 - `internal/github` — thin HTTP client for GitHub API (net/http, no SDK)
 - `internal/wizard` — interactive summary table + Y/N apply flow
@@ -82,10 +82,13 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`.
 
 ### Key behavior
 
-- **Branch protection**: tries modern ruleset first, falls back to classic protection on 403. **Limitation:** the classic protection API requires GitHub Pro — free-tier private repos must configure branch protection manually via Settings → Branches. Use the `--no-overwrite` flag if you only want to add missing files.
-- **File aliasing** (`cmd/apply/apply.go:89`): checks path variants before deciding create/skip/update — e.g., `CODEOWNERS` at root counts as existing even though target is `.github/CODEOWNERS`
-- **Workflow 404 handling** (`internal/github/files.go`): GitHub Actions locks workflow files — HTTP PUT returns 404 when updating an existing workflow via the Contents API. Detected as `ErrWorkflowLocked`, returns `action="skipped"` so apply continues.
+- **Branch protection**: tries modern ruleset first (names `protect-main`, `protect-version-tags`), falls back to classic protection on 403. **Limitation:** the classic protection API requires GitHub Pro — free-tier private repos must configure branch protection manually via Settings → Branches. Use the `--no-overwrite` flag if you only want to add missing files.
+- **File aliasing** (`cmd/apply/apply.go` `aliases` map in `buildItems`): checks path variants before deciding create/skip/update — e.g., `CODEOWNERS` at root counts as existing even though target is `.github/CODEOWNERS`
+- **Workflow 404 handling** (`internal/github/client.go` `putFileContents`, sentinel `ErrWorkflowLocked` in `pr.go`): GitHub Actions locks workflow files — HTTP PUT returns 404 when updating an existing workflow via the Contents API. Returns `action="skipped"` so apply continues.
+- **409 auto-fallback to PR mode** (`cmd/apply/apply.go` `applyItems`): a direct file commit rejected with 409 (branch protection requires PR) switches the remaining file changes into a single batch PR — no re-run needed.
+- **Solo/team prompt**: `apply` asks solo/team (default solo) only when the `protect-main` ruleset doesn't already exist. Solo disables the CODEOWNERS-review and stale-review-dismissal requirements so a single maintainer isn't deadlocked.
 - **`--no-overwrite`**: skips any file that already exists, even if content differs
+- **`--pr`**: batches file changes into a single PR; non-file items (settings, security, protection) still apply directly
 - Auth: `--token` flag or `GITHUB_TOKEN` env var, used as Bearer token
 
 ### Testing
@@ -111,3 +114,4 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`.
 - **Legacy `tools:` key ignored.** The `.codacy/codacy.yaml` format is from Codacy CLI v2 and not recognized by the current cloud config.
 - **Use npm CLIs via npx.** For local and cloud interaction, use `@codacy/codacy-cloud-cli` and `@codacy/analysis-cli`.
 - **Trivy noise:** Trivy reports "no patterns configured" on repos without Dockerfiles or Kubernetes manifests. Disable Trivy in the Codacy UI per-repo to eliminate this noise. If the repo adds container files later, re-enable Trivy.
+- **This-repo workflows (not shipped templates):** `.github/workflows/ci.yml` `Codacy Analysis` job (push-only) re-uploads analysis to keep the dashboard in sync; `.github/workflows/codacy-coverage.yml` (`workflow_run`) forwards the CI test artifact's coverage. `github.DefaultStatusChecks` always requires `Codacy Static Code Analysis`.
