@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Last updated: 2026-07-23
+Last updated: 2026-08-02
 
 fundamentum is a focused, free, open-source CLI (MIT License) for GitHub repo hardening — community files, branch protection, and security features in one shot with an interactive wizard. No cloud, no org batching, no audit subcommand.
 
@@ -44,7 +44,9 @@ Go CLI (Cobra). Entry: `main.go` → `cmd/root/root.go`. Two subcommands: `apply
 
 Path mapping in `resolveTarget`: `dotgithub/` → `.github/`, `dotcodacy.yml` → `.codacy.yml`. Filename prefixes gate by visibility and are stripped from the target: `public_` (public repos only), `private_` (private repos only). Top-level template files map to repo root (e.g. `public_codecov.yml` → `codecov.yml`, `socket.yml` → `socket.yml`).
 
-Shipped CI follows the **fabrica standard**: `public_ci.yml` (a full Go CI workflow — Lint, Vulnerability scan, Build/Test OS matrices, gosec, Trivy — with Codecov coverage + Test Analytics folded into the Test job's Linux leg), `private_ci.yml` (same, minus Codecov — private repos keep `private_octocov.yml` for coverage), root `codecov.yml` (project/patch gates + components), and `public_codeql.yml` (3-language matrix). There is no standalone `codecov.yml` workflow anymore.
+Shipped CI follows the **fabrica standard**: `public_ci.yml` (a full Go CI workflow — Lint, Vulnerability scan, Build/Test OS matrices, gosec, Trivy — with Codecov coverage + Test Analytics folded into the Test job's Linux leg), `private_ci.yml` (same, minus Codecov — private repos keep `private_octocov.yml` for coverage), root `public_codecov.yml` → `codecov.yml` (project/patch gates + components), and `public_codeql.yml` (2-language matrix: `actions` + `go` with autobuild; add a commented-out `javascript-typescript` leg if the target repo ships JS/TS). There is no standalone `codecov.yml` workflow in `ci.yml` anymore — Codecov is a step inside the Test job.
+
+fundamentum also ships root `socket.yml` (Socket Security supply-chain scanning via GitHub App; no visibility prefix, so it's included for every repo — requires the app installed on the target repo/org) and `public_octopus.yml` (Octopus Review, a PR-triaging bot via `pull_request_target`; public repos only, like any `public_`-prefixed template). `dependabot.yml` only watches the `github-actions` ecosystem (no `gomod` entry).
 
 ### Key behavior
 
@@ -53,7 +55,10 @@ Shipped CI follows the **fabrica standard**: `public_ci.yml` (a full Go CI workf
 - **Workflow 404 handling** (`internal/github/files.go`): GitHub locks workflow files; a PUT to update an existing workflow via the Contents API returns 404. Detected as `ErrWorkflowLocked`, returns `action="skipped"` so apply continues.
 - **`--no-overwrite`**: skips any file that already exists, even if content differs.
 - **`--pr`**: applies file changes through a PR instead of direct commits.
+- **Solo/team prompt**: `apply` asks "solo/team" interactively (default solo) only when branch protection will actually be created — skipped if the `protect-main` ruleset already exists. Solo disables the CODEOWNERS-review and stale-review-dismissal requirements (`github.BranchProtectionOptions.Solo`) so a single maintainer isn't deadlocked approving their own PRs.
+- **Default required status check**: `github.DefaultStatusChecks` always includes `"Codacy Static Code Analysis"` (fundamentum always writes `.codacy.yml`, so that check is safe to require).
 - Auth: `--token` or `GITHUB_TOKEN`, sent as Bearer token.
+- `init` also takes `--private` (default `true`); pass `--private=false` for a public repo.
 
 ### Codecov drift gate
 
@@ -73,7 +78,8 @@ Mirrors ludus: two import groups (stdlib first, then third-party + internal), `f
 
 - **Cloud CLI:** `npx --yes @codacy/codacy-cloud-cli@latest issues gh jpvelasco fundamentum --overview` (or set `CODACY_API_TOKEN`)
 - **Local analysis:** `npx --yes @codacy/analysis-cli@latest analyze`
-- CI runs Codacy as a required status check via cloud webhook — no local workflow needed.
+- PR-level Codacy checks come from the GitHub integration webhook — no workflow involved. But that webhook doesn't re-fire on push to `main` after a squash-merge, so this repo's own `.github/workflows/ci.yml` also runs a `Codacy Analysis` job (`push`-only) that re-uploads results via `@codacy/codacy-analysis-cli-action`, keeping the dashboard in sync. This job is this-repo-specific, not part of the shipped templates.
+- `.github/workflows/codacy-coverage.yml` (this repo only, not a shipped template) is a separate `workflow_run`-triggered job: it downloads the `codacy-coverage-*` artifact the CI Test job uploads and forwards it to Codacy via `codacy-coverage-reporter-action`. Split out because PR-triggered jobs must not receive the `CODACY_REPOSITORY_API_TOKEN` secret directly.
 - `.codacy.yml` controls exclude paths and engine configs. Tools **cannot** be disabled via `.codacy.yml` — only languages (`languages.<lang>.enabled: false`); disable tools on the Codacy Code patterns page. See AGENTS.md for full CLI/Trivy notes.
 
 ## PR workflow
