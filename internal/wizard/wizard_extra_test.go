@@ -153,6 +153,31 @@ func TestIsSkip(t *testing.T) {
 	}
 }
 
+// TestShouldSkipOrDryRun verifies the skip/dry-run decision logic: skip items
+// are always reported skip, dry-run items print their dry label, and live
+// items are not skipped.
+func TestShouldSkipOrDryRun(t *testing.T) {
+	tests := []struct {
+		name   string
+		item   Item
+		dryRun bool
+		want   bool
+	}{
+		{"skip item", Item{Action: ActionSkip}, false, true},
+		{"dry-run create", Item{Action: ActionCreate}, true, true},
+		{"live create", Item{Action: ActionCreate}, false, false},
+		{"dry-run update", Item{Action: ActionUpdate}, true, true},
+		{"live update", Item{Action: ActionUpdate}, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ShouldSkipOrDryRun(tt.item, tt.dryRun); got != tt.want {
+				t.Errorf("ShouldSkipOrDryRun() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLiveLabel(t *testing.T) {
 	tests := []struct {
 		action Action

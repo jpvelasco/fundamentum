@@ -3,6 +3,7 @@ package apply
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -39,6 +40,13 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	client := github.NewClient(globals.Token, globals.Verbose)
+	return runWithClient(client, owner, repo, os.Stdin, os.Stdout)
+}
+
+// runWithClient runs the apply flow against client, reading prompts from stdin
+// and writing output to stdout. Extracted from run so tests can inject a
+// mock-server client and buffers.
+func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, stdout io.Writer) error {
 	branch := "main"
 
 	// Detect repo visibility to determine which tooling to apply.
@@ -71,28 +79,28 @@ func run(cmd *cobra.Command, args []string) error {
 	// Only ask solo/team if branch protection will actually be applied.
 	// If the ruleset already exists, the question has no effect.
 	var opts github.BranchProtectionOptions
-	fmt.Printf("fundamentum apply %s/%s\n\n", owner, repo)
+	_, _ = fmt.Fprintf(stdout, "fundamentum apply %s/%s\n\n", owner, repo)
 	if !rulesetExists {
-		opts.Solo = wizard.PromptProjectType(os.Stdin, os.Stdout)
-		fmt.Println()
+		opts.Solo = wizard.PromptProjectType(stdin, stdout)
+		_, _ = fmt.Fprintln(stdout)
 	}
 
 	items := buildItems(client, owner, repo, branch, visibility, rendered, rulesetExists, tagExists, classicExists, opts)
 
-	wizard.PrintSummaryTable(os.Stdout, items, !globals.DryRun)
+	wizard.PrintSummaryTable(stdout, items, !globals.DryRun)
 
-	if wizard.ConfirmDefaults(os.Stdin, os.Stdout) {
+	if wizard.ConfirmDefaults(stdin, stdout) {
 		if err := applyItems(client, owner, repo, branch, items, globals.DryRun, globals.ViaPR); err != nil {
 			return err
 		}
 		if globals.DryRun {
-			fmt.Printf("\n  Dry run complete — no changes made.\n")
+			_, _ = fmt.Fprintf(stdout, "\n  Dry run complete — no changes made.\n")
 		} else {
-			fmt.Printf("\n  ✓ Done — https://github.com/%s/%s\n", owner, repo)
+			_, _ = fmt.Fprintf(stdout, "\n  ✓ Done — https://github.com/%s/%s\n", owner, repo)
 		}
 		return nil
 	}
-	return wizard.RunInteractive(items, globals.DryRun, os.Stdin)
+	return wizard.RunInteractive(items, globals.DryRun, stdin)
 }
 
 func buildItems(
@@ -140,6 +148,10 @@ func buildItems(
 		".github/ISSUE_TEMPLATE/feature_request.yml": {
 			".github/ISSUE_TEMPLATE/feature_request.yml",
 			".github/ISSUE_TEMPLATE/feature_request.md",
+		},
+		".github/workflows/octopus.yml": {
+			".github/workflows/octopus.yml",
+			".github/workflows/octopus-review.yml",
 		},
 	}
 
@@ -192,6 +204,16 @@ func buildItems(
 	// Security features: CodeQL only for public repos (free-tier private needs GHAS).
 	// Secret scanning and Dependabot work for all repos.
 	securityName := "Security (secret scanning, Dependabot)"
+	// When the advanced codeql.yml workflow is part of the render, default-setup
+	// CodeQL must be skipped — GitHub rejects advanced SARIF uploads while
+	// default setup is configured (it also disables the advanced workflow).
+	advancedCodeQL := false
+	for _, f := range rendered {
+		if f.Path == ".github/workflows/codeql.yml" {
+			advancedCodeQL = true
+			break
+		}
+	}
 	if visibility == "public" {
 		securityName = "Security (secret scanning, CodeQL, Dependabot)"
 	}
@@ -199,7 +221,7 @@ func buildItems(
 		Name:     securityName,
 		Action:   wizard.ActionCreate,
 		Optional: true,
-		Apply:    func() error { return c.EnableSecurity(owner, repo, visibility) },
+		Apply:    func() error { return c.EnableSecurity(owner, repo, visibility, advancedCodeQL) },
 	})
 
 	return items

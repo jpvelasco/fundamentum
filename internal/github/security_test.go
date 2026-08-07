@@ -9,14 +9,21 @@ import (
 
 func TestEnableSecurity(t *testing.T) {
 	tests := []struct {
-		name       string
-		visibility string
-		wantCodeQL bool
+		name           string
+		visibility     string
+		advancedCodeQL bool
+		wantCodeQL     bool
 	}{
 		{
 			name:       "public enables CodeQL",
 			visibility: "public",
 			wantCodeQL: true,
+		},
+		{
+			name:           "public with advanced workflow skips default setup",
+			visibility:     "public",
+			advancedCodeQL: true,
+			wantCodeQL:     false,
 		},
 		{
 			name:       "private skips CodeQL",
@@ -33,7 +40,7 @@ func TestEnableSecurity(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{})
 			}))
 			defer srv.Close()
-			if err := c.EnableSecurity("owner", "repo", tt.visibility); err != nil {
+			if err := c.EnableSecurity("owner", "repo", tt.visibility, tt.advancedCodeQL); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if !paths["PUT:/repos/owner/repo/vulnerability-alerts"] {
@@ -115,7 +122,7 @@ func TestEnableSecurity_Errors(t *testing.T) {
 			} else {
 				c = NewClient("t", false).WithBaseURL(srv.URL)
 			}
-			err := c.EnableSecurity("owner", "repo", tt.visibility)
+			err := c.EnableSecurity("owner", "repo", tt.visibility, false)
 			if err == nil {
 				t.Fatal("expected error")
 			}

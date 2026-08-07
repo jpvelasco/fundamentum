@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/jpvelasco/fundamentum/internal/github"
+	"github.com/jpvelasco/fundamentum/internal/templates"
 	"github.com/jpvelasco/fundamentum/internal/wizard"
 )
 
@@ -485,5 +486,69 @@ func TestBuildItems_AliasFormatVariants(t *testing.T) {
 				t.Errorf("expected bug_report.yml to be skipped (md alias exists), got %v", item.Action)
 			}
 		}
+	}
+}
+
+func TestBuildItems_AliasWorkflowVariants(t *testing.T) {
+	// Test alias detection for workflow name variants: an existing
+	// octopus-review.yml counts as already having the octopus.yml workflow.
+	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/octopus-review.yml") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"content":"b2xkCg=="}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}), "public")
+
+	// octopus.yml should be skipped because octopus-review.yml alias exists
+	for _, item := range items {
+		if item.Name == ".github/workflows/octopus.yml" {
+			if item.Action != wizard.ActionSkip {
+				t.Errorf("expected octopus.yml to be skipped (octopus-review.yml alias exists), got %v", item.Action)
+			}
+		}
+	}
+}
+
+func TestBuildItems_AdvancedCodeQLSkipsDefaultSetup(t *testing.T) {
+	// Public renders ship the advanced codeql.yml workflow, so the security
+	// item must NOT enable default-setup CodeQL (GitHub rejects advanced
+	// SARIF uploads while default setup is configured).
+	calledDefaultSetup := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "code-scanning/default-setup"):
+			calledDefaultSetup = true
+		case r.Method == http.MethodPut:
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case r.Method == http.MethodPatch:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":""}`))
+	}))
+	defer srv.Close()
+
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"}
+	rendered, err := templates.Render(data)
+	if err != nil {
+		t.Fatalf("Render() error: %v", err)
+	}
+	items := buildItems(c, "owner", "repo", "main", "public", rendered, false, false, false, github.BranchProtectionOptions{})
+
+	for _, item := range items {
+		if item.Name == "Security (secret scanning, CodeQL, Dependabot)" {
+			if err := item.Apply(); err != nil {
+				t.Fatalf("security item Apply() error: %v", err)
+			}
+		}
+	}
+	if calledDefaultSetup {
+		t.Error("expected no default-setup CodeQL PATCH when advanced codeql.yml workflow is rendered")
 	}
 }
