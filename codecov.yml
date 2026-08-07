@@ -1,9 +1,10 @@
 # Codecov configuration. See https://docs.codecov.com/docs/codecov-yaml
 #
-# Upload: Linux Test job in .github/workflows/ci.yml (OIDC + optional CODECOV_TOKEN).
-# CI must send override_commit/override_branch on every run (including push to
-# main) so Codecov stores base reports — otherwise PRs hit "Missing base commit"
-# / "Coverage data is unknown" (docs.codecov.com/docs/error-reference).
+# Upload: every Test matrix leg in .github/workflows/ci.yml (OIDC + optional
+# CODECOV_TOKEN). No override_* params are sent: the action derives commit and
+# branch from the checkout (fetch-depth: 0 in ci.yml), and push-to-main runs
+# upload the base report Codecov stores for PR comparison (docs.codecov.com/
+# docs/error-reference for what happens when the base report is missing).
 #
 # PR visibility: Codecov GitHub App posts `codecov/patch` + often a PR comment
 # only after BOTH base (main) and head reports process. codecov/project often

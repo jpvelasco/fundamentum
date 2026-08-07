@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 # Fail-fast: live Codecov workflow vs embed template functional parity
 # (OIDC, use_pypi, coverage flags, SHA pin). Action SHAs may differ.
 echo "→ template drift"
@@ -7,6 +7,19 @@ go test ./internal/templatefs/ -run TestCodecovTemplateDrift -count=1
 echo "→ build"
 go build ./...
 echo "→ lint"
-golangci-lint run ./...
+# Test if golangci-lint is both available and executable (AppLocker may block it)
+if command -v golangci-lint &>/dev/null && golangci-lint version &>/dev/null; then
+    golangci-lint run ./...
+else
+    echo "    golangci-lint not found or not executable, falling back to go vet"
+    go vet ./...
+fi
 echo "→ test"
+# On Windows, AppLocker may block test executables from %TEMP%.
+# Redirect Go's temp dir to a location that AppLocker allows.
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
+    GOTMPDIR="${GOTMPDIR:-$HOME/.cache/go-test-tmp}"
+    mkdir -p "$GOTMPDIR"
+    export GOTMPDIR
+fi
 go test ./...
