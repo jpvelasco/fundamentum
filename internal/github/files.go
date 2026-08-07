@@ -16,13 +16,19 @@ func contentsPath(owner, repo, path string) string {
 
 // AnyFileExists checks whether any of the given paths exists in the repo.
 // Use this to detect case-variant or path-variant duplicates before writing.
+// Only 404 counts as "missing" — any other non-200 status (401/403/500) is
+// surfaced as an error rather than silently treated as "does not exist".
 func (c *Client) AnyFileExists(owner, repo string, paths []string) (bool, error) {
 	for _, path := range paths {
 		resp, err := c.get(contentsPath(owner, repo, path))
 		if err != nil {
 			return false, fmt.Errorf("check file %s: %w", path, err)
 		}
+		statusErr := expectStatus("check file "+path, resp, http.StatusOK, http.StatusNotFound)
 		_ = resp.Body.Close()
+		if statusErr != nil {
+			return false, statusErr
+		}
 		if resp.StatusCode == http.StatusOK {
 			return true, nil
 		}

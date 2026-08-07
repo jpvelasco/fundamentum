@@ -2,7 +2,10 @@ package github
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -80,6 +83,42 @@ func TestClientPatch(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+// Given an unexpected HTTP status, expectStatus must return an error that
+// unwraps to *HTTPError carrying the status code, so callers can classify
+// errors structurally (errors.As) instead of matching on message text.
+func TestExpectStatus_ReturnsHTTPError(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     int
+		body       string
+		wantStatus int
+	}{
+		{"conflict response carries 409", http.StatusConflict, `{"message":"rule violations"}`, http.StatusConflict},
+		{"forbidden response carries 403", http.StatusForbidden, `{"message":"Forbidden"}`, http.StatusForbidden},
+		{"server error carries 500", http.StatusInternalServerError, "boom", http.StatusInternalServerError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &http.Response{
+				StatusCode: tt.status,
+				Status:     http.StatusText(tt.status),
+				Body:       io.NopCloser(strings.NewReader(tt.body)),
+			}
+			err := expectStatus("test action", resp, http.StatusOK)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			var he *HTTPError
+			if !errors.As(err, &he) {
+				t.Fatalf("expected error to unwrap to *HTTPError, got %T", err)
+			}
+			if he.StatusCode != tt.wantStatus {
+				t.Errorf("expected StatusCode %d, got %d", tt.wantStatus, he.StatusCode)
+			}
+		})
 	}
 }
 

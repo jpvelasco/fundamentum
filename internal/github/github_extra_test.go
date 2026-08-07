@@ -64,6 +64,14 @@ func TestAnyFileExists(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			// Given a server-side failure, AnyFileExists must surface the
+			// error instead of silently reporting "does not exist".
+			name:    "server error surfaces instead of false",
+			paths:   []string{"foo.md"},
+			resps:   map[string]int{"/repos/owner/repo/contents/foo.md": http.StatusInternalServerError},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

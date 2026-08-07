@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -23,7 +22,7 @@ var ErrWorkflowLocked = fmt.Errorf("workflow file locked by GitHub Actions")
 
 // IsWorkflowLocked returns true if the error wraps ErrWorkflowLocked.
 func IsWorkflowLocked(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "workflow file locked by GitHub Actions")
+	return errors.Is(err, ErrWorkflowLocked)
 }
 
 // UpsertFileOnBranch creates or updates a file on a specific branch via the Contents API.
@@ -38,6 +37,9 @@ func (c *Client) CreatePRBranch(owner, repo, branch, baseBranch string) error {
 		return fmt.Errorf("get branch %s: %w", baseBranch, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return expectStatus("get branch "+baseBranch, resp, http.StatusOK)
+	}
 	var branchInfo struct {
 		Commit struct {
 			SHA string `json:"sha"`
@@ -55,11 +57,7 @@ func (c *Client) CreatePRBranch(owner, repo, branch, baseBranch string) error {
 		return fmt.Errorf("create branch %s: %w", branch, err)
 	}
 	defer func() { _ = putResp.Body.Close() }()
-	if putResp.StatusCode != http.StatusCreated {
-		b, _ := io.ReadAll(putResp.Body)
-		return fmt.Errorf("create branch %s: %s: %s", branch, putResp.Status, b)
-	}
-	return nil
+	return expectStatus("create branch "+branch, putResp, http.StatusCreated)
 }
 
 // CreatePullRequest opens a PR from head to base. Returns the PR number.
@@ -74,9 +72,8 @@ func (c *Client) CreatePullRequest(owner, repo, title, body, head, base string) 
 		return 0, fmt.Errorf("create PR: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusCreated {
-		b, _ := io.ReadAll(resp.Body)
-		return 0, fmt.Errorf("create PR: %s: %s", resp.Status, b)
+	if err := expectStatus("create PR", resp, http.StatusCreated); err != nil {
+		return 0, err
 	}
 	var result struct {
 		Number int `json:"number"`
@@ -118,22 +115,6 @@ func (c *Client) ApplyViaPR(owner, repo, defaultBranch string, changes []FileCha
 		return 0, err
 	}
 	return prNum, nil
-}
-
-// HTTPError wraps an error with the HTTP status code for reliable error checking.
-type HTTPError struct {
-	StatusCode int
-	Msg        string
-}
-
-func (e *HTTPError) Error() string {
-	return e.Msg
-}
-
-// hasStatusCode reports whether err wraps an HTTPError with the given status code.
-func hasStatusCode(err error, code int) bool {
-	var he *HTTPError
-	return errors.As(err, &he) && he.StatusCode == code
 }
 
 // IsConflict409 returns true if the error is a 409 from branch protection rules.
