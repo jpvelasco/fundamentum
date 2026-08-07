@@ -88,12 +88,12 @@ func repoPath(owner, repo string) string {
 // when present. The final response (success or last failure) is returned so
 // callers classify it via expectStatus.
 func (c *Client) do(method, path string, body any) (*http.Response, error) {
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	for attempt := 0; ; attempt++ {
 		resp, err := c.doOnce(method, path, body)
 		if err != nil {
 			return nil, err
 		}
-		if !retryableStatus(resp) || attempt == maxAttempts-1 {
+		if !retryableStatus(resp) || attempt >= maxAttempts-1 {
 			return resp, nil
 		}
 		// Drain and close before retrying so the connection can be reused.
@@ -105,7 +105,6 @@ func (c *Client) do(method, path string, body any) (*http.Response, error) {
 		}
 		time.Sleep(delay)
 	}
-	return nil, nil // unreachable
 }
 
 func (c *Client) doOnce(method, path string, body any) (*http.Response, error) {

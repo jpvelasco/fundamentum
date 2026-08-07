@@ -281,6 +281,91 @@ func TestRetryDelay_HonorsRetryAfter(t *testing.T) {
 	}
 }
 
+// Given a verbose client, a retried request must log the retry line and still
+// succeed.
+func TestDo_VerboseRetryLogs(t *testing.T) {
+	srv, count := countingServer(http.StatusTooManyRequests, http.StatusOK)
+	defer srv.Close()
+
+	c := NewClient("t", true).WithBaseURL(srv.URL)
+	c.retryDelay = func(int, time.Duration) time.Duration { return 0 }
+	resp, err := c.get("/verbose-retry")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK || *count != 2 {
+		t.Errorf("expected retry to succeed (status 200, 2 attempts), got status %d, %d attempts", resp.StatusCode, *count)
+	}
+}
+
+// Given an unencodable body, the request must fail with a clear encode error
+// rather than panicking.
+func TestDoOnce_EncodeError(t *testing.T) {
+	c := NewClient("t", false).WithBaseURL("https://example.com")
+	_, err := c.do(http.MethodPost, "/x", make(chan int))
+	if err == nil || !strings.Contains(err.Error(), "encode request") {
+		t.Errorf("expected encode request error, got %v", err)
+	}
+}
+
+// Given an invalid method, the request must fail with a clear build error
+// rather than being sent.
+func TestDoOnce_BuildRequestError(t *testing.T) {
+	c := NewClient("t", false).WithBaseURL("https://example.com")
+	_, err := c.do("GE T", "/x", nil)
+	if err == nil || !strings.Contains(err.Error(), "build request") {
+		t.Errorf("expected build request error, got %v", err)
+	}
+}
+
+// Given no Retry-After header, backoffDelay must return exponential backoff
+// with full jitter, capped at 30s; a Retry-After value must win when present.
+func TestBackoffDelay_ExponentialJitterAndCap(t *testing.T) {
+	c := NewClient("t", false)
+	tests := []struct {
+		name       string
+		attempt    int
+		retryAfter time.Duration
+		wantMin    time.Duration
+		wantMax    time.Duration
+	}{
+		{"first retry", 0, 0, 500 * time.Millisecond, 1 * time.Second},
+		{"second retry", 1, 0, 1 * time.Second, 2 * time.Second},
+		{"capped at 30s", 6, 0, 15 * time.Second, 30 * time.Second},
+		{"retry-after wins", 0, 7 * time.Second, 7 * time.Second, 7 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := c.backoffDelay(tt.attempt, tt.retryAfter)
+			if got < tt.wantMin || got > tt.wantMax {
+				t.Errorf("backoffDelay(%d, %s) = %s, want within [%s, %s]", tt.attempt, tt.retryAfter, got, tt.wantMin, tt.wantMax)
+			}
+		})
+	}
+}
+
+// Given a Retry-After header in HTTP-date form, the retry delay must be parsed
+// as the time until that date.
+func TestRetryAfterDuration_HTTPDate(t *testing.T) {
+	future := time.Now().Add(90 * time.Second).UTC().Format(http.TimeFormat)
+	resp := &http.Response{Header: http.Header{}}
+	resp.Header.Set("Retry-After", future)
+	got := retryAfterDuration(resp)
+	if got <= 80*time.Second || got > 90*time.Second {
+		t.Errorf("expected ~90s delay from HTTP date, got %s", got)
+	}
+}
+
+// Given an unparseable Retry-After header, the retry delay must be 0 so the
+// exponential backoff fallback applies.
+func TestRetryAfterDuration_Unparseable(t *testing.T) {
+	resp := &http.Response{Header: http.Header{}}
+	resp.Header.Set("Retry-After", "not-a-date")
+	if got := retryAfterDuration(resp); got != 0 {
+		t.Errorf("expected 0 delay for unparseable Retry-After, got %s", got)
+	}
+}
+
 // Given a transport-level failure, the request must fail immediately — no
 // retry loop, no misleading sleep.
 func TestDo_NoRetryOnTransportError(t *testing.T) {
