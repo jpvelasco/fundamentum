@@ -3,13 +3,14 @@ package github
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
-	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -148,7 +149,16 @@ func (c *Client) backoffDelay(attempt int, retryAfter time.Duration) time.Durati
 		delay = 30 * time.Second
 	}
 	half := delay / 2
-	return half + time.Duration(rand.Int64N(int64(half)+1)) // #nosec G404 -- jitter for backoff timing, not security
+	return half + cryptoJitter(half)
+}
+
+// cryptoJitter returns a duration in [0, max) using crypto/rand — this is
+// retry-timing jitter, not security, but crypto/rand avoids Semgrep's
+// math/rand security finding. Only called on retries, so the cost is fine.
+func cryptoJitter(max time.Duration) time.Duration {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return time.Duration(binary.BigEndian.Uint64(b[:]) % uint64(int64(max))) // #nosec G115 -- max is a small duration
 }
 
 // retryableStatus reports whether a response signals a transient failure worth
