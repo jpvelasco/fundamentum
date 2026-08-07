@@ -43,12 +43,27 @@ Pre-commit order: template drift → build → lint → test.
 **Codecov required check (current):** branch protection requires `codecov/patch`, not `codecov/project` — Codecov only posts the former on PRs, so requiring the latter would deadlock merges. Re-add `codecov/project` only if Codecov starts posting that check.
 
 **CI job names (fabrica standard):** `.github/workflows/ci.yml` jobs are `Template drift`, `Lint`,
-`Vulnerability scan`, `Build (ubuntu-latest|windows-latest|macos-latest)`, `Test (ubuntu-latest|…)`,
-`gosec`, `Trivy`, plus `Codacy Analysis` (push-to-main only — PR-level checks come from the GitHub
+`Lint (Windows)`, `Vulnerability scan`, `Build (ubuntu-latest|windows-latest|macos-latest)`,
+`Test (ubuntu-latest|…)`, `gosec`, `Trivy`, `Release build (snapshot)` (GoReleaser build-only —
+never publishes), plus `Codacy Analysis` (push-to-main only — PR-level checks come from the GitHub
 integration webhook). CodeQL runs as `Analyze (actions|go)` in `codeql.yml`. macOS legs run only on
 push to `main` (PRs skip them to save minutes), so **do not** require macOS contexts in branch
-protection. When renaming/adding jobs, update the branch-protection required-status-checks list to
+protection. Required checks in the `protect-main` ruleset must match the reportable jobs on PRs —
+currently `Lint`, `security`, `review`, `Template drift`, `Vulnerability scan`,
+`Build (ubuntu-latest|windows-latest)`, `Test (ubuntu-latest|windows-latest)`, `gosec`, `Trivy`,
+`Analyze (actions)`, `Analyze (go)`, and `Lint (Windows)`. `Release build (snapshot)` is NOT a
+required check. When renaming/adding jobs, update the ruleset required-status-checks list to
 match, or PRs deadlock on contexts that never report.
+
+## Release (tag `v*`)
+
+`.github/workflows/release.yml` runs GoReleaser on version tags (`content: write` only; no npm
+shim — fundamentum is Go-binary only). `.goreleaser.yml` pins version ldflags to
+`cmd/root.Version` (`{{.Version}}`), archives tar.gz (zip on Windows), ignores Windows/arm64.
+The CI snapshot job (`Release build (snapshot)`) verifies the config compiles all platforms and
+smoke-tests the linux/amd64 binary's `--version` output (must not be ` dev`). Local check:
+`goreleaser build --snapshot --clean`, then run `dist/.../fundamentum.exe --version`. Never
+publish a release from CI without an explicit tag.
 
 ## PR Workflow (use with pr-auto / pr-doctor skills)
 
