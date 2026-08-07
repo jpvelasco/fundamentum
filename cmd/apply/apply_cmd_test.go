@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -275,5 +276,162 @@ func TestRun_ArgValidation(t *testing.T) {
 	err = cmd.Args(cmd, []string{})
 	if err == nil {
 		t.Error("expected error for missing arg")
+	}
+}
+
+// lineReader returns input one line at a time, mimicking terminal line-buffered
+// input so sequential bufio.Scanner-based prompts each see their own line.
+// (strings.Reader hands back the whole stream in one Read, so the first prompt
+// buffers everything and later prompts hit EOF.)
+type lineReader struct {
+	lines []string
+}
+
+func newLineReader(input string) *lineReader {
+	return &lineReader{lines: strings.Split(strings.ReplaceAll(input, "\r\n", "\n"), "\n")}
+}
+
+func (r *lineReader) Read(p []byte) (int, error) {
+	if len(r.lines) == 0 {
+		return 0, io.EOF
+	}
+	line := r.lines[0] + "\n"
+	r.lines = r.lines[1:]
+	n := copy(p, line)
+	if n < len(line) {
+		r.lines = append([]string{line[n:]}, r.lines...)
+	}
+	return n, nil
+}
+
+// newRunFlowServer returns a test server that mocks the full run() flow for a
+// public repo with no existing protection or files: visibility check, ruleset
+// checks, classic protection, file status/upsert, settings, and security.
+func newRunFlowServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
+			_, _ = w.Write([]byte(`{"visibility":"public"}`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets"):
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main/protection"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"content":{}}`))
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/vulnerability-alerts"):
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/automated-security-fixes"):
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/owner/repo":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/rulesets"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":1}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
+// TestRunWithClient_FullFlow drives the complete apply flow against a mock
+// server: visibility detection, pre-flight checks, solo prompt, defaults
+// confirmation, and direct application of all items.
+func TestRunWithClient_FullFlow(t *testing.T) {
+	srv := newRunFlowServer()
+	defer srv.Close()
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+
+	var out strings.Builder
+	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &out)
+	if err != nil {
+		t.Fatalf("runWithClient() error: %v", err)
+	}
+	if !strings.Contains(out.String(), "✓ Done — https://github.com/owner/repo") {
+		t.Errorf("expected done message, got:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "Dry run complete") {
+		t.Error("unexpected dry-run message in live flow")
+	}
+}
+
+// TestRunWithClient_InteractiveDecline verifies that declining the defaults
+// prompt routes the flow into the interactive per-item walker.
+func TestRunWithClient_InteractiveDecline(t *testing.T) {
+	srv := newRunFlowServer()
+	defer srv.Close()
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+
+	var out strings.Builder
+	err := runWithClient(c, "owner", "repo", newLineReader("solo\nn\n"), &out)
+	if err != nil {
+		t.Fatalf("runWithClient() error: %v", err)
+	}
+	// RunInteractive prints its per-item prompts to os.Stdout, so the captured
+	// buffer should show the defaults prompt was declined and no "Done" message.
+	if !strings.Contains(out.String(), "Apply all defaults? [Y/n]") {
+		t.Errorf("expected defaults prompt, got:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "✓ Done") {
+		t.Errorf("expected decline to skip the defaults apply path, got:\n%s", out.String())
+	}
+}
+
+// TestRunWithClient_DryRun verifies the dry-run path reports completion without
+// making changes.
+func TestRunWithClient_DryRun(t *testing.T) {
+	t.Cleanup(func() { globals.DryRun = false })
+	globals.DryRun = true
+
+	srv := newRunFlowServer()
+	defer srv.Close()
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+
+	var out strings.Builder
+	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &out)
+	if err != nil {
+		t.Fatalf("runWithClient() error: %v", err)
+	}
+	if !strings.Contains(out.String(), "Dry run complete — no changes made.") {
+		t.Errorf("expected dry-run message, got:\n%s", out.String())
+	}
+}
+
+// TestRunWithClient_VisibilityError verifies visibility detection failures
+// surface a wrapped error.
+func TestRunWithClient_VisibilityError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+
+	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "detect repo visibility") {
+		t.Errorf("expected visibility error, got: %v", err)
+	}
+}
+
+// TestRunWithClient_RulesetError verifies ruleset pre-flight failures surface
+// a wrapped error.
+func TestRunWithClient_RulesetError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/rulesets") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`not json`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"visibility":"public"}`))
+	}))
+	defer srv.Close()
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+
+	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "check branch ruleset") {
+		t.Errorf("expected ruleset error, got: %v", err)
 	}
 }
