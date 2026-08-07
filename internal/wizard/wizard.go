@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 )
 
@@ -59,21 +60,10 @@ func ShouldSkipOrDryRun(item Item, dryRun bool) bool {
 // applyAndPrint runs item.Apply and prints the outcome.
 func applyAndPrint(item Item) {
 	if err := item.Apply(); err != nil {
-		PrintItemError(item, err)
+		PrintItemError(os.Stdout, item, err)
 		return
 	}
 	fmt.Printf("  %-45s  ✓\n", item.Name)
-}
-
-// RunItems applies each item's Apply func, printing status as it goes.
-func RunItems(items []Item, dryRun bool) error {
-	for _, item := range items {
-		if ShouldSkipOrDryRun(item, dryRun) {
-			continue
-		}
-		applyAndPrint(item)
-	}
-	return nil
 }
 
 // RunInteractive walks through each non-skipped item asking for confirmation.
@@ -101,12 +91,13 @@ func RunInteractive(items []Item, dryRun bool, r io.Reader) error {
 	return nil
 }
 
-// PrintItemError formats an error for a wizard item to stdout.
-// Optional items show a warning; required items show an error.
-func PrintItemError(item Item, err error) {
+// PrintItemError formats an error for a wizard item to w.
+// Optional items show a warning; required items show an error. The real error
+// is always surfaced so the cause isn't guessed for the user.
+func PrintItemError(w io.Writer, item Item, err error) {
 	if item.Optional {
-		fmt.Printf("  %-45s  ⚠ requires GitHub Pro or public repo\n", item.Name)
+		_, _ = fmt.Fprintf(w, "  %-45s  ⚠ optional — failed: %v\n", item.Name, err)
 	} else {
-		fmt.Printf("  %-45s  ✗ %v\n", item.Name, err)
+		_, _ = fmt.Fprintf(w, "  %-45s  ✗ %v\n", item.Name, err)
 	}
 }

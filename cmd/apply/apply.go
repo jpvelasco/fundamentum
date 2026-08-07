@@ -302,7 +302,7 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 					continue
 				}
 				fmt.Print("\r")
-				wizard.PrintItemError(item, err)
+				wizard.PrintItemError(os.Stdout, item, err)
 			} else {
 				fmt.Printf("\r  %-45s  ✓\n", item.Name)
 			}
@@ -326,7 +326,7 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 		fmt.Printf("  %-45s  applying...", item.Name)
 		if err := item.Apply(); err != nil {
 			fmt.Print("\r")
-			wizard.PrintItemError(item, err)
+			wizard.PrintItemError(os.Stdout, item, err)
 			continue
 		}
 		fmt.Printf("\r  %-45s  ✓\n", item.Name)

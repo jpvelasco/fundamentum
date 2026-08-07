@@ -415,6 +415,52 @@ func TestIsForbidden403_HTTPError(t *testing.T) {
 	}
 }
 
+// Given two consecutive PR-mode runs, each must get its own branch name so a
+// second apply in the same second cannot collide with the first.
+func TestApplyViaPR_UniqueBranchNames(t *testing.T) {
+	var refs []string
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/"):
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{"commit": map[string]any{"sha": "aaaa1111"}})
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs"):
+			var body struct {
+				Ref string `json:"ref"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			refs = append(refs, body.Ref)
+			w.WriteHeader(http.StatusCreated)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodPut:
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/pulls"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"number":42}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	srv, c := newTestServer(handler)
+	defer srv.Close()
+
+	changes := []FileChange{{Path: "README.md", Content: []byte("hi")}}
+	if _, err := c.ApplyViaPR("owner", "repo", "main", changes); err != nil {
+		t.Fatalf("first ApplyViaPR: %v", err)
+	}
+	if _, err := c.ApplyViaPR("owner", "repo", "main", changes); err != nil {
+		t.Fatalf("second ApplyViaPR: %v", err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("expected 2 branch refs created, got %d", len(refs))
+	}
+	if refs[0] == refs[1] {
+		t.Errorf("expected distinct branch refs, got %q twice", refs[0])
+	}
+}
+
 // Given a real 409 from the API, the whole client path must produce an error
 // that IsConflict409 classifies structurally (the apply auto-fallback to PR
 // mode depends on this).
