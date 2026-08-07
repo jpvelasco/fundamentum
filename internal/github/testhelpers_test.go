@@ -74,9 +74,10 @@ func newMethodSplitTransportClient(baseURL, failOnMethod string) *Client {
 }
 
 // newTestServer creates an httptest.Server with the given handler and returns
-// the server plus a Client configured to point at it. The caller must defer
-// the returned server's Close() call.
+// the server plus a Client configured to point at it with retry backoff
+// disabled (retry timing is only under test in the dedicated retry tests). The
+// caller must defer the returned server's Close() call.
 func newTestServer(handler http.HandlerFunc) (*httptest.Server, *Client) {
 	srv := httptest.NewServer(handler)
-	return srv, NewClient("t", false).WithBaseURL(srv.URL)
+	return srv, newZeroDelayClient(srv.URL)
 }

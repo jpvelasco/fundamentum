@@ -8,15 +8,22 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const defaultBase = "https://api.github.com"
+
+// maxAttempts caps the retry loop for transient failures (429, 5xx, and 403
+// rate-limit exhaustion). Persistent failures hand back the last response.
+const maxAttempts = 3
 
 // Client makes authenticated requests to the GitHub API.
 type Client struct {
@@ -24,6 +31,9 @@ type Client struct {
 	Verbose bool
 	baseURL string
 	client  *http.Client
+	// retryDelay computes the pause before retrying; overridden in tests to
+	// zero so retry-loop tests run without sleeping.
+	retryDelay func(attempt int, retryAfter time.Duration) time.Duration
 }
 
 // NewClient creates a Client, falling back to GITHUB_TOKEN env var if token is empty.
@@ -73,7 +83,32 @@ func repoPath(owner, repo string) string {
 	return "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo)
 }
 
+// do sends one request, retrying transient failures (429, 5xx, rate-limit
+// 403) up to maxAttempts times with backoff. The Retry-After header is honored
+// when present. The final response (success or last failure) is returned so
+// callers classify it via expectStatus.
 func (c *Client) do(method, path string, body any) (*http.Response, error) {
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		resp, err := c.doOnce(method, path, body)
+		if err != nil {
+			return nil, err
+		}
+		if !retryableStatus(resp) || attempt == maxAttempts-1 {
+			return resp, nil
+		}
+		// Drain and close before retrying so the connection can be reused.
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		delay := c.backoffDelay(attempt, retryAfterDuration(resp))
+		if c.Verbose {
+			fmt.Printf("! %s %s: %s — retrying in %s\n", method, c.base()+path, resp.Status, delay.Round(time.Millisecond))
+		}
+		time.Sleep(delay)
+	}
+	return nil, nil // unreachable
+}
+
+func (c *Client) doOnce(method, path string, body any) (*http.Response, error) {
 	var buf bytes.Buffer
 	if body != nil {
 		if err := json.NewEncoder(&buf).Encode(body); err != nil {
@@ -97,6 +132,54 @@ func (c *Client) do(method, path string, body any) (*http.Response, error) {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	return c.client.Do(req)
+}
+
+// backoffDelay returns the pause before a retry. An injected retryDelay (used
+// by tests) wins; otherwise the Retry-After header is honored, falling back to
+// exponential backoff with full jitter capped at 30s.
+func (c *Client) backoffDelay(attempt int, retryAfter time.Duration) time.Duration {
+	if c.retryDelay != nil {
+		return c.retryDelay(attempt, retryAfter)
+	}
+	if retryAfter > 0 {
+		return retryAfter
+	}
+	delay := time.Duration(math.Pow(2, float64(attempt))) * time.Second
+	if delay > 30*time.Second {
+		delay = 30 * time.Second
+	}
+	half := delay / 2
+	return half + time.Duration(rand.Int64N(int64(half)+1)) // #nosec G404 -- jitter for backoff timing, not security
+}
+
+// retryableStatus reports whether a response signals a transient failure worth
+// retrying: 429 rate limit, 5xx server errors, or a 403 rate-limit exhaustion
+// (GitHub reports exhausted core limits as 403 with X-RateLimit-Remaining: 0).
+func retryableStatus(resp *http.Response) bool {
+	switch resp.StatusCode {
+	case http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	case http.StatusForbidden:
+		return resp.Header.Get("X-RateLimit-Remaining") == "0"
+	default:
+		return false
+	}
+}
+
+// retryAfterDuration parses the Retry-After header (delay-seconds or HTTP
+// date); returns 0 when absent or unparseable.
+func retryAfterDuration(resp *http.Response) time.Duration {
+	v := resp.Header.Get("Retry-After")
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(v); err == nil {
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		return time.Until(t)
+	}
+	return 0
 }
 
 func (c *Client) get(path string) (*http.Response, error) {
