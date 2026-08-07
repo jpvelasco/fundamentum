@@ -10,3 +10,10 @@ go.sum text eol=lf
 # match Codacy and Linux CI. Hooks are extensionless shell scripts.
 *.sh text eol=lf
 .hooks/* text eol=lf
+
+# Workflow YAML must retain LF in Windows worktrees: the templatefs parity
+# tests compare live workflows line-for-line against the embed template, and a
+# mixed CRLF/LF pair would fail locally.
+.github/workflows/*.yml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
