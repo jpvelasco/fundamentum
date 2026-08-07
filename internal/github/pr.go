@@ -87,7 +87,9 @@ func (c *Client) CreatePullRequest(owner, repo, title, body, head, base string) 
 // ApplyViaPR creates a feature branch, pushes all file changes, and opens a PR.
 // Returns the PR number on success.
 func (c *Client) ApplyViaPR(owner, repo, defaultBranch string, changes []FileChange) (int, error) {
-	branch := fmt.Sprintf("harden-%s-%d", defaultBranch, time.Now().Unix())
+	// UnixNano keeps consecutive runs in the same second from colliding on a
+	// branch name (POST /git/refs 422s when the branch already exists).
+	branch := fmt.Sprintf("harden-%s-%d", defaultBranch, time.Now().UnixNano())
 
 	if err := c.CreatePRBranch(owner, repo, branch, defaultBranch); err != nil {
 		return 0, fmt.Errorf("create branch: %w", err)

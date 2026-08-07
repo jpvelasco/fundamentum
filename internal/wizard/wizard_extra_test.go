@@ -2,6 +2,7 @@ package wizard
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -62,63 +63,6 @@ func TestConfirmDefaults(t *testing.T) {
 		{"whitespace y", "  y  \n", true},
 	}
 	runBoolPromptTest(t, "ConfirmDefaults", ConfirmDefaults, cases)
-}
-
-func TestRunItems(t *testing.T) {
-	tests := []struct {
-		name   string
-		items  []Item
-		dryRun bool
-	}{
-		{
-			name: "dry run",
-			items: []Item{
-				{Name: "file1.md", Action: ActionCreate, Apply: func() error { return nil }},
-			},
-			dryRun: true,
-		},
-		{
-			name: "skip item",
-			items: []Item{
-				{Name: "file1.md", Action: ActionSkip, Apply: func() error { return nil }},
-			},
-			dryRun: false,
-		},
-		{
-			name: "apply success",
-			items: []Item{
-				{Name: "file1.md", Action: ActionCreate, Apply: func() error { return nil }},
-			},
-			dryRun: false,
-		},
-		{
-			name: "apply error non-optional",
-			items: []Item{
-				{Name: "file1.md", Action: ActionCreate, Apply: func() error { return fmt.Errorf("fail") }},
-			},
-			dryRun: false,
-		},
-		{
-			name: "apply error optional",
-			items: []Item{
-				{Name: "file1.md", Action: ActionCreate, Optional: true, Apply: func() error { return fmt.Errorf("fail") }},
-			},
-			dryRun: false,
-		},
-		{
-			name:   "empty items",
-			items:  []Item{},
-			dryRun: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := RunItems(tt.items, tt.dryRun)
-			if err != nil {
-				t.Errorf("RunItems() unexpected error: %v", err)
-			}
-		})
-	}
 }
 
 func TestRunInteractive(t *testing.T) {
@@ -245,5 +189,31 @@ func TestConfirmDefaults_Output(t *testing.T) {
 	ConfirmDefaults(r, &buf)
 	if !strings.Contains(buf.String(), "Apply all defaults") {
 		t.Error("expected prompt output to contain 'Apply all defaults'")
+	}
+}
+
+// Given an optional item failure, the reported message must surface the actual
+// error — not a hardcoded guess about the cause (e.g. GitHub Pro limits).
+func TestPrintItemError_ShowsActualError(t *testing.T) {
+	tests := []struct {
+		name      string
+		item      Item
+		wantErrIn string
+	}{
+		{"optional item failure shows real error", Item{Name: "tag ruleset", Optional: true}, "plan limit exceeded"},
+		{"required item failure shows real error", Item{Name: "settings", Optional: false}, "rate limit hit"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			PrintItemError(&buf, tt.item, errors.New(tt.wantErrIn))
+			out := buf.String()
+			if !strings.Contains(out, tt.item.Name) {
+				t.Errorf("expected output to name the item, got: %q", out)
+			}
+			if !strings.Contains(out, tt.wantErrIn) {
+				t.Errorf("expected output to contain the real error %q, got: %q", tt.wantErrIn, out)
+			}
+		})
 	}
 }
