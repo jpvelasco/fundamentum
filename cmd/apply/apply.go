@@ -141,6 +141,10 @@ func buildItems(
 			".github/ISSUE_TEMPLATE/feature_request.yml",
 			".github/ISSUE_TEMPLATE/feature_request.md",
 		},
+		".github/workflows/octopus.yml": {
+			".github/workflows/octopus.yml",
+			".github/workflows/octopus-review.yml",
+		},
 	}
 
 	// Files first — branch protection applied after, so direct commits are still allowed.

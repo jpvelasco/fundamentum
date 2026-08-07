@@ -487,3 +487,25 @@ func TestBuildItems_AliasFormatVariants(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildItems_AliasWorkflowVariants(t *testing.T) {
+	// Test alias detection for workflow name variants: an existing
+	// octopus-review.yml counts as already having the octopus.yml workflow.
+	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/octopus-review.yml") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"content":"b2xkCg=="}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}), "public")
+
+	// octopus.yml should be skipped because octopus-review.yml alias exists
+	for _, item := range items {
+		if item.Name == ".github/workflows/octopus.yml" {
+			if item.Action != wizard.ActionSkip {
+				t.Errorf("expected octopus.yml to be skipped (octopus-review.yml alias exists), got %v", item.Action)
+			}
+		}
+	}
+}
