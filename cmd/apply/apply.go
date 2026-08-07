@@ -196,6 +196,16 @@ func buildItems(
 	// Security features: CodeQL only for public repos (free-tier private needs GHAS).
 	// Secret scanning and Dependabot work for all repos.
 	securityName := "Security (secret scanning, Dependabot)"
+	// When the advanced codeql.yml workflow is part of the render, default-setup
+	// CodeQL must be skipped — GitHub rejects advanced SARIF uploads while
+	// default setup is configured (it also disables the advanced workflow).
+	advancedCodeQL := false
+	for _, f := range rendered {
+		if f.Path == ".github/workflows/codeql.yml" {
+			advancedCodeQL = true
+			break
+		}
+	}
 	if visibility == "public" {
 		securityName = "Security (secret scanning, CodeQL, Dependabot)"
 	}
@@ -203,7 +213,7 @@ func buildItems(
 		Name:     securityName,
 		Action:   wizard.ActionCreate,
 		Optional: true,
-		Apply:    func() error { return c.EnableSecurity(owner, repo, visibility) },
+		Apply:    func() error { return c.EnableSecurity(owner, repo, visibility, advancedCodeQL) },
 	})
 
 	return items

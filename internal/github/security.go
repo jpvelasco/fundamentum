@@ -8,7 +8,10 @@ import (
 
 // EnableSecurity enables Dependabot alerts, secret scanning, and push protection.
 // CodeQL is only enabled for public repos (private repos require GitHub Advanced Security).
-func (c *Client) EnableSecurity(owner, repo, visibility string) error {
+// advancedCodeQL indicates the repo ships (or will ship) the advanced codeql.yml workflow;
+// when true, default-setup CodeQL is skipped because GitHub rejects advanced uploads
+// while default setup is configured.
+func (c *Client) EnableSecurity(owner, repo, visibility string, advancedCodeQL bool) error {
 	base := repoPath(owner, repo)
 
 	for _, path := range []string{
@@ -40,7 +43,7 @@ func (c *Client) EnableSecurity(owner, repo, visibility string) error {
 		return err
 	}
 
-	if visibility == "public" {
+	if visibility == "public" && !advancedCodeQL {
 		if err := c.enableCodeQL(base); err != nil {
 			return err
 		}

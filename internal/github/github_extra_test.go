@@ -508,7 +508,7 @@ func TestErrorResponses(t *testing.T) {
 			name:   "EnableSecurity 403",
 			status: http.StatusForbidden,
 			fn: func(c *Client) error {
-				return c.EnableSecurity("owner", "repo", "private")
+				return c.EnableSecurity("owner", "repo", "private", false)
 			},
 		},
 	}
