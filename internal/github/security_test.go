@@ -69,6 +69,7 @@ func TestEnableSecurity_Errors(t *testing.T) {
 		{
 			name:       "secret scanning bad status",
 			visibility: "private",
+			client:     newZeroDelayClient,
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				switch r.Method {
 				case http.MethodPut:
