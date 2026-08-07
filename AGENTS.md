@@ -5,8 +5,14 @@ fundamentum is a **free, open-source CLI** (MIT License) for one-shot GitHub rep
 ## Commands
 
 ```bash
-# Enable pre-commit hooks (required — hooks live in .hooks/)
+# Enable repo hooks (required — hooks live in .hooks/)
 git config core.hooksPath .hooks
+
+`.hooks/pre-commit` runs template drift → build → lint → test (fail-fast).
+`.hooks/commit-msg` enforces Conventional Commits (`feat:|fix:|refactor:|test:|docs:|chore:|perf:|ci:|build:|deps:` + optional scope; merge/revert/fixup/squash allowed).
+`.hooks/pre-push` fails any changed Go file with a 0.0%-coverage function (early warning — the real gate is CI's Codecov patch >= 90%). Emergency bypass: `git push --no-verify`.
+
+`.gitattributes` forces LF for Go sources, mod/sum, `.sh`, and hook files so Windows checkouts stay gofmt-clean (CRLF breaks gofmt in CI).
 
 # Build
 go build -o fundamentum.exe -v .
