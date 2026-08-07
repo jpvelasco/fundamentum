@@ -209,6 +209,28 @@ func TestCodecovTemplateDrift(t *testing.T) {
 	}
 }
 
+// TestLintWindowsParity guards the CI job matrix: the embed template that
+// fundamentum ships and the live workflow must both define the Windows lint
+// leg, otherwise repos hardened from the template inherit a dead job matrix
+// while this repo drifts from what it ships.
+func TestLintWindowsParity(t *testing.T) {
+	liveBytes, err := os.ReadFile(liveCIWorkflow)
+	if err != nil {
+		t.Fatalf("read live workflow %s: %v", liveCIWorkflow, err)
+	}
+	tplBytes, err := fs.ReadFile(FS, "dotgithub/workflows/public_ci.yml")
+	if err != nil {
+		t.Fatalf("read embed template: %v", err)
+	}
+
+	const jobMarker = "  lint-windows:\n    name: Lint (Windows)\n    runs-on: windows-latest"
+	for name, content := range map[string]string{"live workflow": string(liveBytes), "embed template": string(tplBytes)} {
+		if !strings.Contains(content, jobMarker) {
+			t.Errorf("%s is missing the lint-windows job (want %q)", name, jobMarker)
+		}
+	}
+}
+
 func TestDiffCodecovFunctional_UnpinnedBothSides(t *testing.T) {
 	live := fullParity
 	live.CodecovSHAPin = false

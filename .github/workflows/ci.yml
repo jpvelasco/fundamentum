@@ -35,6 +35,22 @@ jobs:
         with:
           version: v2.12.2
 
+  # Lint on Windows as well — golangci-lint can fail on path separators,
+  # case-sensitivity, and CRLF while passing on Linux, so the matrix must
+  # cover it. Required context "Lint (Windows)"; keep branch protection in
+  # sync when adding/renaming jobs (see AGENTS.md).
+  lint-windows:
+    name: Lint (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a  # v9
+        with:
+          version: v2.12.2
+
   vuln:
     name: Vulnerability scan
     runs-on: ubuntu-latest
