@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -114,14 +115,31 @@ func (c *Client) put(path string) (*http.Response, error) {
 	return c.do(http.MethodPut, path, nil)
 }
 
-// expectStatus returns a wrapped error naming action if resp's status code is
+// HTTPError wraps an error with the HTTP status code so callers can classify
+// failures structurally (errors.As) instead of matching on message text.
+type HTTPError struct {
+	StatusCode int
+	Msg        string
+}
+
+func (e *HTTPError) Error() string {
+	return e.Msg
+}
+
+// hasStatusCode reports whether err wraps an HTTPError with the given status code.
+func hasStatusCode(err error, code int) bool {
+	var he *HTTPError
+	return errors.As(err, &he) && he.StatusCode == code
+}
+
+// expectStatus returns an *HTTPError naming action if resp's status code is
 // not one of want. Does not close resp.Body — callers still own that.
 func expectStatus(action string, resp *http.Response, want ...int) error {
 	if slices.Contains(want, resp.StatusCode) {
 		return nil
 	}
 	b, _ := io.ReadAll(resp.Body)
-	return fmt.Errorf("%s: %s: %s", action, resp.Status, b)
+	return &HTTPError{StatusCode: resp.StatusCode, Msg: fmt.Sprintf("%s: %s: %s", action, resp.Status, b)}
 }
 
 // existingContentsFile is the subset of the Contents API GET response used to

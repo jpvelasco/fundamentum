@@ -4,7 +4,6 @@ package github
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 )
 
@@ -18,11 +17,7 @@ func (c *Client) CreateRepo(name string, private bool) error {
 		return fmt.Errorf("create repo: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("create repo: %s: %s", resp.Status, body)
-	}
-	return nil
+	return expectStatus("create repo", resp, http.StatusCreated)
 }
 
 // GetRepoVisibility returns the repository visibility: "public" or "private".
@@ -32,9 +27,8 @@ func (c *Client) GetRepoVisibility(owner, repo string) (string, error) {
 		return "", fmt.Errorf("get repo: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("get repo: %s: %s", resp.Status, body)
+	if err := expectStatus("get repo", resp, http.StatusOK); err != nil {
+		return "", err
 	}
 	var result struct {
 		Visibility string `json:"visibility"`

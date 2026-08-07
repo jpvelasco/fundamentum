@@ -3,6 +3,7 @@ package github
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -27,10 +28,11 @@ func extractFilePathFromContents(path string) string {
 
 func TestCreatePRBranch(t *testing.T) {
 	tests := []struct {
-		name    string
-		client  func(srv string) *Client
-		handler http.HandlerFunc
-		wantErr bool
+		name      string
+		client    func(srv string) *Client
+		handler   http.HandlerFunc
+		wantErr   bool
+		errSubstr string
 	}{
 		{
 			name: "success",
@@ -55,6 +57,17 @@ func TestCreatePRBranch(t *testing.T) {
 				w.WriteHeader(http.StatusNotFound)
 			},
 			wantErr: true,
+		},
+		{
+			// Given a missing base branch, the error must name the failing
+			// operation — not a confusing "decode branch ... EOF".
+			name: "missing base branch names the get",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+			},
+			wantErr:   true,
+			errSubstr: "get branch",
 		},
 		{
 			name:    "network error",
@@ -84,6 +97,9 @@ func TestCreatePRBranch(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
+				}
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
+					t.Errorf("expected error to contain %q, got: %v", tt.errSubstr, err)
 				}
 			} else if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -396,6 +412,66 @@ func TestIsForbidden403_HTTPError(t *testing.T) {
 	}
 	if IsForbidden403(&HTTPError{StatusCode: http.StatusConflict, Msg: "conflict"}) {
 		t.Error("expected false for HTTPError with a non-403 StatusCode")
+	}
+}
+
+// Given a real 409 from the API, the whole client path must produce an error
+// that IsConflict409 classifies structurally (the apply auto-fallback to PR
+// mode depends on this).
+func TestIsConflict409_ProductionError(t *testing.T) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"message":"branch protection rule violations (GH013)"}`))
+	}))
+	defer srv.Close()
+
+	err := c.CreateBranchRuleset("owner", "repo", nil, BranchProtectionOptions{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !IsConflict409(err) {
+		t.Errorf("expected IsConflict409 to be true for a production 409, got: %v", err)
+	}
+}
+
+// Given a real 403 from the API, IsForbidden403 must classify it structurally
+// (the ruleset → classic fallback for free-tier private repos depends on this).
+func TestIsForbidden403_ProductionError(t *testing.T) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"Forbidden"}`))
+	}))
+	defer srv.Close()
+
+	err := c.CreateBranchRuleset("owner", "repo", nil, BranchProtectionOptions{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !IsForbidden403(err) {
+		t.Errorf("expected IsForbidden403 to be true for a production 403, got: %v", err)
+	}
+}
+
+// Given a workflow file update rejected with 404 (GitHub Actions lock), the
+// returned error must satisfy errors.Is against ErrWorkflowLocked so apply can
+// treat it as "skip" rather than failure.
+func TestIsWorkflowLocked_ErrorsIs(t *testing.T) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"content":"b2xk","sha":"abc"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	_, err := c.UpsertFile("owner", "repo", ".github/workflows/ci.yml", []byte("new"))
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrWorkflowLocked) {
+		t.Errorf("expected errors.Is(err, ErrWorkflowLocked), got: %v", err)
 	}
 }
 
