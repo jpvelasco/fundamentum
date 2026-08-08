@@ -1,5 +1,8 @@
 # fundamentum
 
+[![Codacy Badge](https://app.codacy.com/project/badge/Coverage/8e6e46246bfb42ac9257f1ca809bcc5f)](https://app.codacy.com/gh/jpvelasco/fundamentum/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_coverage)
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/8e6e46246bfb42ac9257f1ca809bcc5f)](https://app.codacy.com/gh/jpvelasco/fundamentum/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
+
 Bootstrap and harden GitHub repos for OSS collaboration — in one shot.
 
 **Free, open-source CLI (MIT).** One command applies professional community files, branch protection, security features, and starter workflows.
@@ -69,12 +72,9 @@ go install github.com/jpvelasco/fundamentum@latest
 
 # Run from source
 go run github.com/jpvelasco/fundamentum apply OWNER/REPO
-
-# npm (shim, after v1.0)
-npm install -g fundamentum
 ```
 
-Binaries also available on GitHub Releases.
+Binaries are published on GitHub Releases.
 
 ## Development
 
