@@ -76,6 +76,15 @@ func TestExecute_FlagOrder(t *testing.T) {
 	}
 }
 
+// TestExecute_Root returns the error from the root command, which is nil
+// when only help is requested (no subcommand matches).
+func TestExecute_Root(t *testing.T) {
+	resetRootGlobals(t)
+	if err := Execute(); err != nil {
+		t.Errorf("expected nil error for bare root command, got: %v", err)
+	}
+}
+
 // Test that Execute() calls os.Exit on error by checking the command structure.
 func TestExecute_CommandStructure(t *testing.T) {
 	cmd := newRootCmd()

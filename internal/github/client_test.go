@@ -49,6 +49,7 @@ func TestWithBaseURL_RejectsNonHTTPS(t *testing.T) {
 	}{
 		{"empty url", "", false},
 		{"invalid url", "not a url", false},
+		{"malformed url", "http://%zz", false},
 		{"http scheme", "http://evil.com", false},
 		{"ftp scheme", "ftp://evil.com", false},
 		{"https scheme", "https://api.github.com", true},

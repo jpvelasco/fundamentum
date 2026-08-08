@@ -1,10 +1,14 @@
 package repoinit
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/jpvelasco/fundamentum/cmd/apply"
 	"github.com/jpvelasco/fundamentum/cmd/globals"
+	"github.com/jpvelasco/fundamentum/internal/github"
 )
 
 func TestNewCmd(t *testing.T) {
@@ -82,5 +86,62 @@ func TestRun_CreateRepo_Fails(t *testing.T) {
 				t.Errorf("expected 'create repo' in error, got: %v", err)
 			}
 		})
+	}
+}
+
+func TestRun_CreateRepoSuccess(t *testing.T) {
+	resetGlobals(t)
+	t.Cleanup(func() { newClient = github.NewClient })
+	t.Cleanup(func() { runApply = func(ownerRepo string) error {
+		applyCmd := apply.NewCmd()
+		applyCmd.SetArgs([]string{ownerRepo})
+		return applyCmd.Execute()
+	} })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/user/repos") {
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":1}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	newClient = func(token string, verbose bool) *github.Client {
+		return github.NewClient(token, verbose).WithBaseURL(srv.URL)
+	}
+	runApply = func(string) error { return nil }
+
+	if err := run("owner/repo", false); err != nil {
+		t.Fatalf("run() error: %v", err)
+	}
+}
+
+func TestExecute_RunE(t *testing.T) {
+	resetGlobals(t)
+	t.Cleanup(func() { newClient = github.NewClient })
+	t.Cleanup(func() { runApply = func(ownerRepo string) error {
+		applyCmd := apply.NewCmd()
+		applyCmd.SetArgs([]string{ownerRepo})
+		return applyCmd.Execute()
+	} })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":1}`))
+	}))
+	defer srv.Close()
+
+	newClient = func(token string, verbose bool) *github.Client {
+		return github.NewClient(token, verbose).WithBaseURL(srv.URL)
+	}
+	runApply = func(string) error { return nil }
+
+	// The RunE closure must propagate the private flag into run().
+	cmd := NewCmd()
+	cmd.SetArgs([]string{"owner/repo", "--private=false"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error: %v", err)
 	}
 }

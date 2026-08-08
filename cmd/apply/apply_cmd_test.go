@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -433,5 +434,143 @@ func TestRunWithClient_RulesetError(t *testing.T) {
 	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "check branch ruleset") {
 		t.Errorf("expected ruleset error, got: %v", err)
+	}
+}
+
+// TestRunWithClient_TagRulesetError verifies the protect-version-tags
+// pre-flight failure surfaces a wrapped error.
+func TestRunWithClient_TagRulesetError(t *testing.T) {
+	rulesetCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/rulesets") {
+			rulesetCalls++
+			if rulesetCalls == 1 {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`not json`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"visibility":"public"}`))
+	}))
+	defer srv.Close()
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+
+	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "check tag ruleset") {
+		t.Errorf("expected tag ruleset error, got: %v", err)
+	}
+}
+
+// TestRunWithClient_ClassicProtectionError verifies classic protection
+// pre-flight failures surface a wrapped error. A hijacked connection forces a
+// transport-level error on the GET /branches/main/protection request.
+func TestRunWithClient_ClassicProtectionError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/rulesets"):
+			_, _ = w.Write([]byte(`[]`))
+		case strings.Contains(r.URL.Path, "/branches/main/protection"):
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			conn, _, err := hj.Hijack()
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+		default:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"visibility":"public"}`))
+		}
+	}))
+	defer srv.Close()
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+
+	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "check classic protection") {
+		t.Errorf("expected classic protection error, got: %v", err)
+	}
+}
+
+// TestRunWithClient_ViaPRFailure verifies that an ApplyViaPR failure inside
+// the defaults-apply path propagates the wrapped error (auto-fallback stays
+// transparent: the PR error is the reported cause).
+func TestRunWithClient_ViaPRFailure(t *testing.T) {
+	t.Cleanup(func() { globals.ViaPR = false })
+	globals.ViaPR = true
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
+			_, _ = w.Write([]byte(`{"visibility":"public"}`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets"):
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main/protection"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+
+	var out strings.Builder
+	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &out)
+	if err == nil || !strings.Contains(err.Error(), "apply via PR") {
+		t.Errorf("expected apply-via-PR error, got: %v", err)
+	}
+}
+
+// TestRun_Success exercises the cobra RunE closure end-to-end with an
+// injected mock-server client: valid args, prompts answered, done message.
+func TestRun_Success(t *testing.T) {
+	t.Cleanup(func() { newClient = github.NewClient })
+
+	srv := newRunFlowServer()
+	defer srv.Close()
+	newClient = func(token string, verbose bool) *github.Client {
+		return github.NewClient(token, verbose).WithBaseURL(srv.URL)
+	}
+
+	cmd := NewCmd()
+	var out strings.Builder
+	cmd.SetIn(newLineReader("solo\ny\n"))
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"owner/repo"})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("run() error: %v", err)
+	}
+	if !strings.Contains(out.String(), "✓ Done — https://github.com/owner/repo") {
+		t.Errorf("expected done message, got:\n%s", out.String())
+	}
+}
+
+// TestRunWithClient_RenderError verifies template-render failures surface a
+// wrapped error.
+func TestRunWithClient_RenderError(t *testing.T) {
+	t.Cleanup(func() { renderTemplates = templates.Render })
+	renderTemplates = func(templates.RepoData) ([]templates.RenderedFile, error) {
+		return nil, errors.New("boom")
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"visibility":"public"}`))
+	}))
+	defer srv.Close()
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+
+	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "render templates") {
+		t.Errorf("expected render error, got: %v", err)
 	}
 }

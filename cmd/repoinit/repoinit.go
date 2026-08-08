@@ -12,6 +12,18 @@ import (
 	"github.com/jpvelasco/fundamentum/internal/github"
 )
 
+// newClient creates the GitHub API client; a package-level var so tests can
+// inject a mock-server client.
+var newClient = github.NewClient
+
+// runApply invokes the apply subcommand for ownerRepo; a package-level var so
+// tests can stub the apply flow out.
+var runApply = func(ownerRepo string) error {
+	applyCmd := apply.NewCmd()
+	applyCmd.SetArgs([]string{ownerRepo})
+	return applyCmd.Execute()
+}
+
 // NewCmd returns the init subcommand.
 func NewCmd() *cobra.Command {
 	var private bool
@@ -40,7 +52,7 @@ func run(ownerRepo string, private bool) error {
 	}
 
 	if !globals.DryRun {
-		client := github.NewClient(globals.Token, globals.Verbose)
+		client := newClient(globals.Token, globals.Verbose)
 		fmt.Printf("Creating repo %s...\n", ownerRepo)
 		if err := client.CreateRepo(repo, private); err != nil {
 			return fmt.Errorf("create repo: %w", err)
@@ -50,7 +62,5 @@ func run(ownerRepo string, private bool) error {
 		fmt.Printf("would create repo %s\n\n", ownerRepo)
 	}
 
-	applyCmd := apply.NewCmd()
-	applyCmd.SetArgs([]string{ownerRepo})
-	return applyCmd.Execute()
+	return runApply(ownerRepo)
 }
