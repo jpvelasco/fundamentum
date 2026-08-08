@@ -11,6 +11,26 @@ func TestFS_Init(t *testing.T) {
 	}
 }
 
+// failingSubFS implements fs.SubFS with a Sub method that always fails, which
+// is the only way to make fs.Sub return an error (plain fs.Sub is lazy).
+type failingSubFS struct{}
+
+func (failingSubFS) Open(string) (fs.File, error) { return nil, fs.ErrNotExist }
+func (failingSubFS) Sub(string) (fs.FS, error)    { return nil, fs.ErrNotExist }
+
+func TestMustSub_PanicsOnMissingDir(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic when sub dir is missing")
+		}
+		if _, ok := r.(error); !ok {
+			t.Fatalf("expected error panic, got %T: %v", r, r)
+		}
+	}()
+	mustSub(failingSubFS{}, "missing")
+}
+
 func TestFS_ContainsTemplates(t *testing.T) {
 	count := 0
 	err := fs.WalkDir(FS, ".", func(path string, d fs.DirEntry, err error) error {

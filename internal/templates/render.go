@@ -99,16 +99,22 @@ func validIdentifier(r rune) rune {
 // Templates with a "public_" filename prefix are only included for public repos.
 // Templates with a "private_" filename prefix are only included for private repos.
 func Render(data RepoData) ([]RenderedFile, error) {
+	return renderFromFS(templatefs.FS, data)
+}
+
+// renderFromFS renders all templates from fsys. Split out from Render so the
+// ReadFile error branch is testable with an injecting failing fs.FS.
+func renderFromFS(fsys fs.FS, data RepoData) ([]RenderedFile, error) {
 	data = data.sanitize()
 	var files []RenderedFile
-	err := fs.WalkDir(templatefs.FS, ".", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
 		if !shouldInclude(path, data.Visibility) {
 			return nil
 		}
-		raw, err := fs.ReadFile(templatefs.FS, path)
+		raw, err := fs.ReadFile(fsys, path)
 		if err != nil {
 			return fmt.Errorf("read template %s: %w", path, err)
 		}

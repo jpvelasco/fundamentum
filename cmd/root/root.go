@@ -2,9 +2,6 @@
 package root
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/spf13/cobra"
 
 	"github.com/jpvelasco/fundamentum/cmd/apply"
@@ -39,10 +36,9 @@ Examples:
 	return cmd
 }
 
-func Execute() {
+// Execute runs the root command, returning any error so main can set the
+// process exit code. Split from main to keep the exit path testable.
+func Execute() error {
 	cmd := newRootCmd()
-	if err := cmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	return cmd.Execute()
 }

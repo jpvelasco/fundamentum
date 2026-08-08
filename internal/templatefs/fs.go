@@ -14,9 +14,15 @@ var raw embed.FS
 var FS fs.FS
 
 func init() {
-	var err error
-	FS, err = fs.Sub(raw, "templates")
+	FS = mustSub(raw, "templates")
+}
+
+// mustSub roots subFS at dir within fsys, panicking if the dir is missing.
+// Extracted from init so the failure branch is testable.
+func mustSub(fsys fs.FS, dir string) fs.FS {
+	sub, err := fs.Sub(fsys, dir)
 	if err != nil {
 		panic(errors.New("templatefs: cannot embed templates: " + err.Error()))
 	}
+	return sub
 }

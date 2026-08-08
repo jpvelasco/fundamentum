@@ -15,6 +15,14 @@ import (
 	"github.com/jpvelasco/fundamentum/internal/wizard"
 )
 
+// newClient creates the GitHub API client; a package-level var so tests can
+// inject a client pointed at a mock server.
+var newClient = github.NewClient
+
+// renderTemplates renders the embedded templates; a package-level var so tests
+// can inject a failing renderer to exercise the error branch.
+var renderTemplates = templates.Render
+
 // NewCmd returns the apply subcommand.
 func NewCmd() *cobra.Command {
 	return &cobra.Command{
@@ -39,8 +47,8 @@ func run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	client := github.NewClient(globals.Token, globals.Verbose)
-	return runWithClient(client, owner, repo, os.Stdin, os.Stdout)
+	client := newClient(globals.Token, globals.Verbose)
+	return runWithClient(client, owner, repo, cmd.InOrStdin(), cmd.OutOrStdout())
 }
 
 // runWithClient runs the apply flow against client, reading prompts from stdin
@@ -57,7 +65,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 
 	data := templates.RepoData{Owner: owner, RepoName: repo, DefaultBranch: branch, Visibility: visibility}
 
-	rendered, err := templates.Render(data)
+	rendered, err := renderTemplates(data)
 	if err != nil {
 		return fmt.Errorf("render templates: %w", err)
 	}
