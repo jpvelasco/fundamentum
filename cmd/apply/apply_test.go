@@ -585,6 +585,7 @@ func TestBuildItems_FileStatusSkip(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString([]byte(targetContent))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, target) {
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"content":"` + encoded + `","sha":"abc"}`))
 			return
