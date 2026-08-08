@@ -1,8 +1,10 @@
 package templates
 
 import (
+	"io/fs"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func TestValidIdentifier(t *testing.T) {
@@ -307,7 +309,7 @@ func TestSanitizeOutput(t *testing.T) {
 		{"no html", "hello world", "hello world"},
 		{"script tag", "hello<script>alert(1)</script>world", "helloalert(1)world"},
 		{"img tag", "text<img src=x onerror=alert(1)>more", "textmore"},
-		{"your-username preserved", "git@github.com:<your-username>/repo.git", "git@github.com:<your-username>/repo.git"},
+		{"your-credentials preserved", "git@github.com:<your-username>/repo.git", "git@github.com:<your-username>/repo.git"},
 		{"div tag", "<div class='evil'>content</div>", "content"},
 		{"onerror attribute", "<input onfocus=steal()>", ""},
 	}
@@ -318,5 +320,27 @@ func TestSanitizeOutput(t *testing.T) {
 				t.Errorf("sanitizeOutput(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+// errFS wraps fstest.MapFS with a ReadFile implementation that always fails.
+// WalkDir and Stat still succeed (the embedded MapFS handles them), so
+// renderFromFS' ReadFile failure branch is exercised.
+type errFS struct {
+	fstest.MapFS
+}
+
+func (errFS) ReadFile(string) ([]byte, error) { return nil, fs.ErrPermission }
+
+func TestRenderFromFS_ReadError(t *testing.T) {
+	m := errFS{MapFS: fstest.MapFS{
+		"template.yml": &fstest.MapFile{Data: []byte("hello")},
+	}}
+	_, err := renderFromFS(m, RepoData{Owner: "o", RepoName: "r", DefaultBranch: "main", Visibility: "public"})
+	if err == nil {
+		t.Fatal("expected error when template read fails")
+	}
+	if !strings.Contains(err.Error(), "read template") {
+		t.Errorf("expected 'read template' in error, got: %v", err)
 	}
 }

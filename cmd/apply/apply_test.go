@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -550,5 +551,161 @@ func TestBuildItems_AdvancedCodeQLSkipsDefaultSetup(t *testing.T) {
 	}
 	if calledDefaultSetup {
 		t.Error("expected no default-setup CodeQL PATCH when advanced codeql.yml workflow is rendered")
+	}
+}
+
+// TestBuildItems_FileStatusSkip verifies buildItems maps FileStatus "skip"
+// (existing file with identical content) to ActionSkip.
+func TestBuildItems_FileStatusSkip(t *testing.T) {
+	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"}
+	rendered, err := templates.Render(data)
+	if err != nil {
+		t.Fatalf("Render() error: %v", err)
+	}
+
+	// Pick a rendered file with no alias variants (socket.yml) so the exact
+	// path check (FileStatus) runs instead of AnyFileExists.
+	var target string
+	for _, f := range rendered {
+		if strings.HasSuffix(f.Path, "socket.yml") {
+			target = f.Path
+			break
+		}
+	}
+	if target == "" {
+		t.Fatal("expected a socket.yml rendered file")
+	}
+	var targetContent string
+	for _, f := range rendered {
+		if f.Path == target {
+			targetContent = f.Content
+			break
+		}
+	}
+	encoded := base64.StdEncoding.EncodeToString([]byte(targetContent))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, target) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]string{"content": encoded, "sha": "abc"})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+	items := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{})
+
+	for _, item := range items {
+		if item.Name == target {
+			if item.Action != wizard.ActionSkip {
+				t.Errorf("expected %s to be skipped (content unchanged), got %v", target, item.Action)
+			}
+		}
+	}
+}
+
+// TestBranchProtectionItem_ClassicUpgradeApply verifies the upgrade item's
+// Apply closure: create the ruleset first, then remove classic protection.
+func TestBranchProtectionItem_ClassicUpgradeApply(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/rulesets"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":1}`))
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/protection"):
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+	item := branchProtectionItem(c, "owner", "repo", "main", "public", false, true, github.BranchProtectionOptions{})
+	if item.Action != wizard.ActionUpgrade {
+		t.Fatalf("expected ActionUpgrade, got %v", item.Action)
+	}
+	if err := item.Apply(); err != nil {
+		t.Fatalf("upgrade Apply() error: %v", err)
+	}
+}
+
+// TestBranchProtectionItem_ClassicUpgradeError verifies that a ruleset
+// creation failure during the upgrade aborts before removing classic
+// protection.
+func TestBranchProtectionItem_ClassicUpgradeError(t *testing.T) {
+	classicRemoved := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`not json`))
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/protection"):
+			classicRemoved = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+	item := branchProtectionItem(c, "owner", "repo", "main", "public", false, true, github.BranchProtectionOptions{})
+	if err := item.Apply(); err == nil {
+		t.Fatal("expected error when ruleset creation fails")
+	}
+	if classicRemoved {
+		t.Error("classic protection should not be removed when ruleset creation fails")
+	}
+}
+
+// TestApplyItems_FileApplyErrorNonFatal verifies a file item whose Apply
+// returns a plain error (not 409, not workflow-locked) is reported but does
+// not abort the run.
+func TestApplyItems_FileApplyErrorNonFatal(t *testing.T) {
+	items := []wizard.Item{
+		{
+			Name:    ".github/CODEOWNERS",
+			Action:  wizard.ActionCreate,
+			Content: []byte("me"),
+			Apply:   func() error { return fmt.Errorf("API error") },
+		},
+		{
+			Name:    ".github/SECURITY.md",
+			Action:  wizard.ActionCreate,
+			Content: []byte("sec"),
+			Apply:   func() error { return nil },
+		},
+	}
+	c := github.NewClient("", false)
+	err := applyItems(c, "owner", "repo", "main", items, false, false)
+	if err != nil {
+		t.Errorf("expected no error return for non-fatal file item failure, got: %v", err)
+	}
+}
+
+// TestApplyItems_ViaPRFailure verifies ApplyViaPR errors propagate from
+// applyItems.
+func TestApplyItems_ViaPRFailure(t *testing.T) {
+	items := newFileItems(
+		[]string{".github/CODEOWNERS"},
+		[][]byte{[]byte("me")},
+		[]func() error{func() error { return nil }},
+	)
+	// PR branch creation fails (404 on GET /branches/main) → ApplyViaPR errors.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+
+	err := applyItems(c, "owner", "repo", "main", items, false, true)
+	if err == nil || !strings.Contains(err.Error(), "apply via PR") {
+		t.Errorf("expected apply-via-PR error, got: %v", err)
 	}
 }
