@@ -177,6 +177,7 @@ func TestRenderVisibilityFiltering(t *testing.T) {
 				".github/workflows/codeql.yml",
 				".github/codeql/codeql-config.yml",
 				"socket.yml",
+				".github/workflows/codacy-coverage.yml",
 			},
 		},
 		{
@@ -186,6 +187,7 @@ func TestRenderVisibilityFiltering(t *testing.T) {
 				".github/workflows/ci.yml",
 				".github/workflows/octocov.yml",
 				"socket.yml",
+				".github/workflows/codacy-coverage.yml",
 			},
 		},
 	}
