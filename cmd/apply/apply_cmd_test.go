@@ -381,8 +381,8 @@ func TestRunWithClient_InteractiveDecline(t *testing.T) {
 	}
 }
 
-// TestRunWithClient_DryRun verifies the dry-run path reports completion without
-// making changes.
+// TestRunWithClient_DryRun verifies the dry-run path is non-interactive
+// (no prompts) and reports the plan counts without making changes.
 func TestRunWithClient_DryRun(t *testing.T) {
 	t.Cleanup(func() { globals.DryRun = false })
 	globals.DryRun = true
@@ -392,12 +392,23 @@ func TestRunWithClient_DryRun(t *testing.T) {
 	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 
 	var out strings.Builder
-	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &out)
+	// No input at all: dry-run must not wait for prompts.
+	err := runWithClient(c, "owner", "repo", strings.NewReader(""), &out)
 	if err != nil {
 		t.Fatalf("runWithClient() error: %v", err)
 	}
-	if !strings.Contains(out.String(), "Dry run complete — no changes made.") {
-		t.Errorf("expected dry-run message, got:\n%s", out.String())
+	outStr := out.String()
+	if !strings.Contains(outStr, "Dry run complete — ") || !strings.Contains(outStr, "no changes made.") {
+		t.Errorf("expected dry-run summary, got:\n%s", outStr)
+	}
+	if strings.Contains(outStr, "Apply all defaults?") {
+		t.Errorf("dry-run must not prompt for defaults, got:\n%s", outStr)
+	}
+	if strings.Contains(outStr, "Project type?") {
+		t.Errorf("dry-run must not prompt for project type, got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "would create") {
+		t.Errorf("expected dry-run labels in plan, got:\n%s", outStr)
 	}
 }
 

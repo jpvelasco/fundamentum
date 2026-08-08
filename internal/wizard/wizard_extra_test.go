@@ -67,10 +67,9 @@ func TestConfirmDefaults(t *testing.T) {
 
 func TestRunInteractive(t *testing.T) {
 	tests := []struct {
-		name   string
-		items  []Item
-		input  string
-		dryRun bool
+		name  string
+		items []Item
+		input string
 	}{
 		{
 			name: "accept all",
@@ -78,8 +77,7 @@ func TestRunInteractive(t *testing.T) {
 				{Name: "file1.md", Action: ActionCreate, Apply: func() error { return nil }},
 				{Name: "file2.md", Action: ActionCreate, Apply: func() error { return nil }},
 			},
-			input:  "y\ny\n",
-			dryRun: false,
+			input: "y\ny\n",
 		},
 		{
 			name: "skip one",
@@ -87,8 +85,7 @@ func TestRunInteractive(t *testing.T) {
 				{Name: "file1.md", Action: ActionCreate, Apply: func() error { return nil }},
 				{Name: "file2.md", Action: ActionCreate, Apply: func() error { return nil }},
 			},
-			input:  "y\nn\n",
-			dryRun: false,
+			input: "y\nn\n",
 		},
 		{
 			name: "skip by default",
@@ -96,38 +93,27 @@ func TestRunInteractive(t *testing.T) {
 				{Name: "file1.md", Action: ActionSkip, Apply: func() error { return nil }},
 				{Name: "file2.md", Action: ActionCreate, Apply: func() error { return nil }},
 			},
-			input:  "y\n",
-			dryRun: false,
-		},
-		{
-			name: "dry run with accept",
-			items: []Item{
-				{Name: "file1.md", Action: ActionCreate, Apply: func() error { return nil }},
-			},
-			input:  "y\n",
-			dryRun: true,
+			input: "y\n",
 		},
 		{
 			name: "error on optional",
 			items: []Item{
 				{Name: "file1.md", Action: ActionCreate, Optional: true, Apply: func() error { return fmt.Errorf("fail") }},
 			},
-			input:  "y\n",
-			dryRun: false,
+			input: "y\n",
 		},
 		{
 			name: "empty accept",
 			items: []Item{
 				{Name: "file1.md", Action: ActionCreate, Apply: func() error { return nil }},
 			},
-			input:  "\n",
-			dryRun: false,
+			input: "\n",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := strings.NewReader(tt.input)
-			err := RunInteractive(tt.items, tt.dryRun, r)
+			err := RunInteractive(tt.items, r)
 			if err != nil {
 				t.Errorf("RunInteractive() unexpected error: %v", err)
 			}
@@ -153,28 +139,43 @@ func TestIsSkip(t *testing.T) {
 	}
 }
 
-// TestShouldSkipOrDryRun verifies the skip/dry-run decision logic: skip items
-// are always reported skip, dry-run items print their dry label, and live
-// items are not skipped.
-func TestShouldSkipOrDryRun(t *testing.T) {
+// TestShouldSkip verifies the skip decision logic: skip items are always
+// reported skip, live items are not skipped.
+func TestShouldSkip(t *testing.T) {
 	tests := []struct {
-		name   string
-		item   Item
-		dryRun bool
-		want   bool
+		name string
+		item Item
+		want bool
 	}{
-		{"skip item", Item{Action: ActionSkip}, false, true},
-		{"dry-run create", Item{Action: ActionCreate}, true, true},
-		{"live create", Item{Action: ActionCreate}, false, false},
-		{"dry-run update", Item{Action: ActionUpdate}, true, true},
-		{"live update", Item{Action: ActionUpdate}, false, false},
+		{"skip item", Item{Action: ActionSkip}, true},
+		{"live create", Item{Action: ActionCreate}, false},
+		{"live update", Item{Action: ActionUpdate}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ShouldSkipOrDryRun(tt.item, tt.dryRun); got != tt.want {
-				t.Errorf("ShouldSkipOrDryRun() = %v, want %v", got, tt.want)
+			if got := ShouldSkip(tt.item); got != tt.want {
+				t.Errorf("ShouldSkip() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPlanSummary(t *testing.T) {
+	items := []Item{
+		{Name: "a.md", Action: ActionCreate},
+		{Name: "b.md", Action: ActionCreate},
+		{Name: "c.md", Action: ActionUpdate},
+		{Name: "d.md", Action: ActionUpgrade},
+		{Name: "e.md", Action: ActionSkip},
+	}
+	if got := PlanSummary(items); got != "2 to create, 1 to update, 1 to upgrade, 1 already exist" {
+		t.Errorf("PlanSummary() = %q", got)
+	}
+	if got := PlanSummary([]Item{{Name: "f.md", Action: ActionSkip}}); got != "1 already exist" {
+		t.Errorf("PlanSummary() = %q", got)
+	}
+	if got := PlanSummary(nil); got != "nothing to do" {
+		t.Errorf("PlanSummary() = %q", got)
 	}
 }
 
