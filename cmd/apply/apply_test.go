@@ -69,11 +69,11 @@ func newFileItems(names []string, content [][]byte, applies []func() error) []wi
 // client pointed at it, and fails the test if applyItems returns an error.
 // Shared by the many TestApplyItems_* cases that only differ in server and
 // item setup, not in how the result is checked.
-func runApplyItemsExpectNoError(t *testing.T, srv *httptest.Server, items []wizard.Item, dryRun, viaPR bool) {
+func runApplyItemsExpectNoError(t *testing.T, srv *httptest.Server, items []wizard.Item, viaPR bool) {
 	t.Helper()
 	defer srv.Close()
 	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	if err := applyItems(c, "owner", "repo", "main", items, dryRun, viaPR); err != nil {
+	if err := applyItems(c, "owner", "repo", "main", items, viaPR); err != nil {
 		t.Errorf("expected no error, got: %v", err)
 	}
 }
@@ -144,7 +144,7 @@ func TestApplyItems_No409(t *testing.T) {
 		[][]byte{[]byte("me"), []byte("sec")},
 		[]func() error{func() error { return nil }, func() error { return nil }},
 	)
-	runApplyItemsExpectNoError(t, newSimpleFileServer(), items, false, false)
+	runApplyItemsExpectNoError(t, newSimpleFileServer(), items, false)
 }
 
 // err409 is a stand-in Apply for an item that triggers PR-mode fallback.
@@ -162,7 +162,7 @@ func TestApplyItems_FirstFile409_FallbackToPR(t *testing.T) {
 		[][]byte{[]byte("me"), []byte("sec")},
 		[]func() error{err409, func() error { return nil }},
 	)
-	runApplyItemsExpectNoError(t, newPRMockServer(), items, false, false)
+	runApplyItemsExpectNoError(t, newPRMockServer(), items, false)
 }
 
 func TestApplyItems_All409_AllToPR(t *testing.T) {
@@ -173,7 +173,7 @@ func TestApplyItems_All409_AllToPR(t *testing.T) {
 		[][]byte{[]byte("me"), []byte("sec")},
 		[]func() error{err409, err409},
 	)
-	runApplyItemsExpectNoError(t, newPRMockServer(), items, false, false)
+	runApplyItemsExpectNoError(t, newPRMockServer(), items, false)
 }
 
 func TestApplyItems_ViaPRFromStart(t *testing.T) {
@@ -183,7 +183,7 @@ func TestApplyItems_ViaPRFromStart(t *testing.T) {
 		[][]byte{[]byte("me"), []byte("sec")},
 		[]func() error{func() error { return nil }, func() error { return nil }},
 	)
-	runApplyItemsExpectNoError(t, newPRMockServer(), items, false, true)
+	runApplyItemsExpectNoError(t, newPRMockServer(), items, true)
 }
 
 func TestApplyItems_NonFileItemsApplyDirectly(t *testing.T) {
@@ -206,54 +206,32 @@ func TestApplyItems_NonFileItemsApplyDirectly(t *testing.T) {
 			},
 		},
 	}
-	runApplyItemsExpectNoError(t, newPRMockServer(), items, false, false)
+	runApplyItemsExpectNoError(t, newPRMockServer(), items, false)
 	if !nonFileApplied {
 		t.Error("expected non-file item to be applied directly after PR batch")
 	}
 }
 
-func TestApplyItems_SkippedOrDryRun(t *testing.T) {
-	// Items are not applied when: dry run is enabled OR action is Skip.
-	tests := []struct {
-		name   string
-		dryRun bool
-		action wizard.Action
-	}{
+func TestApplyItems_SkippedItemNotApplied(t *testing.T) {
+	// Items with action Skip are not applied.
+	applyCalled := false
+	items := []wizard.Item{
 		{
-			name:   "dry run skips Apply",
-			dryRun: true,
-			action: wizard.ActionCreate,
-		},
-		{
-			name:   "skipped item not applied",
-			dryRun: false,
-			action: wizard.ActionSkip,
+			Name:    ".github/CODEOWNERS",
+			Action:  wizard.ActionSkip,
+			Content: []byte("me"),
+			Apply: func() error {
+				applyCalled = true
+				return nil
+			},
 		},
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			applyCalled := false
-			items := []wizard.Item{
-				{
-					Name:    ".github/CODEOWNERS",
-					Action:  tt.action,
-					Content: []byte("me"),
-					Apply: func() error {
-						applyCalled = true
-						return nil
-					},
-				},
-			}
-			c := github.NewClient("", false)
-			err := applyItems(c, "owner", "repo", "main", items, tt.dryRun, false)
-			if err != nil {
-				t.Errorf("expected no error, got: %v", err)
-			}
-			if applyCalled {
-				t.Error("expected Apply not to be called")
-			}
-		})
+	c := github.NewClient("", false)
+	if err := applyItems(c, "owner", "repo", "main", items, false); err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+	if applyCalled {
+		t.Error("expected Apply not to be called")
 	}
 }
 
@@ -289,7 +267,7 @@ func TestApplyItems_ErrorHandling_NonFatal(t *testing.T) {
 				},
 			}
 			c := github.NewClient("", false)
-			err := applyItems(c, "owner", "repo", "main", items, false, false)
+			err := applyItems(c, "owner", "repo", "main", items, false)
 			if err != nil {
 				t.Errorf("expected no error return (non-fatal item failure), got: %v", err)
 			}
@@ -427,7 +405,7 @@ func TestApplyItems_WorkflowLocked_Skipped(t *testing.T) {
 			Apply:   func() error { return nil },
 		},
 	}
-	runApplyItemsExpectNoError(t, newSimpleFileServer(), items, false, false)
+	runApplyItemsExpectNoError(t, newSimpleFileServer(), items, false)
 }
 
 func TestApplyItems_MixedFileAndNonFile(t *testing.T) {
@@ -453,7 +431,7 @@ func TestApplyItems_MixedFileAndNonFile(t *testing.T) {
 			},
 		},
 	}
-	runApplyItemsExpectNoError(t, newSimpleFileServer(), items, false, false)
+	runApplyItemsExpectNoError(t, newSimpleFileServer(), items, false)
 	if !fileApplied {
 		t.Error("expected file item to be applied directly")
 	}
@@ -683,7 +661,7 @@ func TestApplyItems_FileApplyErrorNonFatal(t *testing.T) {
 		},
 	}
 	c := github.NewClient("", false)
-	err := applyItems(c, "owner", "repo", "main", items, false, false)
+	err := applyItems(c, "owner", "repo", "main", items, false)
 	if err != nil {
 		t.Errorf("expected no error return for non-fatal file item failure, got: %v", err)
 	}
@@ -704,7 +682,7 @@ func TestApplyItems_ViaPRFailure(t *testing.T) {
 	defer srv.Close()
 	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 
-	err := applyItems(c, "owner", "repo", "main", items, false, true)
+	err := applyItems(c, "owner", "repo", "main", items, true)
 	if err == nil || !strings.Contains(err.Error(), "apply via PR") {
 		t.Errorf("expected apply-via-PR error, got: %v", err)
 	}

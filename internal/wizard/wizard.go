@@ -42,19 +42,50 @@ func ConfirmDefaults(r io.Reader, w io.Writer) bool {
 	return input == "" || strings.EqualFold(input, "y")
 }
 
-// ShouldSkipOrDryRun prints and reports whether item should be skipped rather
-// than applied — either because it already exists (IsSkip) or because dryRun
-// is set (prints the dry-run label instead of applying).
-func ShouldSkipOrDryRun(item Item, dryRun bool) bool {
+// ShouldSkip reports whether item should be skipped rather than applied
+// (already exists) and prints a "skipped" line so the user sees the decision.
+func ShouldSkip(item Item) bool {
 	if item.IsSkip() {
 		fmt.Printf("  %-45s  skipped\n", item.Name)
 		return true
 	}
-	if dryRun {
-		fmt.Printf("  %-45s  %s\n", item.Name, item.DryRunLabel())
-		return true
-	}
 	return false
+}
+
+// PlanSummary returns a human-readable counts summary of the item plan,
+// e.g. "3 to create, 1 to update, 2 already exist". Returns "nothing to do"
+// when the plan is entirely skips.
+func PlanSummary(items []Item) string {
+	var toCreate, toUpdate, toUpgrade, alreadyExist int
+	for _, it := range items {
+		switch it.Action {
+		case ActionSkip:
+			alreadyExist++
+		case ActionUpdate:
+			toUpdate++
+		case ActionUpgrade:
+			toUpgrade++
+		default:
+			toCreate++
+		}
+	}
+	var parts []string
+	if toCreate > 0 {
+		parts = append(parts, fmt.Sprintf("%d to create", toCreate))
+	}
+	if toUpdate > 0 {
+		parts = append(parts, fmt.Sprintf("%d to update", toUpdate))
+	}
+	if toUpgrade > 0 {
+		parts = append(parts, fmt.Sprintf("%d to upgrade", toUpgrade))
+	}
+	if alreadyExist > 0 {
+		parts = append(parts, fmt.Sprintf("%d already exist", alreadyExist))
+	}
+	if len(parts) == 0 {
+		return "nothing to do"
+	}
+	return strings.Join(parts, ", ")
 }
 
 // applyAndPrint runs item.Apply and prints the outcome.
@@ -67,7 +98,7 @@ func applyAndPrint(item Item) {
 }
 
 // RunInteractive walks through each non-skipped item asking for confirmation.
-func RunInteractive(items []Item, dryRun bool, r io.Reader) error {
+func RunInteractive(items []Item, r io.Reader) error {
 	scanner := bufio.NewScanner(r)
 	for i, item := range items {
 		if item.IsSkip() {
@@ -80,10 +111,6 @@ func RunInteractive(items []Item, dryRun bool, r io.Reader) error {
 		input := strings.TrimSpace(scanner.Text())
 		if input != "" && !strings.EqualFold(input, "y") {
 			fmt.Printf("  %-45s  skipped by user\n", item.Name)
-			continue
-		}
-		if dryRun {
-			fmt.Printf("  %-45s  %s\n", item.Name, item.DryRunLabel())
 			continue
 		}
 		applyAndPrint(item)

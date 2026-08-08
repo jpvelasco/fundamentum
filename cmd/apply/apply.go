@@ -88,27 +88,30 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	// If the ruleset already exists, the question has no effect.
 	var opts github.BranchProtectionOptions
 	_, _ = fmt.Fprintf(stdout, "fundamentum apply %s/%s\n\n", owner, repo)
-	if !rulesetExists {
+	if !globals.DryRun && !rulesetExists {
 		opts.Solo = wizard.PromptProjectType(stdin, stdout)
 		_, _ = fmt.Fprintln(stdout)
 	}
 
 	items := buildItems(client, owner, repo, branch, visibility, rendered, rulesetExists, tagExists, classicExists, opts)
 
-	wizard.PrintSummaryTable(stdout, items, !globals.DryRun)
-
-	if wizard.ConfirmDefaults(stdin, stdout) {
-		if err := applyItems(client, owner, repo, branch, items, globals.DryRun, globals.ViaPR); err != nil {
-			return err
-		}
-		if globals.DryRun {
-			_, _ = fmt.Fprintf(stdout, "\n  Dry run complete — no changes made.\n")
-		} else {
-			_, _ = fmt.Fprintf(stdout, "\n  ✓ Done — https://github.com/%s/%s\n", owner, repo)
-		}
+	if globals.DryRun {
+		// Non-interactive dry run: plan table plus counts, then stop.
+		wizard.PrintSummaryTable(stdout, items, false)
+		_, _ = fmt.Fprintf(stdout, "\n  Dry run complete — %s — no changes made.\n", wizard.PlanSummary(items))
 		return nil
 	}
-	return wizard.RunInteractive(items, globals.DryRun, stdin)
+
+	wizard.PrintSummaryTable(stdout, items, true)
+
+	if wizard.ConfirmDefaults(stdin, stdout) {
+		if err := applyItems(client, owner, repo, branch, items, globals.ViaPR); err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(stdout, "\n  ✓ Done — https://github.com/%s/%s\n", owner, repo)
+		return nil
+	}
+	return wizard.RunInteractive(items, stdin)
 }
 
 func buildItems(
@@ -293,13 +296,13 @@ func actionFromExists(exists bool) wizard.Action {
 // into a single PR instead of direct commits. If viaPR is false and a 409
 // is detected, the tool automatically falls back to PR mode for remaining
 // file items — no re-run needed.
-func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Item, dryRun, viaPR bool) error {
+func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Item, viaPR bool) error {
 	var fileChanges []github.FileChange
 	var nonFileItems []wizard.Item
 	fallback := false // true after first 409 triggers auto-fallback to PR mode
 
 	for _, item := range items {
-		if wizard.ShouldSkipOrDryRun(item, dryRun) {
+		if wizard.ShouldSkip(item) {
 			continue
 		}
 
