@@ -587,7 +587,7 @@ func TestBuildItems_FileStatusSkip(t *testing.T) {
 		if strings.Contains(r.URL.Path, target) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"content":"` + encoded + `","sha":"abc"}`))
+			_ = json.NewEncoder(w).Encode(map[string]string{"content": encoded, "sha": "abc"})
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
