@@ -45,9 +45,10 @@ Pre-commit order: template drift → build → lint → test.
 **CI job names (fabrica standard):** `.github/workflows/ci.yml` jobs are `Template drift`, `Lint`,
 `Lint (Windows)`, `Vulnerability scan`, `Build (ubuntu-latest|windows-latest|macos-latest)`,
 `Test (ubuntu-latest|…)`, `gosec`, `Trivy`, `Release build (snapshot)` (GoReleaser build-only —
-never publishes), plus `Codacy Analysis` (push-to-main only, **non-blocking** via
-`continue-on-error: true` — PR-level checks come from the GitHub integration webhook). CodeQL runs
-as `Analyze (actions|go)` in `codeql.yml`. macOS legs run only on
+never publishes); PR-level Codacy checks come from the GitHub integration webhook — no `Codacy
+Analysis` CI job needed (verified: cloud analysis updates the dashboard on push to main, and the
+CLI's upload completion is rejected for cloud-analyzed repos with `Feature "Repository Analysis"
+is disabled`). CodeQL runs as `Analyze (actions|go)` in `codeql.yml`. macOS legs run only on
 push to `main` (PRs skip them to save minutes), so **do not** require macOS contexts in branch
 protection. Required checks in the `protect-main` ruleset must match the reportable jobs on PRs —
 currently `Lint`, `security`, `review`, `Template drift`, `Vulnerability scan`,
@@ -136,4 +137,4 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`, `--
 - **Legacy `tools:` key ignored.** The `.codacy/codacy.yaml` format is from Codacy CLI v2 and not recognized by the current cloud config.
 - **Use npm CLIs via npx.** For local and cloud interaction, use `@codacy/codacy-cloud-cli` and `@codacy/analysis-cli`.
 - **Trivy noise:** Trivy reports "no patterns configured" on repos without Dockerfiles or Kubernetes manifests. Disable Trivy in the Codacy UI per-repo to eliminate this noise. If the repo adds container files later, re-enable Trivy.
-- **This-repo workflows (now shipped templates):** `.github/workflows/ci.yml` `Codacy Analysis` job (push-only, `continue-on-error: true` — the CLI's final notification is rejected for cloud-analyzed repos, so the job must not fail pushes; it only becomes a real analysis source if "Run analysis on your build server" is enabled in Codacy settings) re-uploads analysis to keep the dashboard in sync; `.github/workflows/codacy-coverage.yml` (`workflow_run`) re-sends the CI test artifact's coverage — both are embedded templates (`codacy-coverage.yml` is a shared workflow; the CI job is folded into `public_ci.yml`/`private_ci.yml`). `github.DefaultStatusChecks` always includes `Codacy Static Code Analysis`.
+- **This-repo workflows (now shipped templates):** `.github/workflows/codacy-coverage.yml` (`workflow_run`) re-sends the CI test artifact's coverage to Codacy — part of the embedded templates (`codacy-coverage.yml` is a shared workflow). Codacy analysis itself is entirely webhook/cloud-driven: PR checks come from the GitHub integration, and the main dashboard updates on push without any CI job (the former `Codacy Analysis` CLI-upload job was removed after proving it can never succeed — the CLI's final notification is rejected for cloud-analyzed repos with `Feature "Repository Analysis" is disabled`). `github.DefaultStatusChecks` always includes `Codacy Static Code Analysis`.
