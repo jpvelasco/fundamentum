@@ -52,21 +52,22 @@ func TestClassicProtectionExists_NetworkError(t *testing.T) {
 }
 
 func TestApplyClassicBranchProtection(t *testing.T) {
-	called := false
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var called bool
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut && r.URL.Path == "/repos/owner/repo/branches/main/protection" {
 			called = true
 		}
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]any{})
-	}))
-	defer srv.Close()
-	if err := c.ApplyClassicBranchProtection("owner", "repo", "main", DefaultStatusChecks, BranchProtectionOptions{Solo: true}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !called {
-		t.Error("expected PUT to be called")
-	}
+	}), nil, func(c *Client) {
+		if err := c.ApplyClassicBranchProtection("owner", "repo", "main", DefaultStatusChecks, BranchProtectionOptions{Solo: true}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}, func(t *testing.T) {
+		if !called {
+			t.Error("expected PUT to be called")
+		}
+	})
 }
 
 func TestApplyClassicBranchProtection_NetworkError(t *testing.T) {
@@ -78,20 +79,21 @@ func TestApplyClassicBranchProtection_NetworkError(t *testing.T) {
 }
 
 func TestRemoveClassicBranchProtection(t *testing.T) {
-	called := false
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var called bool
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete && r.URL.Path == "/repos/owner/repo/branches/main/protection" {
 			called = true
 		}
 		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer srv.Close()
-	if err := c.RemoveClassicBranchProtection("owner", "repo", "main"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !called {
-		t.Error("expected DELETE to be called")
-	}
+	}), nil, func(c *Client) {
+		if err := c.RemoveClassicBranchProtection("owner", "repo", "main"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}, func(t *testing.T) {
+		if !called {
+			t.Error("expected DELETE to be called")
+		}
+	})
 }
 
 func TestRemoveClassicBranchProtection_NetworkError(t *testing.T) {

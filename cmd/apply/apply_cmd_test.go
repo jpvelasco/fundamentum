@@ -14,16 +14,6 @@ import (
 	"github.com/jpvelasco/fundamentum/internal/wizard"
 )
 
-// newCreatedServer returns a test server that returns 201 + {"id":1} for all
-// requests, plus a client pointed at it. Useful for branch protection tests
-// that don't care about request details.
-func newCreatedServer() (*httptest.Server, *github.Client) {
-	return newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":1}`))
-	}))
-}
-
 // newBuildItemsTest is a shared setup helper for TestBuildItems_* tests.
 // It creates a mock HTTP server with the given handler, renders templates with the specified visibility,
 // and calls buildItems, returning the resulting items for assertion in the test.
@@ -123,16 +113,18 @@ func TestBranchProtectionItem_Creation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv, c := newCreatedServer()
-			defer srv.Close()
-
-			item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, tt.rulesetExists, tt.classicExists, github.BranchProtectionOptions{})
-			if item.Action != tt.wantAction {
-				t.Errorf("expected action %v, got %v", tt.wantAction, item.Action)
-			}
-			if tt.checkOptional && item.Optional != tt.wantOptional {
-				t.Errorf("expected Optional=%v, got %v", tt.wantOptional, item.Optional)
-			}
+			testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"id":1}`))
+			}), func(c *github.Client) {
+				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, tt.rulesetExists, tt.classicExists, github.BranchProtectionOptions{})
+				if item.Action != tt.wantAction {
+					t.Errorf("expected action %v, got %v", tt.wantAction, item.Action)
+				}
+				if tt.checkOptional && item.Optional != tt.wantOptional {
+					t.Errorf("expected Optional=%v, got %v", tt.wantOptional, item.Optional)
+				}
+			}, nil)
 		})
 	}
 }

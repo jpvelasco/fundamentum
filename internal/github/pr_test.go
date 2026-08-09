@@ -5,20 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 )
-
-// newTestClient returns client(srv.URL) if client is set, otherwise the
-// default test client pointed at srv. Shared across table-driven tests that
-// exercise both normal responses and injected transport failures.
-func newTestClient(srv *httptest.Server, client func(srv string) *Client) *Client {
-	if client != nil {
-		return client(srv.URL)
-	}
-	return NewClient("t", false).WithBaseURL(srv.URL)
-}
 
 // extractFilePathFromContents extracts the file path from a GitHub API /contents/ URL.
 // For example, "/repos/owner/repo/contents/README.md" returns "README.md".
@@ -89,21 +78,19 @@ func TestCreatePRBranch(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(tt.handler)
-			defer srv.Close()
-
-			c := newTestClient(srv, tt.client)
-			err := c.CreatePRBranch("owner", "repo", "test-branch", "main")
-			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
+			testWithServer(t, tt.handler, tt.client, func(c *Client) {
+				err := c.CreatePRBranch("owner", "repo", "test-branch", "main")
+				if tt.wantErr {
+					if err == nil {
+						t.Fatal("expected error, got nil")
+					}
+					if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
+						t.Errorf("expected error to contain %q, got: %v", tt.errSubstr, err)
+					}
+				} else if err != nil {
+					t.Fatalf("unexpected error: %v", err)
 				}
-				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
-					t.Errorf("expected error to contain %q, got: %v", tt.errSubstr, err)
-				}
-			} else if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			}, nil)
 		})
 	}
 }
@@ -155,23 +142,21 @@ func TestCreatePullRequest(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(tt.handler)
-			defer srv.Close()
-
-			c := newTestClient(srv, tt.client)
-			num, err := c.CreatePullRequest("owner", "repo", "test title", "test body", "feature", "main")
-			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
+			testWithServer(t, tt.handler, tt.client, func(c *Client) {
+				num, err := c.CreatePullRequest("owner", "repo", "test title", "test body", "feature", "main")
+				if tt.wantErr {
+					if err == nil {
+						t.Fatal("expected error, got nil")
+					}
+				} else {
+					if err != nil {
+						t.Fatalf("unexpected error: %v", err)
+					}
+					if num != tt.wantNum {
+						t.Errorf("expected PR number %d, got %d", tt.wantNum, num)
+					}
 				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if num != tt.wantNum {
-					t.Errorf("expected PR number %d, got %d", tt.wantNum, num)
-				}
-			}
+			}, nil)
 		})
 	}
 }
@@ -311,25 +296,23 @@ func TestUpsertFileOnBranch(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(tt.handler)
-			defer srv.Close()
+			testWithServer(t, tt.handler, tt.client, func(c *Client) {
+				action, err := c.UpsertFileOnBranch("owner", "repo", "feature", tt.filePath, tt.content)
 
-			c := newTestClient(srv, tt.client)
-			action, err := c.UpsertFileOnBranch("owner", "repo", "feature", tt.filePath, tt.content)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
+				if tt.wantErr {
+					if err == nil {
+						t.Fatal("expected error, got nil")
+					}
+					if tt.wantLock && !IsWorkflowLocked(err) {
+						t.Errorf("expected ErrWorkflowLocked, got: %v", err)
+					}
+				} else if err != nil {
+					t.Fatalf("unexpected error: %v", err)
 				}
-				if tt.wantLock && !IsWorkflowLocked(err) {
-					t.Errorf("expected ErrWorkflowLocked, got: %v", err)
+				if tt.wantAction != "" && action != tt.wantAction {
+					t.Errorf("expected action=%q, got %q", tt.wantAction, action)
 				}
-			} else if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if tt.wantAction != "" && action != tt.wantAction {
-				t.Errorf("expected action=%q, got %q", tt.wantAction, action)
-			}
+			}, nil)
 		})
 	}
 }
@@ -443,82 +426,79 @@ func TestApplyViaPR_UniqueBranchNames(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	})
-	srv, c := newTestServer(handler)
-	defer srv.Close()
-
-	changes := []FileChange{{Path: "README.md", Content: []byte("hi")}}
-	if _, err := c.ApplyViaPR("owner", "repo", "main", changes); err != nil {
-		t.Fatalf("first ApplyViaPR: %v", err)
-	}
-	if _, err := c.ApplyViaPR("owner", "repo", "main", changes); err != nil {
-		t.Fatalf("second ApplyViaPR: %v", err)
-	}
-	if len(refs) != 2 {
-		t.Fatalf("expected 2 branch refs created, got %d", len(refs))
-	}
-	if refs[0] == refs[1] {
-		t.Errorf("expected distinct branch refs, got %q twice", refs[0])
-	}
+	testWithServer(t, handler, nil, func(c *Client) {
+		changes := []FileChange{{Path: "README.md", Content: []byte("hi")}}
+		if _, err := c.ApplyViaPR("owner", "repo", "main", changes); err != nil {
+			t.Fatalf("first ApplyViaPR: %v", err)
+		}
+		if _, err := c.ApplyViaPR("owner", "repo", "main", changes); err != nil {
+			t.Fatalf("second ApplyViaPR: %v", err)
+		}
+	}, func(t *testing.T) {
+		if len(refs) != 2 {
+			t.Fatalf("expected 2 branch refs created, got %d", len(refs))
+		}
+		if refs[0] == refs[1] {
+			t.Errorf("expected distinct branch refs, got %q twice", refs[0])
+		}
+	})
 }
 
 // Given a real 409 from the API, the whole client path must produce an error
 // that IsConflict409 classifies structurally (the apply auto-fallback to PR
 // mode depends on this).
 func TestIsConflict409_ProductionError(t *testing.T) {
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
 		_, _ = w.Write([]byte(`{"message":"branch protection rule violations (GH013)"}`))
-	}))
-	defer srv.Close()
-
-	err := c.CreateBranchRuleset("owner", "repo", nil, BranchProtectionOptions{})
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !IsConflict409(err) {
-		t.Errorf("expected IsConflict409 to be true for a production 409, got: %v", err)
-	}
+	}), nil, func(c *Client) {
+		err := c.CreateBranchRuleset("owner", "repo", nil, BranchProtectionOptions{})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !IsConflict409(err) {
+			t.Errorf("expected IsConflict409 to be true for a production 409, got: %v", err)
+		}
+	}, nil)
 }
 
 // Given a real 403 from the API, IsForbidden403 must classify it structurally
 // (the ruleset → classic fallback for free-tier private repos depends on this).
 func TestIsForbidden403_ProductionError(t *testing.T) {
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(`{"message":"Forbidden"}`))
-	}))
-	defer srv.Close()
-
-	err := c.CreateBranchRuleset("owner", "repo", nil, BranchProtectionOptions{})
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !IsForbidden403(err) {
-		t.Errorf("expected IsForbidden403 to be true for a production 403, got: %v", err)
-	}
+	}), nil, func(c *Client) {
+		err := c.CreateBranchRuleset("owner", "repo", nil, BranchProtectionOptions{})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !IsForbidden403(err) {
+			t.Errorf("expected IsForbidden403 to be true for a production 403, got: %v", err)
+		}
+	}, nil)
 }
 
 // Given a workflow file update rejected with 404 (GitHub Actions lock), the
 // returned error must satisfy errors.Is against ErrWorkflowLocked so apply can
 // treat it as "skip" rather than failure.
 func TestIsWorkflowLocked_ErrorsIs(t *testing.T) {
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"content":"b2xk","sha":"abc"}`))
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	_, err := c.UpsertFile("owner", "repo", ".github/workflows/ci.yml", []byte("new"))
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !errors.Is(err, ErrWorkflowLocked) {
-		t.Errorf("expected errors.Is(err, ErrWorkflowLocked), got: %v", err)
-	}
+	}), nil, func(c *Client) {
+		_, err := c.UpsertFile("owner", "repo", ".github/workflows/ci.yml", []byte("new"))
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !errors.Is(err, ErrWorkflowLocked) {
+			t.Errorf("expected errors.Is(err, ErrWorkflowLocked), got: %v", err)
+		}
+	}, nil)
 }
 
 func TestApplyViaPR(t *testing.T) {
@@ -762,25 +742,24 @@ func TestApplyViaPR(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv, c := newTestServer(tt.handler)
-			defer srv.Close()
-
-			prNum, err := c.ApplyViaPR("owner", "repo", "main", tt.changes)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
+			testWithServer(t, tt.handler, nil, func(c *Client) {
+				prNum, err := c.ApplyViaPR("owner", "repo", "main", tt.changes)
+				if tt.wantErr {
+					if err == nil {
+						t.Fatal("expected error, got nil")
+					}
+					if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+						t.Errorf("expected error containing %q, got: %v", tt.errMsg, err)
+					}
+				} else {
+					if err != nil {
+						t.Fatalf("unexpected error: %v", err)
+					}
+					if prNum == 0 {
+						t.Error("expected non-zero PR number")
+					}
 				}
-				if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
-					t.Errorf("expected error containing %q, got: %v", tt.errMsg, err)
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if prNum == 0 {
-					t.Error("expected non-zero PR number")
-				}
-			}
+			}, nil)
 		})
 	}
 }

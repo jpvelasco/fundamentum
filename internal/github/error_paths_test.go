@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -39,22 +38,21 @@ func TestDecodeExistingContentsFile_ParseError(t *testing.T) {
 // invalidJSONHandler serves the given method-specific status with a body that
 // is valid per status but not parseable as a Contents API response.
 func TestCheckExistingFile_DecodeError(t *testing.T) {
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`not json`))
-	}))
-	defer srv.Close()
-
-	action, sha, err := c.checkExistingFile("/repos/owner/repo/contents/test.md", "test.md", []byte("data"))
-	if err == nil {
-		t.Fatal("expected decode error from checkExistingFile")
-	}
-	if action != fileActionSkip {
-		t.Errorf("expected fileActionSkip on error, got %v", action)
-	}
-	if sha != "" {
-		t.Errorf("expected empty sha on error, got %q", sha)
-	}
+	}), nil, func(c *Client) {
+		action, sha, err := c.checkExistingFile("/repos/owner/repo/contents/test.md", "test.md", []byte("data"))
+		if err == nil {
+			t.Fatal("expected decode error from checkExistingFile")
+		}
+		if action != fileActionSkip {
+			t.Errorf("expected fileActionSkip on error, got %v", action)
+		}
+		if sha != "" {
+			t.Errorf("expected empty sha on error, got %q", sha)
+		}
+	}, nil)
 }
 
 func TestAnyFileExists_NetworkError(t *testing.T) {
@@ -80,15 +78,14 @@ func TestGetRepoVisibility_NetworkError(t *testing.T) {
 }
 
 func TestGetRepoVisibility_DecodeError(t *testing.T) {
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`not json`))
-	}))
-	defer srv.Close()
-
-	if _, err := c.GetRepoVisibility("owner", "repo"); err == nil {
-		t.Fatal("expected decode error")
-	}
+	}), nil, func(c *Client) {
+		if _, err := c.GetRepoVisibility("owner", "repo"); err == nil {
+			t.Fatal("expected decode error")
+		}
+	}, nil)
 }
 
 func TestRulesetExists_NetworkError(t *testing.T) {
@@ -99,15 +96,14 @@ func TestRulesetExists_NetworkError(t *testing.T) {
 }
 
 func TestRulesetExists_DecodeError(t *testing.T) {
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`not json`))
-	}))
-	defer srv.Close()
-
-	if _, err := c.RulesetExists("owner", "repo", "protect-main"); err == nil {
-		t.Fatal("expected decode error")
-	}
+	}), nil, func(c *Client) {
+		if _, err := c.RulesetExists("owner", "repo", "protect-main"); err == nil {
+			t.Fatal("expected decode error")
+		}
+	}, nil)
 }
 
 func TestCreateBranchRuleset_NetworkError(t *testing.T) {
@@ -125,17 +121,16 @@ func TestCreateTagRuleset_NetworkError(t *testing.T) {
 }
 
 func TestEnableSecurity_SecretScanningNetworkError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]any{})
-	}))
-	defer srv.Close()
-
-	// PATCH (base repo) fails at the transport level; PUTs succeed.
-	c := newMethodSplitTransportClient(srv.URL, http.MethodPatch)
-	if err := c.EnableSecurity("owner", "repo", "private", false); err == nil {
-		t.Fatal("expected network error on secret scanning PATCH")
-	}
+	}), func(url string) *Client {
+		return newMethodSplitTransportClient(url, http.MethodPatch)
+	}, func(c *Client) {
+		if err := c.EnableSecurity("owner", "repo", "private", false); err == nil {
+			t.Fatal("expected network error on secret scanning PATCH")
+		}
+	}, nil)
 }
 
 func TestApplyGeneralSettings_NetworkError(t *testing.T) {
@@ -146,25 +141,23 @@ func TestApplyGeneralSettings_NetworkError(t *testing.T) {
 }
 
 func TestCreatePRBranch_DecodeError(t *testing.T) {
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`not json`))
-	}))
-	defer srv.Close()
-
-	if err := c.CreatePRBranch("owner", "repo", "feat/x", "main"); err == nil {
-		t.Fatal("expected decode error")
-	}
+	}), nil, func(c *Client) {
+		if err := c.CreatePRBranch("owner", "repo", "feat/x", "main"); err == nil {
+			t.Fatal("expected decode error")
+		}
+	}, nil)
 }
 
 func TestCreatePullRequest_DecodeError(t *testing.T) {
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`not json`))
-	}))
-	defer srv.Close()
-
-	if _, err := c.CreatePullRequest("owner", "repo", "t", "b", "head", "main"); err == nil {
-		t.Fatal("expected decode error")
-	}
+	}), nil, func(c *Client) {
+		if _, err := c.CreatePullRequest("owner", "repo", "t", "b", "head", "main"); err == nil {
+			t.Fatal("expected decode error")
+		}
+	}, nil)
 }

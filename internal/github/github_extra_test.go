@@ -75,22 +75,22 @@ func TestAnyFileExists(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				status, ok := tt.resps[r.URL.Path]
 				if !ok {
 					status = http.StatusNotFound
 				}
 				w.WriteHeader(status)
-			}))
-			defer srv.Close()
-			got, err := c.AnyFileExists("owner", "repo", tt.paths)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("AnyFileExists() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if got != tt.want {
-				t.Errorf("AnyFileExists() = %v, want %v", got, tt.want)
-			}
+			}), nil, func(c *Client) {
+				got, err := c.AnyFileExists("owner", "repo", tt.paths)
+				if (err != nil) != tt.wantErr {
+					t.Errorf("AnyFileExists() error = %v, wantErr %v", err, tt.wantErr)
+					return
+				}
+				if got != tt.want {
+					t.Errorf("AnyFileExists() = %v, want %v", got, tt.want)
+				}
+			}, nil)
 		})
 	}
 }
@@ -134,16 +134,16 @@ func TestFileStatus(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv, c := newTestServer(newJSONResponseHandler(tt.status, tt.response))
-			defer srv.Close()
-			got, err := c.FileStatus("owner", "repo", "test.md", []byte(tt.content))
-			if (err != nil) != tt.wantErr {
-				t.Errorf("FileStatus() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if got != tt.want {
-				t.Errorf("FileStatus() = %q, want %q", got, tt.want)
-			}
+			testWithServer(t, newJSONResponseHandler(tt.status, tt.response), nil, func(c *Client) {
+				got, err := c.FileStatus("owner", "repo", "test.md", []byte(tt.content))
+				if (err != nil) != tt.wantErr {
+					t.Errorf("FileStatus() error = %v, wantErr %v", err, tt.wantErr)
+					return
+				}
+				if got != tt.want {
+					t.Errorf("FileStatus() = %q, want %q", got, tt.want)
+				}
+			}, nil)
 		})
 	}
 }
@@ -188,22 +188,21 @@ func TestUpsertFile_UpdateAndErrorStatus(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv, c := newTestServer(tt.handler)
-			defer srv.Close()
-
-			action, err := c.UpsertFile("owner", "repo", "test.md", []byte("new"))
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error")
+			testWithServer(t, tt.handler, nil, func(c *Client) {
+				action, err := c.UpsertFile("owner", "repo", "test.md", []byte("new"))
+				if tt.wantErr {
+					if err == nil {
+						t.Error("expected error")
+					}
+				} else {
+					if err != nil {
+						t.Fatalf("unexpected error: %v", err)
+					}
+					if action != tt.wantAction {
+						t.Errorf("expected action=%q, got %q", tt.wantAction, action)
+					}
 				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if action != tt.wantAction {
-					t.Errorf("expected action=%q, got %q", tt.wantAction, action)
-				}
-			}
+			}, nil)
 		})
 	}
 }
@@ -242,15 +241,15 @@ func TestRulesetExists(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv, c := newTestServer(newJSONResponseHandler(tt.statusCode, tt.response))
-			defer srv.Close()
-			got, err := c.RulesetExists("owner", "repo", "protect-main")
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tt.want {
-				t.Errorf("RulesetExists() = %v, want %v", got, tt.want)
-			}
+			testWithServer(t, newJSONResponseHandler(tt.statusCode, tt.response), nil, func(c *Client) {
+				got, err := c.RulesetExists("owner", "repo", "protect-main")
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got != tt.want {
+					t.Errorf("RulesetExists() = %v, want %v", got, tt.want)
+				}
+			}, nil)
 		})
 	}
 }
@@ -302,8 +301,8 @@ func TestEnsureRulesets(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			postCalled := false
-			srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var postCalled bool
+			testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
 					w.WriteHeader(http.StatusOK)
 					var out any
@@ -317,15 +316,15 @@ func TestEnsureRulesets(t *testing.T) {
 					_ = json.NewEncoder(w).Encode(map[string]any{"id": 1})
 					return
 				}
-			}))
-			defer srv.Close()
-			err := tt.fn(c)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if postCalled != tt.wantPost {
-				t.Errorf("POST called: %v, want %v", postCalled, tt.wantPost)
-			}
+			}), nil, func(c *Client) {
+				if err := tt.fn(c); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}, func(t *testing.T) {
+				if postCalled != tt.wantPost {
+					t.Errorf("POST called: %v, want %v", postCalled, tt.wantPost)
+				}
+			})
 		})
 	}
 }
@@ -350,34 +349,35 @@ func TestCreateRulesetErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv, c := newTestServer(newErrorResponseHandler(http.StatusUnprocessableEntity))
-			defer srv.Close()
-			err := tt.fn(c)
-			if err == nil {
-				t.Error("expected error for 422 response")
-			}
+			testWithServer(t, newErrorResponseHandler(http.StatusUnprocessableEntity), nil, func(c *Client) {
+				err := tt.fn(c)
+				if err == nil {
+					t.Error("expected error for 422 response")
+				}
+			}, nil)
 		})
 	}
 }
 
 func TestCreateBranchRuleset_WithStatusChecks(t *testing.T) {
 	var postBody map[string]any
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Decode the body to inspect
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		postBody = body
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": 1})
-	}))
-	defer srv.Close()
-	err := c.CreateBranchRuleset("owner", "repo", []string{"ci"}, BranchProtectionOptions{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if postBody == nil {
-		t.Fatal("expected POST body")
-	}
+	}), nil, func(c *Client) {
+		err := c.CreateBranchRuleset("owner", "repo", []string{"ci"}, BranchProtectionOptions{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}, func(t *testing.T) {
+		if postBody == nil {
+			t.Fatal("expected POST body")
+		}
+	})
 }
 
 func TestCreateBranchRuleset_DedupStatusChecks(t *testing.T) {
@@ -421,39 +421,39 @@ func TestCreateBranchRuleset_DedupStatusChecks(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var postBody map[string]any
-			srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_ = json.NewDecoder(r.Body).Decode(&postBody)
 				w.WriteHeader(http.StatusCreated)
 				_ = json.NewEncoder(w).Encode(map[string]any{"id": 1})
-			}))
-			defer srv.Close()
-			err := c.CreateBranchRuleset("owner", "repo", tt.statusChecks, BranchProtectionOptions{})
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			// Count required_status_checks entries in the rules array
-			rules, ok := postBody["rules"].([]any)
-			if !ok {
-				t.Fatal("expected rules array in body")
-			}
-			for _, rule := range rules {
-				rm, ok := rule.(map[string]any)
-				if !ok || rm["type"] != "required_status_checks" {
-					continue
+			}), nil, func(c *Client) {
+				err := c.CreateBranchRuleset("owner", "repo", tt.statusChecks, BranchProtectionOptions{})
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
 				}
-				params, ok := rm["parameters"].(map[string]any)
+			}, func(t *testing.T) {
+				// Count required_status_checks entries in the rules array
+				rules, ok := postBody["rules"].([]any)
 				if !ok {
-					continue
+					t.Fatal("expected rules array in body")
 				}
-				checks, ok := params["required_status_checks"].([]any)
-				if !ok {
-					continue
+				for _, rule := range rules {
+					rm, ok := rule.(map[string]any)
+					if !ok || rm["type"] != "required_status_checks" {
+						continue
+					}
+					params, ok := rm["parameters"].(map[string]any)
+					if !ok {
+						continue
+					}
+					checks, ok := params["required_status_checks"].([]any)
+					if !ok {
+						continue
+					}
+					if len(checks) != tt.wantCount {
+						t.Errorf("expected %d checks, got %d", tt.wantCount, len(checks))
+					}
 				}
-				if len(checks) != tt.wantCount {
-					t.Errorf("expected %d checks, got %d", tt.wantCount, len(checks))
-				}
-			}
+			})
 		})
 	}
 }
@@ -514,13 +514,12 @@ func TestErrorResponses(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv, c := newTestServer(newErrorResponseHandler(tt.status))
-			defer srv.Close()
-
-			err := tt.fn(c)
-			if err == nil {
-				t.Error("expected error")
-			}
+			testWithServer(t, newErrorResponseHandler(tt.status), nil, func(c *Client) {
+				err := tt.fn(c)
+				if err == nil {
+					t.Error("expected error")
+				}
+			}, nil)
 		})
 	}
 }
@@ -528,33 +527,33 @@ func TestErrorResponses(t *testing.T) {
 func TestClassicProtectionExists_Error(t *testing.T) {
 	// The function doesn't return an error for non-200 status — it just returns false
 	// Test that API errors still propagate
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-	exists, err := c.ClassicProtectionExists("owner", "repo", "main")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !exists {
-		t.Error("expected true for 200 response")
-	}
+	}), nil, func(c *Client) {
+		exists, err := c.ClassicProtectionExists("owner", "repo", "main")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !exists {
+			t.Error("expected true for 200 response")
+		}
+	}, nil)
 }
 
 func TestClient_DoVerbose(t *testing.T) {
-	srv, _ := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-
-	c := NewClient("t", true).WithBaseURL(srv.URL)
-	resp, err := c.get("/")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("expected 200, got %d", resp.StatusCode)
-	}
+	}), func(url string) *Client {
+		return NewClient("t", true).WithBaseURL(url)
+	}, func(c *Client) {
+		resp, err := c.get("/")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("expected 200, got %d", resp.StatusCode)
+		}
+	}, nil)
 }
 
 func TestBase(t *testing.T) {

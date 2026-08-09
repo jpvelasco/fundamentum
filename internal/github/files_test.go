@@ -94,23 +94,22 @@ func TestUpsertFile(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv, c := newTestServer(tt.handler)
-			defer srv.Close()
-			action, err := c.UpsertFile("owner", "repo", tt.filePath, tt.content)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
+			testWithServer(t, tt.handler, nil, func(c *Client) {
+				action, err := c.UpsertFile("owner", "repo", tt.filePath, tt.content)
+				if tt.wantErr {
+					if err == nil {
+						t.Fatal("expected error, got nil")
+					}
+					if tt.wantLock && !IsWorkflowLocked(err) {
+						t.Errorf("expected ErrWorkflowLocked, got: %v", err)
+					}
+				} else if err != nil {
+					t.Fatalf("unexpected error: %v", err)
 				}
-				if tt.wantLock && !IsWorkflowLocked(err) {
-					t.Errorf("expected ErrWorkflowLocked, got: %v", err)
+				if tt.wantAction != "" && action != tt.wantAction {
+					t.Errorf("expected action=%q, got %q", tt.wantAction, action)
 				}
-			} else if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if tt.wantAction != "" && action != tt.wantAction {
-				t.Errorf("expected action=%q, got %q", tt.wantAction, action)
-			}
+			}, nil)
 		})
 	}
 }
