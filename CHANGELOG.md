@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-08
+
+**Documentation release.** Tidies both READMEs — the npm registry drops the redundant Codacy coverage badge (Codecov already reports coverage), and the npm README gets a tighter badge row and platform-specific support notes.
+
+### Documentation
+
+- **README cleanup.** Removed the Codacy coverage badge from the repo README (kept Codacy grade; Codecov owns the coverage), dropped the self-referential npm version/downloads badges from the npm README, removed the stale planning-directory note from the repo README, and corrected the npm package platform claim (macOS/Linux on x64+arm64, Windows on x64).
+
 ## [0.1.0] - 2026-08-08
 
 **First release.** One-shot GitHub repo hardening CLI: bootstrap an existing repo (or create a new one) with community health files, branch protection, security features, and starter workflows — idempotent, dry-run first, free forever.
@@ -42,5 +50,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.1
 [0.1.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.0
