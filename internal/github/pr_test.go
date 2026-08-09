@@ -762,10 +762,9 @@ func TestApplyViaPR(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(tt.handler)
+			srv, c := newTestServer(tt.handler)
 			defer srv.Close()
 
-			c := NewClient("t", false).WithBaseURL(srv.URL)
 			prNum, err := c.ApplyViaPR("owner", "repo", "main", tt.changes)
 			if tt.wantErr {
 				if err == nil {

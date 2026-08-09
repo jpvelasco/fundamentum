@@ -72,7 +72,7 @@ func newFileItems(names []string, content [][]byte, applies []func() error) []wi
 func runApplyItemsExpectNoError(t *testing.T, srv *httptest.Server, items []wizard.Item, viaPR bool) {
 	t.Helper()
 	defer srv.Close()
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+	c := newTestClient(srv)
 	if err := applyItems(c, "owner", "repo", "main", items, viaPR); err != nil {
 		t.Errorf("expected no error, got: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestBranchProtectionItem_FallbackOnlyOn403(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			classicCalled := false
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/rulesets"):
 					w.WriteHeader(http.StatusOK)
@@ -364,7 +364,6 @@ func TestBranchProtectionItem_FallbackOnlyOn403(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c := github.NewClient("t", false).WithBaseURL(srv.URL)
 			item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, false, false, github.BranchProtectionOptions{})
 
 			err := item.Apply()
@@ -495,7 +494,7 @@ func TestBuildItems_AdvancedCodeQLSkipsDefaultSetup(t *testing.T) {
 	// item must NOT enable default-setup CodeQL (GitHub rejects advanced
 	// SARIF uploads while default setup is configured).
 	calledDefaultSetup := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "code-scanning/default-setup"):
 			calledDefaultSetup = true
@@ -512,7 +511,6 @@ func TestBuildItems_AdvancedCodeQLSkipsDefaultSetup(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"}
 	rendered, err := templates.Render(data)
 	if err != nil {
@@ -561,7 +559,7 @@ func TestBuildItems_FileStatusSkip(t *testing.T) {
 		}
 	}
 	encoded := base64.StdEncoding.EncodeToString([]byte(targetContent))
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, target) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -572,7 +570,6 @@ func TestBuildItems_FileStatusSkip(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 	items := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{})
 
 	for _, item := range items {
@@ -587,7 +584,7 @@ func TestBuildItems_FileStatusSkip(t *testing.T) {
 // TestBranchProtectionItem_ClassicUpgradeApply verifies the upgrade item's
 // Apply closure: create the ruleset first, then remove classic protection.
 func TestBranchProtectionItem_ClassicUpgradeApply(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets"):
 			w.WriteHeader(http.StatusOK)
@@ -603,7 +600,6 @@ func TestBranchProtectionItem_ClassicUpgradeApply(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 	item := branchProtectionItem(c, "owner", "repo", "main", "public", false, true, github.BranchProtectionOptions{})
 	if item.Action != wizard.ActionUpgrade {
 		t.Fatalf("expected ActionUpgrade, got %v", item.Action)
@@ -618,7 +614,7 @@ func TestBranchProtectionItem_ClassicUpgradeApply(t *testing.T) {
 // protection.
 func TestBranchProtectionItem_ClassicUpgradeError(t *testing.T) {
 	classicRemoved := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets"):
 			w.WriteHeader(http.StatusOK)
@@ -632,7 +628,6 @@ func TestBranchProtectionItem_ClassicUpgradeError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 	item := branchProtectionItem(c, "owner", "repo", "main", "public", false, true, github.BranchProtectionOptions{})
 	if err := item.Apply(); err == nil {
 		t.Fatal("expected error when ruleset creation fails")
@@ -676,11 +671,10 @@ func TestApplyItems_ViaPRFailure(t *testing.T) {
 		[]func() error{func() error { return nil }},
 	)
 	// PR branch creation fails (404 on GET /branches/main) → ApplyViaPR errors.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 
 	err := applyItems(c, "owner", "repo", "main", items, true)
 	if err == nil || !strings.Contains(err.Error(), "apply via PR") {

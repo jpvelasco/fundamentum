@@ -14,10 +14,11 @@ import (
 	"github.com/jpvelasco/fundamentum/internal/wizard"
 )
 
-// newCreatedServer returns a test server that returns 201 + {"id":1} for all requests.
-// Useful for branch protection tests that don't care about request details.
-func newCreatedServer() *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// newCreatedServer returns a test server that returns 201 + {"id":1} for all
+// requests, plus a client pointed at it. Useful for branch protection tests
+// that don't care about request details.
+func newCreatedServer() (*httptest.Server, *github.Client) {
+	return newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"id":1}`))
 	}))
@@ -35,10 +36,8 @@ func newBuildItemsTest(t *testing.T, handler http.HandlerFunc, visibility string
 // rulesetExists/tagExists/classicExists inputs to buildItems.
 func newBuildItemsTestFull(t *testing.T, handler http.HandlerFunc, visibility string, rulesetExists, tagExists, classicExists bool) []wizard.Item {
 	t.Helper()
-	srv := httptest.NewServer(handler)
+	srv, c := newTestServer(handler)
 	defer srv.Close()
-
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: visibility}
 	rendered, err := templates.Render(data)
 	if err != nil {
@@ -124,10 +123,9 @@ func TestBranchProtectionItem_Creation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := newCreatedServer()
+			srv, c := newCreatedServer()
 			defer srv.Close()
 
-			c := github.NewClient("t", false).WithBaseURL(srv.URL)
 			item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, tt.rulesetExists, tt.classicExists, github.BranchProtectionOptions{})
 			if item.Action != tt.wantAction {
 				t.Errorf("expected action %v, got %v", tt.wantAction, item.Action)
@@ -344,7 +342,7 @@ func newRunFlowServer() *httptest.Server {
 func TestRunWithClient_FullFlow(t *testing.T) {
 	srv := newRunFlowServer()
 	defer srv.Close()
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+	c := newTestClient(srv)
 
 	var out strings.Builder
 	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &out)
@@ -364,7 +362,7 @@ func TestRunWithClient_FullFlow(t *testing.T) {
 func TestRunWithClient_InteractiveDecline(t *testing.T) {
 	srv := newRunFlowServer()
 	defer srv.Close()
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+	c := newTestClient(srv)
 
 	var out strings.Builder
 	err := runWithClient(c, "owner", "repo", newLineReader("solo\nn\n"), &out)
@@ -389,7 +387,7 @@ func TestRunWithClient_DryRun(t *testing.T) {
 
 	srv := newRunFlowServer()
 	defer srv.Close()
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+	c := newTestClient(srv)
 
 	var out strings.Builder
 	// No input at all: dry-run must not wait for prompts.
@@ -415,11 +413,10 @@ func TestRunWithClient_DryRun(t *testing.T) {
 // TestRunWithClient_VisibilityError verifies visibility detection failures
 // surface a wrapped error.
 func TestRunWithClient_VisibilityError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 
 	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "detect repo visibility") {
@@ -430,7 +427,7 @@ func TestRunWithClient_VisibilityError(t *testing.T) {
 // TestRunWithClient_RulesetError verifies ruleset pre-flight failures surface
 // a wrapped error.
 func TestRunWithClient_RulesetError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/rulesets") {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`not json`))
@@ -440,7 +437,6 @@ func TestRunWithClient_RulesetError(t *testing.T) {
 		_, _ = w.Write([]byte(`{"visibility":"public"}`))
 	}))
 	defer srv.Close()
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 
 	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "check branch ruleset") {
@@ -452,7 +448,7 @@ func TestRunWithClient_RulesetError(t *testing.T) {
 // pre-flight failure surfaces a wrapped error.
 func TestRunWithClient_TagRulesetError(t *testing.T) {
 	rulesetCalls := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/rulesets") {
 			rulesetCalls++
 			if rulesetCalls == 1 {
@@ -467,7 +463,6 @@ func TestRunWithClient_TagRulesetError(t *testing.T) {
 		_, _ = w.Write([]byte(`{"visibility":"public"}`))
 	}))
 	defer srv.Close()
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 
 	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "check tag ruleset") {
@@ -479,7 +474,7 @@ func TestRunWithClient_TagRulesetError(t *testing.T) {
 // pre-flight failures surface a wrapped error. A hijacked connection forces a
 // transport-level error on the GET /branches/main/protection request.
 func TestRunWithClient_ClassicProtectionError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "/rulesets"):
 			_, _ = w.Write([]byte(`[]`))
@@ -500,7 +495,6 @@ func TestRunWithClient_ClassicProtectionError(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 
 	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "check classic protection") {
@@ -515,7 +509,7 @@ func TestRunWithClient_ViaPRFailure(t *testing.T) {
 	t.Cleanup(func() { globals.ViaPR = false })
 	globals.ViaPR = true
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
 			_, _ = w.Write([]byte(`{"visibility":"public"}`))
@@ -530,7 +524,6 @@ func TestRunWithClient_ViaPRFailure(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 
 	var out strings.Builder
 	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &out)
@@ -573,12 +566,11 @@ func TestRunWithClient_RenderError(t *testing.T) {
 		return nil, errors.New("boom")
 	}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"visibility":"public"}`))
 	}))
 	defer srv.Close()
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 
 	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "render templates") {
