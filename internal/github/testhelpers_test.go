@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"testing"
 )
 
 // erroringTransport is an http.RoundTripper that always fails, simulating a
@@ -80,4 +81,27 @@ func newMethodSplitTransportClient(baseURL, failOnMethod string) *Client {
 func newTestServer(handler http.HandlerFunc) (*httptest.Server, *Client) {
 	srv := httptest.NewServer(handler)
 	return srv, newZeroDelayClient(srv.URL)
+}
+
+// clientFactory returns a test client for the given server URL. When nil,
+// the default zero-delay client is used. Non-nil factories allow tests to
+// inject erroring or split-transport clients.
+type clientFactory func(baseURL string) *Client
+
+// testWithServer creates a test server with the given handler, builds a client
+// (using the factory if provided, or the default zero-delay client), runs the
+// action, and calls verify with the results. The server is closed automatically.
+// This replaces the common srv/defer/call/assert skeleton across table-driven tests.
+func testWithServer(t *testing.T, handler http.HandlerFunc, factory clientFactory, action func(*Client), verify func(*testing.T)) {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+	c := newZeroDelayClient(srv.URL)
+	if factory != nil {
+		c = factory(srv.URL)
+	}
+	action(c)
+	if verify != nil {
+		verify(t)
+	}
 }
