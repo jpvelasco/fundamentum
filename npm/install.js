@@ -84,7 +84,15 @@ function download(url, redirectCount = 0) {
 function verifyChecksum(buffer, archiveName, pkg) {
   const expected = pkg.binaryChecksums?.[archiveName] || null;
   if (!expected) {
-    console.log("fundamentum: no checksum available, skipping verification");
+    // A published package always has checksums embedded by the release
+    // workflow. A missing entry means asset-naming drift or tampering —
+    // fail closed rather than run an unverified binary.
+    if (pkg.version !== "0.0.0") {
+      throw new Error(
+        `No checksum found for ${archiveName}. Refusing to install an unverified binary.`
+      );
+    }
+    console.log("fundamentum: dev version, skipping checksum verification");
     return;
   }
 
