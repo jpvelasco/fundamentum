@@ -7,7 +7,6 @@
   <a href="https://www.npmjs.com/package/fundamentum-cli"><img src="https://img.shields.io/npm/v/fundamentum-cli" alt="npm"></a>
   <a href="https://www.npmjs.com/package/fundamentum-cli"><img src="https://img.shields.io/npm/dm/fundamentum-cli" alt="npm downloads"></a>
   <a href="https://app.codecov.io/gh/jpvelasco/fundamentum"><img src="https://img.shields.io/codecov/c/github/jpvelasco/fundamentum" alt="Codecov"></a>
-  <a href="https://goreportcard.com/report/github.com/jpvelasco/fundamentum"><img src="https://goreportcard.com/badge/github.com/jpvelasco/fundamentum" alt="Go Report Card"></a>
   <a href="https://github.com/jpvelasco/fundamentum/blob/main/LICENSE"><img src="https://img.shields.io/github/license/jpvelasco/fundamentum" alt="License"></a>
   <a href="https://app.codacy.com/gh/jpvelasco/fundamentum/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_coverage"><img src="https://app.codacy.com/project/badge/Coverage/8e6e46246bfb42ac9257f1ca809bcc5f" alt="Codacy Coverage"></a>
   <a href="https://app.codacy.com/gh/jpvelasco/fundamentum/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade"><img src="https://app.codacy.com/project/badge/Grade/8e6e46246bfb42ac9257f1ca809bcc5f" alt="Codacy Grade"></a>
