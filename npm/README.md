@@ -11,7 +11,6 @@ Fundamentum bootstraps and hardens GitHub repos for OSS collaboration — commun
   <a href="https://github.com/jpvelasco/fundamentum/releases/latest"><img src="https://img.shields.io/github/v/release/jpvelasco/fundamentum" alt="Release"></a>
   <a href="https://www.npmjs.com/package/fundamentum-cli"><img src="https://img.shields.io/npm/v/fundamentum-cli" alt="npm"></a>
   <a href="https://www.npmjs.com/package/fundamentum-cli"><img src="https://img.shields.io/npm/dm/fundamentum-cli" alt="npm downloads"></a>
-  <a href="https://goreportcard.com/report/github.com/jpvelasco/fundamentum"><img src="https://goreportcard.com/badge/github.com/jpvelasco/fundamentum" alt="Go Report Card"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
 </p>
 
