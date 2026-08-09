@@ -17,3 +17,7 @@ go.sum text eol=lf
 .github/workflows/*.yml text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+
+# npm shim JS must retain LF in Windows worktrees so CI checksums and the
+# published package stay byte-identical across platforms.
+*.js text eol=lf
