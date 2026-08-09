@@ -2,15 +2,13 @@
 
 **One command to make your GitHub repo look (and behave) like a pro open-source project.**
 
-[npm](https://www.npmjs.com/package/fundamentum-cli) · [GitHub](https://github.com/jpvelasco/fundamentum)
+[GitHub](https://github.com/jpvelasco/fundamentum)
 
 Fundamentum bootstraps and hardens GitHub repos for OSS collaboration — community health files, branch protection, secret scanning, and starter CI workflows. You bring the code, it brings the polish.
 
 <p align="center">
   <a href="https://github.com/jpvelasco/fundamentum/actions/workflows/ci.yml"><img src="https://github.com/jpvelasco/fundamentum/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/jpvelasco/fundamentum/releases/latest"><img src="https://img.shields.io/github/v/release/jpvelasco/fundamentum" alt="Release"></a>
-  <a href="https://www.npmjs.com/package/fundamentum-cli"><img src="https://img.shields.io/npm/v/fundamentum-cli" alt="npm"></a>
-  <a href="https://www.npmjs.com/package/fundamentum-cli"><img src="https://img.shields.io/npm/dm/fundamentum-cli" alt="npm downloads"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
 </p>
 
@@ -27,7 +25,7 @@ npx fundamentum-cli --version
 npx fundamentum-cli apply OWNER/REPO
 ```
 
-Works on **macOS**, **Linux**, and **Windows** — `x64` and `arm64`. Postinstall downloads the matching prebuilt binary from GitHub Releases with embedded SHA-256 verification.
+Works on **macOS** and **Linux** (`x64` and `arm64`) and **Windows** (`x64`). Postinstall downloads the matching prebuilt binary from GitHub Releases with embedded SHA-256 verification.
 
 > **npm 9+ / Ubuntu 26+ note:** npm's `allow-scripts` security policy may block the postinstall
 > script, so the binary won't be downloaded at install time. No worries — if `fundamentum` is invoked
