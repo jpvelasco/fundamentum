@@ -1,7 +1,17 @@
 # fundamentum
 
-[![Codacy Badge](https://app.codacy.com/project/badge/Coverage/8e6e46246bfb42ac9257f1ca809bcc5f)](https://app.codacy.com/gh/jpvelasco/fundamentum/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_coverage)
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/8e6e46246bfb42ac9257f1ca809bcc5f)](https://app.codacy.com/gh/jpvelasco/fundamentum/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
+<p align="center">
+  <a href="https://github.com/jpvelasco/fundamentum/actions/workflows/ci.yml"><img src="https://github.com/jpvelasco/fundamentum/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/jpvelasco/fundamentum/releases/latest"><img src="https://img.shields.io/github/v/release/jpvelasco/fundamentum" alt="Release"></a>
+  <a href="https://github.com/jpvelasco/fundamentum/blob/main/go.mod"><img src="https://img.shields.io/github/go-mod/go-version/jpvelasco/fundamentum" alt="Go"></a>
+  <a href="https://www.npmjs.com/package/fundamentum-cli"><img src="https://img.shields.io/npm/v/fundamentum-cli" alt="npm"></a>
+  <a href="https://www.npmjs.com/package/fundamentum-cli"><img src="https://img.shields.io/npm/dm/fundamentum-cli" alt="npm downloads"></a>
+  <a href="https://app.codecov.io/gh/jpvelasco/fundamentum"><img src="https://img.shields.io/codecov/c/github/jpvelasco/fundamentum" alt="Codecov"></a>
+  <a href="https://goreportcard.com/report/github.com/jpvelasco/fundamentum"><img src="https://goreportcard.com/badge/github.com/jpvelasco/fundamentum" alt="Go Report Card"></a>
+  <a href="https://github.com/jpvelasco/fundamentum/blob/main/LICENSE"><img src="https://img.shields.io/github/license/jpvelasco/fundamentum" alt="License"></a>
+  <a href="https://app.codacy.com/gh/jpvelasco/fundamentum/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_coverage"><img src="https://app.codacy.com/project/badge/Coverage/8e6e46246bfb42ac9257f1ca809bcc5f" alt="Codacy Coverage"></a>
+  <a href="https://app.codacy.com/gh/jpvelasco/fundamentum/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade"><img src="https://app.codacy.com/project/badge/Grade/8e6e46246bfb42ac9257f1ca809bcc5f" alt="Codacy Grade"></a>
+</p>
 
 Bootstrap and harden GitHub repos for OSS collaboration — in one shot.
 
@@ -67,6 +77,9 @@ Everything is **idempotent** — re-running is safe and fast.
 ## Install
 
 ```bash
+# npm (recommended)
+npm install -g fundamentum-cli
+
 # Go install
 go install github.com/jpvelasco/fundamentum@latest
 

@@ -1,0 +1,60 @@
+{
+  "name": "fundamentum-cli",
+  "version": "0.0.0",
+  "description": "Bootstrap and harden GitHub repos for OSS collaboration — community files, branch protection, security features, and starter workflows in one command.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jpvelasco/fundamentum.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jpvelasco/fundamentum/issues"
+  },
+  "homepage": "https://github.com/jpvelasco/fundamentum#readme",
+  "bin": {
+    "fundamentum": "run.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "keywords": [
+    "github",
+    "github-repo",
+    "repo-hardening",
+    "repository-security",
+    "branch-protection",
+    "codeowners",
+    "code-of-conduct",
+    "contributing",
+    "community-files",
+    "open-source",
+    "oss",
+    "best-practices",
+    "security",
+    "dependabot",
+    "codeql",
+    "secret-scanning",
+    "templates",
+    "scaffolding",
+    "automation",
+    "devops",
+    "cli",
+    "github-api"
+  ],
+  "files": [
+    "README.md",
+    "install.js",
+    "run.js",
+    "bin/"
+  ],
+  "binaryChecksums": {}
+}
