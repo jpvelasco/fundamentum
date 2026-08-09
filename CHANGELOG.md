@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-09
+
+**Security fix release.** The npm shim now validates the packaged version before building the binary download URL, closing a CodeQL-reported file-to-HTTP data flow in `install.js`.
+
+### Fixed
+
+- **Shim download URL hardening.** `npm/install.js` validates the package version against a strict semver pattern before it reaches the release download URL, so malformed or tampered versions fail the install instead of flowing into an outbound request (CodeQL `js/file-access-to-http`).
+
 ## [0.1.1] - 2026-08-08
 
 **Documentation release.** Tidies both READMEs — the npm registry drops the redundant Codacy coverage badge (Codecov already reports coverage), and the npm README gets a tighter badge row and platform-specific support notes.
@@ -50,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.2
 [0.1.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.1
 [0.1.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.0
