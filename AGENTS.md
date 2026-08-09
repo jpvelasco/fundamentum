@@ -59,10 +59,16 @@ match, or PRs deadlock on contexts that never report.
 
 ## Release (tag `v*`)
 
-`.github/workflows/release.yml` runs GoReleaser on version tags (`content: write` only; no npm
-shim — fundamentum is Go-binary only). `.goreleaser.yml` pins version ldflags to
-`cmd/root.Version` (`{{.Version}}`), archives tar.gz (zip on Windows), ignores Windows/arm64.
-The CI snapshot job (`Release build (snapshot)`) verifies the config compiles all platforms and
+`.github/workflows/release.yml` runs GoReleaser on version tags, then publishes the npm shim
+(`fundamentum-cli`): `scripts/embed-checksums.js` embeds GoReleaser's `dist/checksums.txt` into
+`npm/package.json` (`binaryChecksums`), then `npm publish` runs from `npm/` via OIDC trusted
+publishing (`id-token: write`). `.goreleaser.yml` pins version ldflags to
+`cmd/root.Version` (`{{.Version}}`), archives tar.gz (zip on Windows) as
+`fundamentum_<version>_<os>_<arch>.{tar.gz,zip}`, ignores Windows/arm64 — the npm shim
+(`npm/install.js` + `npm/run.js`) must match that naming and the release-asset layout
+(nyx/ludus/juggernaut pattern). `npm/package.json` version stays `0.0.0` in the repo; the
+workflow sets it to the tag version before publishing. The CI snapshot job
+(`Release build (snapshot)`) verifies the config compiles all platforms and
 smoke-tests the linux/amd64 binary's `--version` output (must not be ` dev`). Local check:
 `goreleaser build --snapshot --clean`, then run `dist/.../fundamentum.exe --version`. Never
 publish a release from CI without an explicit tag.

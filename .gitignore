@@ -19,3 +19,7 @@ planning/
 .codacy/*.sarif
 .codacy/server-issues.json
 
+# npm shim install-time downloads
+npm/bin/
+npm/.tmp-install/
+
