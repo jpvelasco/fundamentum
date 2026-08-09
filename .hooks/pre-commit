@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$HOOK_DIR/lib.sh"
+
 # Fail-fast: live Codecov workflow vs embed template functional parity
 # (OIDC, use_pypi, coverage flags, SHA pin). Action SHAs may differ.
 echo "→ template drift"
@@ -15,11 +19,5 @@ else
     go vet ./...
 fi
 echo "→ test"
-# On Windows, AppLocker may block test executables from %TEMP%.
-# Redirect Go's temp dir to a location that AppLocker allows.
-if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
-    GOTMPDIR="${GOTMPDIR:-$HOME/.cache/go-test-tmp}"
-    mkdir -p "$GOTMPDIR"
-    export GOTMPDIR
-fi
+setup_go_tmpdir
 go test ./...

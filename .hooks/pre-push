@@ -9,6 +9,9 @@
 # Emergency bypass (use sparingly, CI will still enforce): git push --no-verify
 set -euo pipefail
 
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$HOOK_DIR/lib.sh"
+
 # Resolve the base to diff against: merge-base with origin/main, falling back to
 # origin/main or main if the merge-base can't be computed (e.g. detached state).
 base=""
@@ -31,13 +34,7 @@ if [ -z "$changed" ]; then
   exit 0
 fi
 
-# On Windows, AppLocker may block test executables from %TEMP%. Redirect Go's
-# temp dir the same way .hooks/pre-commit does.
-if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
-  GOTMPDIR="${GOTMPDIR:-$HOME/.cache/go-test-tmp}"
-  mkdir -p "$GOTMPDIR"
-  export GOTMPDIR
-fi
+setup_go_tmpdir
 
 cov=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/fundamentum-prepush-cov.out")
 trap 'rm -f "$cov"' EXIT
