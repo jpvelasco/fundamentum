@@ -29,6 +29,17 @@ const ARCH_MAP = {
   arm64: "arm64",
 };
 
+function getPackageVersion(pkg) {
+  const version = pkg.version;
+
+  // Validate semver format to prevent URL injection
+  if (!/^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$/.test(version)) {
+    throw new Error(`Invalid version format: ${version}`);
+  }
+
+  return version;
+}
+
 function getArchiveName(version, platform, arch) {
   const os = PLATFORM_MAP[platform];
   const cpu = ARCH_MAP[arch];
@@ -178,7 +189,7 @@ async function main() {
   const pkg = JSON.parse(
     fs.readFileSync(path.join(__dirname, "package.json"), "utf8")
   );
-  const version = pkg.version;
+  const version = getPackageVersion(pkg);
   if (version === "0.0.0") {
     console.error("fundamentum: skipping binary download for development version");
     return;
