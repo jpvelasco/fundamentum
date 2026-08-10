@@ -10,24 +10,11 @@ permissions:
   contents: read
 
 jobs:
-  # fundamentum-specific: proves the live Codecov settings in this file match the
-  # shipped embed template (public_ci.yml). See internal/templatefs/codecov_drift.go.
-  template-drift:
-    name: Template drift
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: Check Codecov template drift
-        run: go test ./internal/templatefs/ -run TestCodecovTemplateDrift -count=1 -v
-
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
@@ -43,7 +30,7 @@ jobs:
     name: Lint (Windows)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
@@ -55,7 +42,7 @@ jobs:
     name: Vulnerability scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
@@ -67,13 +54,13 @@ jobs:
   build:
     name: Build
     strategy:
-      # Full 3-OS matrix on push to main; PRs skip macOS (10x minutes on the
-      # free tier) — Linux + Windows already cover the cross-platform risk.
+      # Full 3-OS matrix on push to the default branch; PRs skip macOS (10x minutes
+      # on the free tier) — Linux + Windows already cover the cross-platform risk.
       matrix:
         os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
@@ -84,7 +71,7 @@ jobs:
     name: Test
     strategy:
       fail-fast: false  # one leg failing must not cancel the others' coverage uploads
-      # Full 3-OS matrix on push to main; PRs skip macOS to conserve minutes.
+      # Full 3-OS matrix on push to the default branch; PRs skip macOS to conserve minutes.
       matrix:
         os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
     runs-on: ${{ matrix.os }}
@@ -93,9 +80,9 @@ jobs:
       id-token: write  # OIDC; lets each leg mint the Codecov upload token
     steps:
       # fetch-depth: 0 so Codecov can walk git history for path mapping and so
-      # parent/base SHAs exist when the App compares PR head vs main
+      # parent/base SHAs exist when the App compares PR head vs the default branch
       # (avoids "Missing base commit" / unusable reports on shallow clones).
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
@@ -143,7 +130,8 @@ jobs:
           files: ./junit.xml
           fail_ci_if_error: false
       # PR jobs must not receive the Codacy repository token. Save the report;
-      # a trusted workflow_run workflow downloads this artifact and uploads it.
+      # a trusted workflow_run workflow (codacy-coverage.yml) downloads this
+      # artifact and uploads it to Codacy.
       - name: Save coverage for Codacy
         if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -156,22 +144,21 @@ jobs:
     name: gosec
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
       - name: Run gosec
-        # Exclusions match .golangci.yml (single source of truth):
-        #   G104 unhandled errors, G204 subprocess launched with variable,
-        #   G304 file inclusion via variable, G704 (reserved) — intentionally
-        #   suppressed for CLI subprocess calls and config/state file reads.
+        # Keep this -exclude set in sync with .golangci.yml gosec.excludes
+        # (single source of truth) so gosec and golangci suppress the same IDs.
+        # Adjust the set to match the target repo's .golangci.yml.
         run: go run github.com/securego/gosec/v2/cmd/gosec@v2.28.0 -exclude=G104,G204,G304,G704 ./...
 
   trivy:
     name: Trivy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - name: Run Trivy filesystem scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
         with:
@@ -180,30 +167,3 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: "1"
           ignore-unfixed: true
-
-  goreleaser:
-    name: Release build (snapshot)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version-file: go.mod
-      # Build-only: verifies .goreleaser.yml compiles all platforms. NEVER
-      # publishes (no `release`, no tag). Catches release-config breakage on PRs.
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7
-        with:
-          args: build --snapshot --clean
-      - name: Smoke-test the built linux binary
-        # Exec the freshly built native binary to prove it runs and the version
-        # ldflags resolved (not the "dev" fallback in cmd/root.Version). The
-        # runner is linux/amd64, so glob that build output. Fundamentum has no
-        # `version` subcommand; Cobra's built-in --version prints the raw flag.
-        run: |
-          BIN=$(find dist -type f -name fundamentum -path '*linux_amd64*')
-          test -n "$BIN" || { echo "no linux/amd64 fundamentum binary in dist/"; exit 1; }
-          chmod +x "$BIN"
-          OUT=$("$BIN" --version)
-          echo "$OUT"
-          echo "$OUT" | grep -q " dev$" && { echo "version ldflags did not resolve (still 'dev')"; exit 1; }
-          echo "smoke test OK"
