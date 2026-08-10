@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-08-10
+
+**Template and docs release.** Codacy analysis and coverage ship as embedded templates, the standalone `Template drift` CI job is gone (the drift gate now runs inside the `Test` job), and this repo's own configs and instruction files are fully in line with the shipped behavior.
+
+### Added
+
+- **Codacy embedded templates.** `.codacy.yml` and the `codacy-coverage.yml` `workflow_run` coverage forwarder are now shipped templates, so `apply` gives every hardened repo the same webhook-driven Codacy analysis and coverage uploads fundamentum itself uses.
+
+### Changed
+
+- **Template drift gate folded into the `Test` job.** The standalone `Template drift` CI job was removed — `TestCodecovTemplateDrift` still gates every PR, but now inside `go test ./...` on each `Test` leg (plus pre-commit), instead of as a separate job.
+- **`protect-main` ruleset updated.** The stale `Template drift` required check (which could no longer report after the job removal, deadlocking merges) was dropped; all other required checks unchanged.
+- **YML configs normalized to LF.** `.github/codeql/codeql-config.yml`, `.github/dependabot.yml`, `codecov.yml`, and `socket.yml` were committed with CRLF blobs; normalized to LF so Windows checkouts no longer show a permanent dirty tree.
+
+### Documentation
+
+- **AGENTS.md / CLAUDE.md reality sync.** Corrected the required-check list, drift-gate location, Codacy template coverage, and `.gitattributes` scope; documented the Windows CRLF embed trap (externally CRLF-rewritten template files embed as CRLF and cause false "would update" in dry-runs) and the hardcoded `ActionCreate` dry-run labels for the settings items.
+
+### Other
+
+- Test-harness, hook-script, and test-client refactors (`lib.sh` GOTMPDIR setup, consolidated test server/client boilerplate).
+
 ## [0.1.2] - 2026-08-09
 
 **Security fix release.** The npm shim now validates the packaged version before building the binary download URL, closing a CodeQL-reported file-to-HTTP data flow in `install.js`.
@@ -58,7 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.3
 [0.1.2]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.2
 [0.1.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.1
 [0.1.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.0
