@@ -48,9 +48,8 @@ Pre-commit order: template drift → build → lint → test.
 never publishes); PR-level Codacy checks come from the GitHub integration webhook — no `Codacy
 Analysis` CI job needed (verified: cloud analysis updates the dashboard on push to main, and the
 CLI's upload completion is rejected for cloud-analyzed repos with `Feature "Repository Analysis"
-is disabled`). CodeQL runs as `Analyze (actions|go)` in `codeql.yml`. macOS legs run only on
-push to `main` (PRs skip them to save minutes), so **do not** require macOS contexts in branch
-protection. Required checks in the `protect-main` ruleset must match the reportable jobs on PRs —
+is disabled`). CodeQL runs as `Analyze (actions|go)` in `codeql.yml`. macOS legs run on PRs and
+push (public repo: Actions minutes are unlimited). Required checks in the `protect-main` ruleset must match the reportable jobs on PRs —
 currently `Lint`, `security`, `review`, `Vulnerability scan`,
 `Build (ubuntu-latest|windows-latest)`, `Test (ubuntu-latest|windows-latest)`, `gosec`, `Trivy`,
 `Analyze (actions)`, `Analyze (go)`, and `Lint (Windows)`. `Release build (snapshot)` is NOT a
