@@ -12,7 +12,7 @@ git config core.hooksPath .hooks
 `.hooks/commit-msg` enforces Conventional Commits (`feat:|fix:|refactor:|test:|docs:|chore:|perf:|ci:|build:|deps:` + optional scope; merge/revert/fixup/squash allowed).
 `.hooks/pre-push` fails any changed Go file with a 0.0%-coverage function (early warning — the real gate is CI's Codecov patch >= 90%). Emergency bypass: `git push --no-verify`.
 
-`.gitattributes` forces LF for Go sources, mod/sum, `.sh`, and hook files so Windows checkouts stay gofmt-clean (CRLF breaks gofmt in CI).
+`.gitattributes` forces LF for Go sources, mod/sum, `.sh`, `.hooks/*`, all YAML (`*.yml`/`*.yaml`, including `.github/workflows/`), `.js`, and `.gitattributes` itself so Windows checkouts stay diff-clean against CI and the templatefs parity checks.
 
 # Build
 go build -o fundamentum.exe -v .
@@ -113,11 +113,13 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`, `--
 
 - **Branch protection**: tries modern ruleset first (names `protect-main`, `protect-version-tags`), falls back to classic protection on 403. **Limitation:** the classic protection API requires GitHub Pro — free-tier private repos must configure branch protection manually via Settings → Branches. Use the `--no-overwrite` flag if you only want to add missing files.
 - **File aliasing** (`cmd/apply/apply.go` `aliases` map in `buildItems`): checks path variants before deciding create/skip/update — e.g., `CODEOWNERS` at root counts as existing even though target is `.github/CODEOWNERS`
-- **Workflow 404 handling** (`internal/github/client.go` `putFileContents`, sentinel `ErrWorkflowLocked` in `pr.go`): GitHub Actions locks workflow files — HTTP PUT returns 404 when updating an existing workflow via the Contents API. Returns `action="skipped"` so apply continues.
+- **Workflow 404 handling** (`internal/github/files.go` `putFileContents`, sentinel `ErrWorkflowLocked` in `pr.go`): GitHub Actions locks workflow files — HTTP PUT returns 404 when updating an existing workflow via the Contents API. Returns `action="skipped"` so apply continues.
 - **409 auto-fallback to PR mode** (`cmd/apply/apply.go` `applyItems`): a direct file commit rejected with 409 (branch protection requires PR) switches the remaining file changes into a single batch PR — no re-run needed.
 - **Solo/team prompt**: `apply` asks solo/team (default solo) only when the `protect-main` ruleset doesn't already exist. Solo disables the CODEOWNERS-review and stale-review-dismissal requirements so a single maintainer isn't deadlocked.
 - **`--no-overwrite`**: skips any file that already exists, even if content differs
 - **`--pr`**: batches file changes into a single PR; non-file items (settings, security, protection) still apply directly
+- **Dry-run "would create" labels**: `General settings (auto-delete branches)` and `Security (…)` are hardcoded `ActionCreate` in `cmd/apply/apply.go` `buildItems` — they always show "would create" even when already enabled. The applies are idempotent PUTs; verify live state via `gh api repos/O/R --jq '{delete_branch_on_merge, security_and_analysis}'` instead of trusting the label.
+- **Windows CRLF embed trap**: template files under `internal/templatefs/templates/` that get rewritten externally with CRLF (editor, scripting) become invisible to git — the clean filter normalizes CRLF→LF, matching the LF blob, so `git status` stays clean and checkout/restore never rewrite the bytes. `//go:embed` then embeds the CRLF bytes and dry-run falsely reports `would update` for content-identical files (live blobs are LF). Fix: delete the file and `git checkout HEAD -- <file>` (or clone fresh). Verify with `git hash-object --no-filters <file>` — it must equal `git rev-parse HEAD:<file>`.
 - Auth: `--token` flag or `GITHUB_TOKEN` env var, used as Bearer token
 
 ### Testing

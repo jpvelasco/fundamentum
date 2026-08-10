@@ -2,14 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Last updated: 2026-08-02
+Last updated: 2026-08-10
 
 fundamentum is a focused, free, open-source CLI (MIT License) for GitHub repo hardening — community files, branch protection, and security features in one shot with an interactive wizard. No cloud, no org batching, no audit subcommand.
 
 ## Build / Lint / Test
 
 ```bash
-git config core.hooksPath .hooks   # enable pre-commit hooks (required)
+git config core.hooksPath .hooks   # enable repo hooks (required)
 
 go build -o fundamentum.exe -v .   # Windows
 go build -o fundamentum -v .       # Linux/macOS
@@ -18,11 +18,17 @@ go test ./...
 
 go test ./internal/github/...      # single package
 go test -v -run TestRender ./internal/templates
+go test ./internal/templatefs/ -run TestCodecovTemplateDrift -count=1   # drift gate alone
 ```
 
-Pre-commit order: template drift → build → lint → test.
-
 Run: `GITHUB_TOKEN` must be set (or pass `--token`), then `go run . apply OWNER/REPO` / `go run . init OWNER/REPO`. `OWNER` is the GitHub username or org, `REPO` is the repository name.
+
+### Hooks (`.hooks/`, shared code in `.hooks/lib.sh`)
+
+- **pre-commit**: template drift → build → lint (falls back to `go vet` if `golangci-lint` isn't executable, e.g. blocked by AppLocker) → test.
+- **commit-msg**: enforces Conventional Commits — `feat|fix|refactor|test|docs|chore|perf|ci|build|deps` + optional `(scope)` + optional `!`; merge/revert/fixup/squash commits are exempt.
+- **pre-push**: fails the push if any changed non-test `.go` file has a function at exactly 0.0% coverage (full-suite `-coverpkg=./...` run, not just the changed package — a function's coverage may come from another package's tests). This is an early warning only; the real gate is CI's Codecov patch ≥90%. Bypass with `git push --no-verify` if truly needed. Build-constrained files for a different GOOS (can't be compiled/tested on this machine) are flagged as unverifiable rather than silently skipped.
+- `.gitattributes` forces LF for Go/mod/sum/`.sh`/hooks/YAML/`.js` so Windows checkouts stay diff-clean against CI and the templatefs drift comparisons.
 
 ## Architecture
 
@@ -53,8 +59,12 @@ fundamentum also ships root `socket.yml` (Socket Security supply-chain scanning 
 - **Branch protection**: tries modern ruleset first, falls back to classic protection on 403. Classic API requires GitHub Pro — free-tier private repos must configure protection manually via Settings → Branches.
 - **File aliasing** (`cmd/apply/apply.go`): checks path variants before deciding create/skip/update — e.g., root `CODEOWNERS` counts as existing even though the target is `.github/CODEOWNERS`.
 - **Workflow 404 handling** (`internal/github/files.go`): GitHub locks workflow files; a PUT to update an existing workflow via the Contents API returns 404. Detected as `ErrWorkflowLocked`, returns `action="skipped"` so apply continues.
+- **409 auto-fallback to PR** (`cmd/apply/apply.go` `applyItems`): in direct-commit mode, a 409 (`github.IsConflict409`, branch protection blocking direct pushes) switches the remaining file changes to a single batch PR mid-run — no re-invocation needed.
+- **Retry/backoff** (`internal/github/client.go`): transient failures (429, 5xx, 403 rate-limit exhaustion) retry up to `maxAttempts` (3) with exponential backoff + full jitter (capped 30s), honoring `Retry-After`. Jitter uses `crypto/rand`, not `math/rand`, to satisfy gosec even though this is timing jitter, not a security boundary.
 - **`--no-overwrite`**: skips any file that already exists, even if content differs.
 - **`--pr`**: applies file changes through a PR instead of direct commits.
+- **Dry-run labels**: `General settings (auto-delete branches)` and `Security (…)` are hardcoded `ActionCreate` in `cmd/apply/apply.go` — always show "would create" even when already enabled; applies are idempotent.
+- **Windows CRLF embed trap**: template files under `internal/templatefs/templates/` rewritten externally with CRLF stay invisible to git (clean filter normalizes to LF), so `//go:embed` embeds CRLF and dry-run falsely reports "would update" against LF live blobs. Fix: delete the file, `git checkout HEAD -- <file>`; verify with `git hash-object --no-filters <file>`. See AGENTS.md.
 - **Solo/team prompt**: `apply` asks "solo/team" interactively (default solo) only when branch protection will actually be created — skipped if the `protect-main` ruleset already exists. Solo disables the CODEOWNERS-review and stale-review-dismissal requirements (`github.BranchProtectionOptions.Solo`) so a single maintainer isn't deadlocked approving their own PRs.
 - **Default required status check**: `github.DefaultStatusChecks` always includes `"Codacy Static Code Analysis"` (fundamentum always writes `.codacy.yml`, so that check is safe to require).
 - Auth: `--token` or `GITHUB_TOKEN`, sent as Bearer token.
@@ -62,7 +72,7 @@ fundamentum also ships root `socket.yml` (Socket Security supply-chain scanning 
 
 ### Codecov drift gate
 
-`TestCodecovTemplateDrift` (`internal/templatefs/codecov_drift_test.go`) compares the live `.github/workflows/ci.yml` Codecov upload settings against the embed template `public_ci.yml` (Codecov is folded into the CI Test job). Checks OIDC/token XOR auth, `use_pypi`, `fail_ci_if_error`, `-covermode=atomic`, coverage `files`, `override_commit/branch/pr`, `slug`, `report_type: test_results`, and that `codecov/codecov-action` is SHA-pinned. Runs in pre-commit (fail-fast) and the CI `Template drift` job. Action SHAs and branch names may differ intentionally. Branch protection uses `codecov/patch` as the required check (not `codecov/project` — see AGENTS.md).
+`TestCodecovTemplateDrift` (`internal/templatefs/codecov_drift_test.go`) compares the live `.github/workflows/ci.yml` Codecov upload settings against the embed template `public_ci.yml` (Codecov is folded into the CI Test job). Checks OIDC/token XOR auth, `use_pypi`, `fail_ci_if_error`, `-covermode=atomic`, coverage `files`, `override_commit/branch/pr`, `slug`, `report_type: test_results`, and that `codecov/codecov-action` is SHA-pinned. Runs in pre-commit (fail-fast) and inside CI's `Test` job (`go test ./...`) — there's no standalone `Template drift` job. Action SHAs and branch names may differ intentionally. Branch protection uses `codecov/patch` as the required check (not `codecov/project` — Codecov only posts the former on PRs).
 
 ## Testing conventions
 
@@ -79,7 +89,7 @@ Mirrors ludus: two import groups (stdlib first, then third-party + internal), `f
 - **Cloud CLI:** `npx --yes @codacy/codacy-cloud-cli@latest issues gh jpvelasco fundamentum --overview` (or set `CODACY_API_TOKEN`)
 - **Local analysis:** `npx --yes @codacy/analysis-cli@latest analyze`
 - PR-level Codacy checks come from the GitHub integration webhook — no workflow involved. The main dashboard also updates on push to `main` via that same webhook/cloud analysis (verified end-to-end: analysis finished on the merge commit with no CLI job in the workflow). A `Codacy Analysis` CLI-upload job was briefly tried and **removed** — the CLI's final notification is always rejected for cloud-analyzed repos with `Feature "Repository Analysis" is disabled`, so it could never succeed and added 2+ minutes of dead runner time per push. If "Run analysis on your build server" is ever enabled in Codacy settings, re-adding a push-only CLI job would make sense — otherwise keep Codacy fully webhook-driven.
-- `.github/workflows/codacy-coverage.yml` (this repo only, not a shipped template) is a separate `workflow_run`-triggered job: it downloads the `codacy-coverage-*` artifact the CI Test job uploads and forwards it to Codacy via `codacy-coverage-reporter-action`. Split out because PR-triggered jobs must not receive the `CODACY_REPOSITORY_API_TOKEN` secret directly.
+- `.github/workflows/codacy-coverage.yml` is an **embedded shipped template** (`internal/templatefs/templates/dotgithub/workflows/codacy-coverage.yml`, shared workflow) — a separate `workflow_run`-triggered job: it downloads the `codacy-coverage-*` artifact the CI Test job uploads and forwards it to Codacy via `codacy-coverage-reporter-action`. Split out because PR-triggered jobs must not receive the `CODACY_REPOSITORY_API_TOKEN` secret directly. Re-apply it to other repos via `go run . apply`, not manual copy.
 - `.codacy.yml` controls exclude paths and engine configs. Tools **cannot** be disabled via `.codacy.yml` — only languages (`languages.<lang>.enabled: false`); disable tools on the Codacy Code patterns page. See AGENTS.md for full CLI/Trivy notes.
 
 ## PR workflow
