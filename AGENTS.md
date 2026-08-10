@@ -38,11 +38,11 @@ go run . init OWNER/REPO
 
 Pre-commit order: template drift → build → lint → test.
 
-**Codecov template drift gate:** `TestCodecovTemplateDrift` (`internal/templatefs/codecov_drift_test.go`) compares live `.github/workflows/ci.yml` Codecov upload settings against the embed template `public_ci.yml` (Codecov is folded into the CI Test job, fabrica standard). Checks: `id-token: write`, `use_oidc` (literal `true` or the XOR `${{ secrets.CODECOV_TOKEN == '' }}` expression), `use_pypi`, `fail_ci_if_error`, `-covermode=atomic`, coverage `files`/`-coverprofile`, `override_commit`/`override_branch`/`override_pr`, `slug`, `report_type: test_results`, and SHA-pinned `codecov/codecov-action`. Runs in pre-commit (fail-fast) and CI job `Template drift`. Action SHAs and branch names may differ intentionally.
+**Codecov template drift gate:** `TestCodecovTemplateDrift` (`internal/templatefs/codecov_drift_test.go`) compares live `.github/workflows/ci.yml` Codecov upload settings against the embed template `public_ci.yml` (Codecov is folded into the CI Test job, fabrica standard). Checks: `id-token: write`, `use_oidc` (literal `true` or the XOR `${{ secrets.CODECOV_TOKEN == '' }}` expression), `use_pypi`, `fail_ci_if_error`, `-covermode=atomic`, coverage `files`/`-coverprofile`, `override_commit`/`override_branch`/`override_pr`, `slug`, `report_type: test_results`, and SHA-pinned `codecov/codecov-action`. Runs in pre-commit (fail-fast) and in CI inside the `Test` job's `go test ./...` — there is no standalone `Template drift` job anymore. Action SHAs and branch names may differ intentionally.
 
 **Codecov required check (current):** branch protection requires `codecov/patch`, not `codecov/project` — Codecov only posts the former on PRs, so requiring the latter would deadlock merges. Re-add `codecov/project` only if Codecov starts posting that check.
 
-**CI job names (fabrica standard):** `.github/workflows/ci.yml` jobs are `Template drift`, `Lint`,
+**CI job names (fabrica standard):** `.github/workflows/ci.yml` jobs are `Lint`,
 `Lint (Windows)`, `Vulnerability scan`, `Build (ubuntu-latest|windows-latest|macos-latest)`,
 `Test (ubuntu-latest|…)`, `gosec`, `Trivy`, `Release build (snapshot)` (GoReleaser build-only —
 never publishes); PR-level Codacy checks come from the GitHub integration webhook — no `Codacy
@@ -51,7 +51,7 @@ CLI's upload completion is rejected for cloud-analyzed repos with `Feature "Repo
 is disabled`). CodeQL runs as `Analyze (actions|go)` in `codeql.yml`. macOS legs run only on
 push to `main` (PRs skip them to save minutes), so **do not** require macOS contexts in branch
 protection. Required checks in the `protect-main` ruleset must match the reportable jobs on PRs —
-currently `Lint`, `security`, `review`, `Template drift`, `Vulnerability scan`,
+currently `Lint`, `security`, `review`, `Vulnerability scan`,
 `Build (ubuntu-latest|windows-latest)`, `Test (ubuntu-latest|windows-latest)`, `gosec`, `Trivy`,
 `Analyze (actions)`, `Analyze (go)`, and `Lint (Windows)`. `Release build (snapshot)` is NOT a
 required check. When renaming/adding jobs, update the ruleset required-status-checks list to
