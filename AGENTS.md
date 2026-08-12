@@ -8,14 +8,16 @@ fundamentum is a **free, open-source CLI** (MIT License) for one-shot GitHub rep
 # Enable repo hooks (required — hooks live in .hooks/)
 git config core.hooksPath .hooks
 
-`.hooks/pre-commit` runs template drift → build → lint → test (fail-fast).
-`.hooks/commit-msg` enforces Conventional Commits (`feat:|fix:|refactor:|test:|docs:|chore:|perf:|ci:|build:|deps:` + optional scope; merge/revert/fixup/squash allowed).
-`.hooks/pre-push` fails any changed Go file with a 0.0%-coverage function (early warning — the real gate is CI's Codecov patch >= 90%). Emergency bypass: `git push --no-verify`.
+Hooks share code in `.hooks/lib.sh`.
+`.hooks/pre-commit` runs template drift → build → lint → test (fail-fast). Lint falls back to `go vet` if `golangci-lint` isn't executable (e.g., AppLocker).
+`.hooks/commit-msg` enforces Conventional Commits (`feat:|fix:|refactor:|test:|docs:|chore:|perf:|ci:|build:|deps:` + optional `(scope)` + optional `!` breaking marker; merge/revert/fixup/squash allowed).
+`.hooks/pre-push` fails any changed non-test `.go` file with a 0.0%-coverage function, using a full-suite `-coverpkg=./...` run (a function's coverage may come from another package's tests). Early warning only — the real gate is CI's Codecov patch >= 90%. GOOS-constrained files that can't compile here are flagged unverifiable, not silently skipped. Emergency bypass: `git push --no-verify`.
 
 `.gitattributes` forces LF for Go sources, mod/sum, `.sh`, `.hooks/*`, all YAML (`*.yml`/`*.yaml`, including `.github/workflows/`), `.js`, and `.gitattributes` itself so Windows checkouts stay diff-clean against CI and the templatefs parity checks.
 
 # Build
-go build -o fundamentum.exe -v .
+go build -o fundamentum.exe -v .   # Windows
+go build -o fundamentum -v .       # Linux/macOS
 
 # Lint
 golangci-lint run ./...
@@ -79,7 +81,7 @@ For PRs: use pr-auto for full lifecycle (create, fix CI/reviews, land safely).
 - Address and resolve review threads with substantive replies that include code changes or clear justifications.
 - For admin actions (force-push, `--admin` merge, branch protection bypass): pause and ask the human before proceeding.
 - After changes to `.github/`, `.codacy.yml`, or workflows: suggest `go run . apply <owner>/<repo>` with a dry-run first.
-- Load AGENTS.md and CLAUDE.md at the start of a session. Follow squash-merge default, feature branches, and CI-wait rules.
+- Load AGENTS.md at the start of a session (root CLAUDE.md is a thin pointer to it); load the global claude/CLAUDE.md separately. Follow squash-merge default, feature branches, and CI-wait rules.
 - Use supporting skills as needed:
   - check-work — verify fixes before committing
   - review — surface code quality findings
@@ -108,13 +110,22 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`, `--
 - `internal/templates` — renders embedded templates via plain string substitution (not `text/template`; see `render.go`)
 - `internal/templatefs` — `//go:embed` of template files; `dotgithub/` maps to `.github/`, `dotcodacy.yml` to `.codacy.yml`; `public_`/`private_` filename prefixes gate by visibility and are stripped from the target
 
+### Templates
+
+`internal/templates/render.go` substitutes `{{.Owner}}`, `{{.RepoName}}`, `{{.DefaultBranch}}`, `{{.Visibility}}` with plain `strings.ReplaceAll` — no template engine. All `RepoData` fields are sanitized (regex-validated identifiers, whitelisted visibility) before substitution, and rendered output passes through `sanitizeOutput` (strips dangerous HTML tags) as defense-in-depth. This also avoids false-positive XSS flags from static analyzers on YAML/Markdown output.
+
+`resolveTarget` path mapping: `dotgithub/` → `.github/`, `dotcodacy.yml` → `.codacy.yml`; top-level template files map to repo root (`public_codecov.yml` → `codecov.yml`, `socket.yml` → `socket.yml`).
+
+Shipped CI follows the **fabrica standard**: `public_ci.yml` (full Go CI — Lint, Vulnerability scan, Build/Test OS matrices, gosec, Trivy — with Codecov coverage + Test Analytics folded into the Test job's Linux leg), `private_ci.yml` (same minus Codecov — private repos keep `private_octocov.yml`), root `public_codeql.yml` (2-language matrix `actions`|`go` with autobuild; add a commented-out `javascript-typescript` leg if the target repo ships JS/TS), root `socket.yml` (Socket Security supply-chain scan via GitHub App — no visibility prefix, ships for every repo; requires the app installed), root `public_octopus.yml` (Octopus Review PR-triaging bot via `pull_request_target`, public only), and `dependabot.yml` watching only the `github-actions` ecosystem (no `gomod` entry).
+
 ### Key behavior
 
 - **Branch protection**: tries modern ruleset first (names `protect-main`, `protect-version-tags`), falls back to classic protection on 403. **Limitation:** the classic protection API requires GitHub Pro — free-tier private repos must configure branch protection manually via Settings → Branches. Use the `--no-overwrite` flag if you only want to add missing files.
 - **File aliasing** (`cmd/apply/apply.go` `aliases` map in `buildItems`): checks path variants before deciding create/skip/update — e.g., `CODEOWNERS` at root counts as existing even though target is `.github/CODEOWNERS`
 - **Workflow 404 handling** (`internal/github/files.go` `putFileContents`, sentinel `ErrWorkflowLocked` in `pr.go`): GitHub Actions locks workflow files — HTTP PUT returns 404 when updating an existing workflow via the Contents API. Returns `action="skipped"` so apply continues.
 - **409 auto-fallback to PR mode** (`cmd/apply/apply.go` `applyItems`): a direct file commit rejected with 409 (branch protection requires PR) switches the remaining file changes into a single batch PR — no re-run needed.
-- **Solo/team prompt**: `apply` asks solo/team (default solo) only when the `protect-main` ruleset doesn't already exist. Solo disables the CODEOWNERS-review and stale-review-dismissal requirements so a single maintainer isn't deadlocked.
+- **Retry/backoff** (`internal/github/client.go`): transient failures (429, 5xx, 403 rate-limit exhaustion) retry up to `maxAttempts` (3) with exponential backoff + full jitter (capped 30s), honoring `Retry-After`. Jitter uses `crypto/rand` (gosec), not `math/rand`.
+- **Solo/team prompt**: `apply` asks solo/team (default solo) only when the `protect-main` ruleset doesn't already exist. Solo disables the CODEOWNERS-review and stale-review-dismissal requirements (`github.BranchProtectionOptions.Solo`) so a single maintainer isn't deadlocked.
 - **`--no-overwrite`**: skips any file that already exists, even if content differs
 - **`--pr`**: batches file changes into a single PR; non-file items (settings, security, protection) still apply directly
 - **Dry-run "would create" labels**: `General settings (auto-delete branches)` and `Security (…)` are hardcoded `ActionCreate` in `cmd/apply/apply.go` `buildItems` — they always show "would create" even when already enabled. The applies are idempotent PUTs; verify live state via `gh api repos/O/R --jq '{delete_branch_on_merge, security_and_analysis}'` instead of trusting the label.
@@ -144,4 +155,4 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`, `--
 - **Legacy `tools:` key ignored.** The `.codacy/codacy.yaml` format is from Codacy CLI v2 and not recognized by the current cloud config.
 - **Use npm CLIs via npx.** For local and cloud interaction, use `@codacy/codacy-cloud-cli` and `@codacy/analysis-cli`.
 - **Trivy noise:** Trivy reports "no patterns configured" on repos without Dockerfiles or Kubernetes manifests. Disable Trivy in the Codacy UI per-repo to eliminate this noise. If the repo adds container files later, re-enable Trivy.
-- **This-repo workflows (now shipped templates):** `.github/workflows/codacy-coverage.yml` (`workflow_run`) re-sends the CI test artifact's coverage to Codacy — part of the embedded templates (`codacy-coverage.yml` is a shared workflow). Codacy analysis itself is entirely webhook/cloud-driven: PR checks come from the GitHub integration, and the main dashboard updates on push without any CI job (the former `Codacy Analysis` CLI-upload job was removed after proving it can never succeed — the CLI's final notification is rejected for cloud-analyzed repos with `Feature "Repository Analysis" is disabled`). `github.DefaultStatusChecks` always includes `Codacy Static Code Analysis`.
+- **This-repo workflows (now shipped templates):** `.github/workflows/codacy-coverage.yml` (`workflow_run`) re-sends the CI test artifact's coverage to Codacy — part of the embedded templates (`codacy-coverage.yml` is a shared workflow); re-apply to other repos via `go run . apply`, not manual copy. Codacy analysis itself is entirely webhook/cloud-driven: PR checks come from the GitHub integration, and the main dashboard updates on push without any CI job (the former `Codacy Analysis` CLI-upload job was removed after proving it can never succeed — the CLI's final notification is rejected for cloud-analyzed repos with `Feature "Repository Analysis" is disabled`). If "Run analysis on your build server" is ever enabled in Codacy settings, re-add a push-only CLI job; otherwise keep Codacy fully webhook-driven. `github.DefaultStatusChecks` always includes `Codacy Static Code Analysis`.
