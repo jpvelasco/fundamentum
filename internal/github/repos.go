@@ -102,14 +102,18 @@ func (c *Client) accountType(login string) (string, error) {
 type Repo struct {
 	Visibility    string
 	DefaultBranch string
+	OwnerType     string // "User" or "Organization"
 }
 
-// GetRepo returns visibility and default branch. An empty default_branch
-// falls back to "main" so callers always have a ref name.
+// GetRepo returns visibility, default branch, and owner account type.
+// An empty default_branch falls back to "main" so callers always have a ref name.
 func (c *Client) GetRepo(owner, repo string) (Repo, error) {
 	var result struct {
 		Visibility    string `json:"visibility"`
 		DefaultBranch string `json:"default_branch"`
+		Owner         struct {
+			Type string `json:"type"`
+		} `json:"owner"`
 	}
 	if err := c.getDecode(repoPath(owner, repo), "get repo", &result); err != nil {
 		return Repo{}, err
@@ -117,7 +121,11 @@ func (c *Client) GetRepo(owner, repo string) (Repo, error) {
 	if result.DefaultBranch == "" {
 		result.DefaultBranch = "main"
 	}
-	return Repo{Visibility: result.Visibility, DefaultBranch: result.DefaultBranch}, nil
+	return Repo{
+		Visibility:    result.Visibility,
+		DefaultBranch: result.DefaultBranch,
+		OwnerType:     result.Owner.Type,
+	}, nil
 }
 
 // GetRepoVisibility returns the repository visibility: "public" or "private".

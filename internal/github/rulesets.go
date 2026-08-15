@@ -33,6 +33,13 @@ type BranchProtectionOptions struct {
 	// Solo disables CODEOWNERS review requirement and stale review dismissal,
 	// which would deadlock a solo maintainer who can't approve their own PRs.
 	Solo bool
+	// SkipCodeOwners disables CODEOWNERS review when the shipped CODEOWNERS
+	// file cannot name a valid owner (organization without a team).
+	SkipCodeOwners bool
+}
+
+func (o BranchProtectionOptions) requireCodeOwners() bool {
+	return !o.Solo && !o.SkipCodeOwners
 }
 
 // RulesetExists returns true if a ruleset with the given name already exists.
@@ -89,7 +96,7 @@ func (c *Client) CreateBranchRuleset(owner, repo string, statusChecks []string, 
 	prParams := map[string]any{
 		"required_approving_review_count":   0,
 		"dismiss_stale_reviews_on_push":     !opts.Solo,
-		"require_code_owner_review":         !opts.Solo,
+		"require_code_owner_review":         opts.requireCodeOwners(),
 		"require_last_push_approval":        false,
 		"required_review_thread_resolution": true,
 	}

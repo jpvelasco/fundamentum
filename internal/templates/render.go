@@ -41,6 +41,7 @@ type RepoData struct {
 	RepoName      string
 	DefaultBranch string
 	Visibility    string // "public" or "private"
+	CodeOwnerLine string // CODEOWNERS body line; user: "* @owner", org: comment
 }
 
 // sanitize sanitizes RepoData fields to prevent template injection.
@@ -78,11 +79,22 @@ func (d RepoData) sanitize() RepoData {
 		visibility = "private"
 	}
 
+	codeOwnerLine := strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune("#@/* .-:,_'()", r) {
+			return r
+		}
+		return -1
+	}, d.CodeOwnerLine)
+	if strings.TrimSpace(codeOwnerLine) == "" {
+		codeOwnerLine = "* @" + owner
+	}
+
 	return RepoData{
 		Owner:         owner,
 		RepoName:      repo,
 		DefaultBranch: branch,
 		Visibility:    visibility,
+		CodeOwnerLine: codeOwnerLine,
 	}
 }
 
@@ -176,16 +188,20 @@ func stripVisibilityPrefix(base string) string {
 }
 
 // substitute replaces {{.Field}} placeholders with sanitized values.
-// Only the four known fields are replaced; unknown placeholders are left
+// Only the known fields are replaced; unknown placeholders are left
 // as-is so broken templates surface during review rather than silently
 // passing through.
 func substitute(tmpl string, data RepoData) string {
-	return strings.ReplaceAll(
-		strings.ReplaceAll(
-			strings.ReplaceAll(
-				strings.ReplaceAll(tmpl, "{{.Owner}}", data.Owner),
-				"{{.RepoName}}", data.RepoName),
-			"{{.DefaultBranch}}", data.DefaultBranch),
-		"{{.Visibility}}", data.Visibility,
-	)
+	repls := []struct{ old, new string }{
+		{"{{.Owner}}", data.Owner},
+		{"{{.RepoName}}", data.RepoName},
+		{"{{.DefaultBranch}}", data.DefaultBranch},
+		{"{{.Visibility}}", data.Visibility},
+		{"{{.CodeOwnerLine}}", data.CodeOwnerLine},
+	}
+	out := tmpl
+	for _, r := range repls {
+		out = strings.ReplaceAll(out, r.old, r.new)
+	}
+	return out
 }

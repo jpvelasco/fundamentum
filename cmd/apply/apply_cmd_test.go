@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -712,5 +713,94 @@ func TestRunWithClient_RenderError(t *testing.T) {
 	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "render templates") {
 		t.Errorf("expected render error, got: %v", err)
+	}
+}
+
+func TestCodeOwnerLine(t *testing.T) {
+	tests := []struct {
+		owner string
+		org   bool
+		want  string
+	}{
+		{owner: "jpvelasco", org: false, want: "* @jpvelasco"},
+		{owner: "acme", org: true, want: "# Organizations need a team (@org/team), not @acme"},
+	}
+	for _, tt := range tests {
+		if got := codeOwnerLine(tt.owner, tt.org); got != tt.want {
+			t.Errorf("codeOwnerLine(%q, %v) = %q, want %q", tt.owner, tt.org, got, tt.want)
+		}
+	}
+}
+
+func TestRunWithClient_OrgOwnerSkipsCodeOwners(t *testing.T) {
+	t.Cleanup(func() { renderTemplates = templates.Render })
+	var gotLine string
+	orig := renderTemplates
+	renderTemplates = func(data templates.RepoData) ([]templates.RenderedFile, error) {
+		gotLine = data.CodeOwnerLine
+		return orig(data)
+	}
+
+	var requireReview *bool
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/repo":
+			_, _ = w.Write([]byte(`{"visibility":"public","default_branch":"main","owner":{"type":"Organization"}}`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets"):
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main/protection"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"content":{}}`))
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/vulnerability-alerts"):
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/automated-security-fixes"):
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/acme/repo":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/rulesets"):
+			body, _ := io.ReadAll(r.Body)
+			var payload struct {
+				Rules []struct {
+					Type       string `json:"type"`
+					Parameters struct {
+						RequireCodeOwnerReview bool `json:"require_code_owner_review"`
+					} `json:"parameters"`
+				} `json:"rules"`
+			}
+			if err := json.Unmarshal(body, &payload); err == nil {
+				for _, rule := range payload.Rules {
+					if rule.Type == "pull_request" {
+						v := rule.Parameters.RequireCodeOwnerReview
+						requireReview = &v
+					}
+				}
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":1}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	var out strings.Builder
+	err := runWithClient(c, "acme", "repo", newLineReader("team\ny\n"), &out)
+	if err != nil {
+		t.Fatalf("runWithClient() error: %v", err)
+	}
+	wantLine := "# Organizations need a team (@org/team), not @acme"
+	if gotLine != wantLine {
+		t.Errorf("CodeOwnerLine = %q, want %q", gotLine, wantLine)
+	}
+	if requireReview == nil {
+		t.Fatal("expected pull_request ruleset to be created")
+	}
+	if *requireReview {
+		t.Error("org owner must not require CODEOWNERS reviews")
 	}
 }

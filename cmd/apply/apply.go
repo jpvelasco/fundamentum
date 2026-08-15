@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -62,7 +63,15 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	branch := info.DefaultBranch
 	visibility := info.Visibility
 
-	data := templates.RepoData{Owner: owner, RepoName: repo, DefaultBranch: branch, Visibility: visibility}
+	orgOwner := strings.EqualFold(info.OwnerType, "Organization")
+
+	data := templates.RepoData{
+		Owner:         owner,
+		RepoName:      repo,
+		DefaultBranch: branch,
+		Visibility:    visibility,
+		CodeOwnerLine: codeOwnerLine(owner, orgOwner),
+	}
 
 	rendered, err := renderTemplates(data)
 	if err != nil {
@@ -86,6 +95,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	// Only ask solo/team if branch protection will actually be applied.
 	// If the ruleset already exists, the question has no effect.
 	var opts github.BranchProtectionOptions
+	opts.SkipCodeOwners = orgOwner
 	_, _ = fmt.Fprintf(stdout, "fundamentum apply %s/%s\n\n", owner, repo)
 	if !globals.DryRun && !rulesetExists {
 		opts.Solo = wizard.PromptProjectType(stdin, stdout)
@@ -321,6 +331,13 @@ func fileItemAction(c *github.Client, owner, repo, path, content string) wizard.
 	default:
 		return wizard.ActionCreate
 	}
+}
+
+func codeOwnerLine(owner string, org bool) string {
+	if org {
+		return "# Organizations need a team (@org/team), not @" + owner
+	}
+	return "* @" + owner
 }
 
 func actionFromExists(exists bool) wizard.Action {

@@ -40,7 +40,7 @@ func (c *Client) ApplyClassicBranchProtection(owner, repo, branch string, status
 		"enforce_admins":         true,
 		"required_pull_request_reviews": map[string]any{
 			"dismiss_stale_reviews":           !opts.Solo,
-			"require_code_owner_reviews":      !opts.Solo,
+			"require_code_owner_reviews":      opts.requireCodeOwners(),
 			"required_approving_review_count": 0,
 		},
 		"restrictions":       nil,

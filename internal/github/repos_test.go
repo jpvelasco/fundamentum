@@ -240,18 +240,27 @@ func TestGetRepo(t *testing.T) {
 		response   string
 		wantVis    string
 		wantBranch string
+		wantOwner  string
 	}{
 		{
 			name:       "reads default_branch",
-			response:   `{"visibility":"private","default_branch":"develop"}`,
+			response:   `{"visibility":"private","default_branch":"develop","owner":{"type":"User"}}`,
 			wantVis:    "private",
 			wantBranch: "develop",
+			wantOwner:  "User",
 		},
 		{
 			name:       "empty default_branch falls back to main",
 			response:   `{"visibility":"public"}`,
 			wantVis:    "public",
 			wantBranch: "main",
+		},
+		{
+			name:       "reads organization owner",
+			response:   `{"visibility":"public","default_branch":"main","owner":{"type":"Organization"}}`,
+			wantVis:    "public",
+			wantBranch: "main",
+			wantOwner:  "Organization",
 		},
 	}
 	for _, tt := range tests {
@@ -272,6 +281,9 @@ func TestGetRepo(t *testing.T) {
 				}
 				if got.DefaultBranch != tt.wantBranch {
 					t.Errorf("DefaultBranch=%q, want %q", got.DefaultBranch, tt.wantBranch)
+				}
+				if got.OwnerType != tt.wantOwner {
+					t.Errorf("OwnerType=%q, want %q", got.OwnerType, tt.wantOwner)
 				}
 			}, nil)
 		})

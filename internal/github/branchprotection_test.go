@@ -2,6 +2,7 @@ package github
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"testing"
 )
@@ -68,6 +69,33 @@ func TestApplyClassicBranchProtection(t *testing.T) {
 			t.Error("expected PUT to be called")
 		}
 	})
+}
+
+func TestApplyClassicBranchProtection_SkipCodeOwners(t *testing.T) {
+	var got bool
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			RequiredPullRequestReviews struct {
+				RequireCodeOwnerReviews bool `json:"require_code_owner_reviews"`
+			} `json:"required_pull_request_reviews"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Errorf("decode protection: %v", err)
+		}
+		got = payload.RequiredPullRequestReviews.RequireCodeOwnerReviews
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{})
+	}))
+	defer srv.Close()
+
+	err := c.ApplyClassicBranchProtection("owner", "repo", "main", DefaultStatusChecks, BranchProtectionOptions{SkipCodeOwners: true})
+	if err != nil {
+		t.Fatalf("ApplyClassicBranchProtection() error: %v", err)
+	}
+	if got {
+		t.Error("expected require_code_owner_reviews false when SkipCodeOwners is set")
+	}
 }
 
 func TestApplyClassicBranchProtection_NetworkError(t *testing.T) {
