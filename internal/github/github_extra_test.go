@@ -480,7 +480,7 @@ func TestErrorResponses(t *testing.T) {
 			name:   "CreateRepo 422",
 			status: http.StatusUnprocessableEntity,
 			fn: func(c *Client) error {
-				return c.CreateRepo("taken", false)
+				return c.CreateRepo("alice", "taken", false)
 			},
 		},
 		{

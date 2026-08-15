@@ -99,6 +99,11 @@ func TestRun_CreateRepoSuccess(t *testing.T) {
 	} })
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/user" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"login":"owner"}`))
+			return
+		}
 		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/user/repos") {
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"id":1}`))
@@ -128,6 +133,11 @@ func TestExecute_RunE(t *testing.T) {
 	} })
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/user" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"login":"owner"}`))
+			return
+		}
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"id":1}`))
 	}))

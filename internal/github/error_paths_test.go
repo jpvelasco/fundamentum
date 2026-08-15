@@ -65,9 +65,26 @@ func TestAnyFileExists_NetworkError(t *testing.T) {
 
 func TestCreateRepo_NetworkError(t *testing.T) {
 	c := newErroringClient()
-	if err := c.CreateRepo("repo", false); err == nil {
+	if err := c.CreateRepo("owner", "repo", false); err == nil {
 		t.Fatal("expected network error")
 	}
+}
+
+func TestCreateRepo_AccountLookupNetworkError(t *testing.T) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/user" {
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]string{"login": "alice"})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}), func(url string) *Client {
+		return newSplitTransportClient(url, "/users/")
+	}, func(c *Client) {
+		if err := c.CreateRepo("my-org", "repo", false); err == nil {
+			t.Fatal("expected network error looking up owner account")
+		}
+	}, nil)
 }
 
 func TestGetRepoVisibility_NetworkError(t *testing.T) {
