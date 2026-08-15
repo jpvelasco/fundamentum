@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-08-15
+
+**Documentation release.** Documents the `--advanced-security` opt-in for GitHub Advanced Security on private/internal repos across the repo README, npm README, and AGENTS.md.
+
+### Documentation
+
+- **`--advanced-security` documented.** The repo README flags table and npm README commands table now list the flag; both security bullets explain that secret scanning + push protection are opt-in (paid GHAS) on private/internal repos while public repos always get them. AGENTS.md gains a key-behavior entry for the gating.
+
 ## [0.1.4] - 2026-08-15
 
 **Patch release.** Applies the repo's real default branch everywhere, routes `init` correctly for organizations, gates paid GitHub Advanced Security on private repos behind an explicit opt-in, and fixes a batch of apply/npm-shim edge cases.
@@ -103,7 +111,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.5
 [0.1.4]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.4
 [0.1.3]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.3
 [0.1.2]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.2
