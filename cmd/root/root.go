@@ -31,6 +31,7 @@ Examples:
 	cmd.PersistentFlags().StringVar(&globals.Token, "token", "", "GitHub token (default: GITHUB_TOKEN env var)")
 	cmd.PersistentFlags().BoolVar(&globals.NoOverwrite, "no-overwrite", false, "skip files that already exist, never update")
 	cmd.PersistentFlags().BoolVar(&globals.ViaPR, "pr", false, "push file changes through a PR instead of direct commits")
+	cmd.PersistentFlags().BoolVar(&globals.AdvancedSecurity, "advanced-security", false, "enable GitHub Advanced Security (secret scanning, push protection) on private/internal repos")
 	cmd.AddCommand(apply.NewCmd())
 	cmd.AddCommand(repoinit.NewCmd())
 	return cmd

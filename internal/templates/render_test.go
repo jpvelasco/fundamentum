@@ -66,9 +66,14 @@ func TestRepoDataSanitize(t *testing.T) {
 			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
 		},
 		{
-			name:   "invalid visibility falls back",
+			name:   "invalid visibility falls back to private",
 			input:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "secret"},
-			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"},
+		},
+		{
+			name:   "internal visibility uses private templates",
+			input:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "internal"},
+			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"},
 		},
 		{
 			name:   "visibility case normalized",

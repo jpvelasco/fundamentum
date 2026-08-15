@@ -47,6 +47,23 @@ func TestPromptProjectType(t *testing.T) {
 	runBoolPromptTest(t, "PromptProjectType", PromptProjectType, cases)
 }
 
+func TestPromptAdvancedSecurity(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"empty input", "\n", false},
+		{"n", "n\n", false},
+		{"N", "N\n", false},
+		{"y", "y\n", true},
+		{"Y", "Y\n", true},
+		{"yes", "yes\n", true},
+		{"no", "no\n", false},
+	}
+	runBoolPromptTest(t, "PromptAdvancedSecurity", PromptAdvancedSecurity, cases)
+}
+
 func TestConfirmDefaults(t *testing.T) {
 	cases := []struct {
 		name  string

@@ -113,7 +113,7 @@ func TestBuildItems(t *testing.T) {
 
 func TestBuildItems_WithExistingRuleset(t *testing.T) {
 	c := &github.Client{}
-	items := buildItems(c, "owner", "repo", "main", "public", nil, true, true, false, github.BranchProtectionOptions{})
+	items := buildItems(c, "owner", "repo", "main", "public", nil, true, true, false, github.BranchProtectionOptions{}, false)
 
 	// Branch protection should be skipped
 	for _, item := range items {
@@ -510,7 +510,7 @@ func TestBuildItems_AdvancedCodeQLSkipsDefaultSetup(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Render() error: %v", err)
 		}
-		items := buildItems(c, "owner", "repo", "main", "public", rendered, false, false, false, github.BranchProtectionOptions{})
+		items := buildItems(c, "owner", "repo", "main", "public", rendered, false, false, false, github.BranchProtectionOptions{}, false)
 		for _, item := range items {
 			if item.Name == "Security (secret scanning, CodeQL, Dependabot)" {
 				if err := item.Apply(); err != nil {
@@ -563,7 +563,7 @@ func TestBuildItems_FileStatusSkip(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNotFound)
 	}), func(c *github.Client) {
-		items := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{})
+		items := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{}, false)
 		for _, item := range items {
 			if item.Name == target {
 				if item.Action != wizard.ActionSkip {
