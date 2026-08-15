@@ -46,7 +46,7 @@ Examples:
 }
 
 func run(ownerRepo string, private bool) error {
-	_, repo, err := util.ParseOwnerRepo(ownerRepo)
+	owner, repo, err := util.ParseOwnerRepo(ownerRepo)
 	if err != nil {
 		return err
 	}
@@ -54,7 +54,7 @@ func run(ownerRepo string, private bool) error {
 	if !globals.DryRun {
 		client := newClient(globals.Token, globals.Verbose)
 		fmt.Printf("Creating repo %s...\n", ownerRepo)
-		if err := client.CreateRepo(repo, private); err != nil {
+		if err := client.CreateRepo(owner, repo, private); err != nil {
 			return fmt.Errorf("create repo: %w", err)
 		}
 		fmt.Printf("Repo created.\n\n")
