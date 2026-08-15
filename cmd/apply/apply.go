@@ -338,6 +338,7 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 	var fileChanges []github.FileChange
 	var nonFileItems []wizard.Item
 	fallback := false // true after first 409 triggers auto-fallback to PR mode
+	requiredFailed := false
 
 	for _, item := range items {
 		if wizard.ShouldSkip(item) {
@@ -374,6 +375,9 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 				}
 				fmt.Print("\r")
 				wizard.PrintItemError(os.Stdout, item, err)
+				if !item.Optional {
+					requiredFailed = true
+				}
 			} else {
 				fmt.Printf("\r  %-45s  ✓\n", item.Name)
 			}
@@ -389,7 +393,11 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 		if err != nil {
 			return fmt.Errorf("apply via PR: %w", err)
 		}
-		fmt.Printf("  ✓ PR #%d created: https://github.com/%s/%s/pull/%d\n", prNum, owner, repo, prNum)
+		if prNum > 0 {
+			fmt.Printf("  ✓ PR #%d created: https://github.com/%s/%s/pull/%d\n", prNum, owner, repo, prNum)
+		} else {
+			fmt.Printf("  no file changes to put in a PR\n")
+		}
 	}
 
 	// Apply non-file items (settings, security) directly.
@@ -398,11 +406,17 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 		if err := item.Apply(); err != nil {
 			fmt.Print("\r")
 			wizard.PrintItemError(os.Stdout, item, err)
+			if !item.Optional {
+				requiredFailed = true
+			}
 			continue
 		}
 		fmt.Printf("\r  %-45s  ✓\n", item.Name)
 	}
 
 	fmt.Printf("\n  Repo: https://github.com/%s/%s\n", owner, repo)
+	if requiredFailed {
+		return fmt.Errorf("one or more required items failed")
+	}
 	return nil
 }

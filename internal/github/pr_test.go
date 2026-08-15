@@ -506,8 +506,9 @@ func TestApplyViaPR(t *testing.T) {
 		name    string
 		handler http.HandlerFunc
 		changes []FileChange
-		wantErr bool
-		errMsg  string
+		wantErr    bool
+		errMsg     string
+		wantZeroPR bool
 	}{
 		{
 			name: "happy path with 2 files",
@@ -680,22 +681,37 @@ func TestApplyViaPR(t *testing.T) {
 		{
 			name: "empty changes",
 			handler: func(w http.ResponseWriter, r *http.Request) {
+				t.Errorf("must not call GitHub when there are no changes: %s %s", r.Method, r.URL.Path)
+			},
+			changes:    nil,
+			wantZeroPR: true,
+		},
+		{
+			name: "all files skipped",
+			handler: func(w http.ResponseWriter, r *http.Request) {
 				switch r.Method {
 				case http.MethodGet:
+					if strings.Contains(r.URL.Path, "/branches/") {
+						w.WriteHeader(http.StatusOK)
+						_ = json.NewEncoder(w).Encode(map[string]any{
+							"commit": map[string]any{"sha": "aaaa1111"},
+						})
+						return
+					}
 					w.WriteHeader(http.StatusOK)
 					_ = json.NewEncoder(w).Encode(map[string]any{
-						"commit": map[string]any{"sha": "aaaa1111"},
+						"content": "aGVsbG8=",
+						"sha":     "abc123",
 					})
 				case http.MethodPost:
-					if strings.Contains(r.URL.Path, "/git/refs") {
-						w.WriteHeader(http.StatusCreated)
-					} else {
-						w.WriteHeader(http.StatusCreated)
-						_ = json.NewEncoder(w).Encode(map[string]any{"number": 3})
+					if strings.Contains(r.URL.Path, "/pulls") {
+						t.Error("must not open a PR when every file is skipped")
 					}
+					w.WriteHeader(http.StatusCreated)
 				}
 			},
-			changes: nil,
+			changes:    []FileChange{{Path: "README.md", Content: []byte("hello")}},
+			wantZeroPR: true,
 		},
 		{
 			name: "skipped file no print",
@@ -755,7 +771,11 @@ func TestApplyViaPR(t *testing.T) {
 					if err != nil {
 						t.Fatalf("unexpected error: %v", err)
 					}
-					if prNum == 0 {
+					if tt.wantZeroPR {
+						if prNum != 0 {
+							t.Errorf("expected no PR, got #%d", prNum)
+						}
+					} else if prNum == 0 {
 						t.Error("expected non-zero PR number")
 					}
 				}
