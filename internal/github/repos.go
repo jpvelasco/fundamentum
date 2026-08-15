@@ -98,13 +98,33 @@ func (c *Client) accountType(login string) (string, error) {
 	return u.Type, nil
 }
 
-// GetRepoVisibility returns the repository visibility: "public" or "private".
-func (c *Client) GetRepoVisibility(owner, repo string) (string, error) {
+// Repo is the subset of GET /repos/{owner}/{repo} that apply needs.
+type Repo struct {
+	Visibility    string
+	DefaultBranch string
+}
+
+// GetRepo returns visibility and default branch. An empty default_branch
+// falls back to "main" so callers always have a ref name.
+func (c *Client) GetRepo(owner, repo string) (Repo, error) {
 	var result struct {
-		Visibility string `json:"visibility"`
+		Visibility    string `json:"visibility"`
+		DefaultBranch string `json:"default_branch"`
 	}
 	if err := c.getDecode(repoPath(owner, repo), "get repo", &result); err != nil {
+		return Repo{}, err
+	}
+	if result.DefaultBranch == "" {
+		result.DefaultBranch = "main"
+	}
+	return Repo{Visibility: result.Visibility, DefaultBranch: result.DefaultBranch}, nil
+}
+
+// GetRepoVisibility returns the repository visibility: "public" or "private".
+func (c *Client) GetRepoVisibility(owner, repo string) (string, error) {
+	info, err := c.GetRepo(owner, repo)
+	if err != nil {
 		return "", err
 	}
-	return result.Visibility, nil
+	return info.Visibility, nil
 }

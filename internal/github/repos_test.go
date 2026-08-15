@@ -234,6 +234,50 @@ func TestAccountType_Errors(t *testing.T) {
 	}
 }
 
+func TestGetRepo(t *testing.T) {
+	tests := []struct {
+		name       string
+		response   string
+		wantVis    string
+		wantBranch string
+	}{
+		{
+			name:       "reads default_branch",
+			response:   `{"visibility":"private","default_branch":"develop"}`,
+			wantVis:    "private",
+			wantBranch: "develop",
+		},
+		{
+			name:       "empty default_branch falls back to main",
+			response:   `{"visibility":"public"}`,
+			wantVis:    "public",
+			wantBranch: "main",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				var out any
+				_ = json.Unmarshal([]byte(tt.response), &out)
+				_ = json.NewEncoder(w).Encode(out)
+			}), nil, func(c *Client) {
+				got, err := c.GetRepo("owner", "repo")
+				if err != nil {
+					t.Fatalf("GetRepo: %v", err)
+				}
+				if got.Visibility != tt.wantVis {
+					t.Errorf("Visibility=%q, want %q", got.Visibility, tt.wantVis)
+				}
+				if got.DefaultBranch != tt.wantBranch {
+					t.Errorf("DefaultBranch=%q, want %q", got.DefaultBranch, tt.wantBranch)
+				}
+			}, nil)
+		})
+	}
+}
+
 func TestGetRepoVisibility(t *testing.T) {
 	tests := []struct {
 		name       string

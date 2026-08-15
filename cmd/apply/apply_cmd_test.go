@@ -497,6 +497,43 @@ func TestRunWithClient_ClassicProtectionError(t *testing.T) {
 // TestRunWithClient_ViaPRFailure verifies that an ApplyViaPR failure inside
 // the defaults-apply path propagates the wrapped error (auto-fallback stays
 // transparent: the PR error is the reported cause).
+func TestRunWithClient_UsesDefaultBranch(t *testing.T) {
+	t.Cleanup(func() { globals.ViaPR = false })
+	globals.ViaPR = true
+
+	var sawDevelop, sawMain bool
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
+			_, _ = w.Write([]byte(`{"visibility":"public","default_branch":"develop"}`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets"):
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/develop"):
+			sawDevelop = true
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main"):
+			sawMain = true
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "apply via PR") {
+		t.Errorf("expected apply-via-PR error, got: %v", err)
+	}
+	if !sawDevelop {
+		t.Error("expected PR branch lookup against default branch develop")
+	}
+	if sawMain {
+		t.Error("must not look up hardcoded main when default_branch is develop")
+	}
+}
+
 func TestRunWithClient_ViaPRFailure(t *testing.T) {
 	t.Cleanup(func() { globals.ViaPR = false })
 	globals.ViaPR = true
