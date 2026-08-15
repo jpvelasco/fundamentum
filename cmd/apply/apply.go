@@ -177,22 +177,16 @@ func buildItems(
 		file := f
 		action := wizard.ActionCreate
 
-		// Check alias paths before the exact path to avoid false "missing" on case/path variants.
+		// Non-canonical aliases (root CODEOWNERS, octopus-review.yml, …) count
+		// as already present so we do not write a second copy. The canonical
+		// path still goes through FileStatus so content drift can update.
 		if variants, ok := aliases[file.Path]; ok {
-			if exists, err := c.AnyFileExists(owner, repo, variants); err == nil && exists {
+			if exists, err := c.AnyFileExists(owner, repo, otherAliases(file.Path, variants)); err == nil && exists {
 				action = wizard.ActionSkip
 			}
-		} else if status, err := c.FileStatus(owner, repo, file.Path, []byte(file.Content)); err == nil {
-			switch status {
-			case "skip":
-				action = wizard.ActionSkip
-			case "update":
-				if globals.NoOverwrite {
-					action = wizard.ActionSkip
-				} else {
-					action = wizard.ActionUpdate
-				}
-			}
+		}
+		if action != wizard.ActionSkip {
+			action = fileItemAction(c, owner, repo, file.Path, file.Content)
 		}
 		items = append(items, wizard.Item{
 			Name:    file.Path,
@@ -296,6 +290,36 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 				return c.ApplyClassicBranchProtection(owner, repo, branch, github.DefaultStatusChecks, opts)
 			},
 		}
+	}
+}
+
+// otherAliases returns path variants that are not the canonical target.
+func otherAliases(canonical string, variants []string) []string {
+	out := make([]string, 0, len(variants))
+	for _, v := range variants {
+		if v != canonical {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// fileItemAction maps FileStatus to a wizard action, honoring --no-overwrite.
+func fileItemAction(c *github.Client, owner, repo, path, content string) wizard.Action {
+	status, err := c.FileStatus(owner, repo, path, []byte(content))
+	if err != nil {
+		return wizard.ActionCreate
+	}
+	switch status {
+	case "skip":
+		return wizard.ActionSkip
+	case "update":
+		if globals.NoOverwrite {
+			return wizard.ActionSkip
+		}
+		return wizard.ActionUpdate
+	default:
+		return wizard.ActionCreate
 	}
 }
 
