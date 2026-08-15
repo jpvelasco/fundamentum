@@ -73,7 +73,9 @@ func (d RepoData) sanitize() RepoData {
 
 	visibility := strings.ToLower(d.Visibility)
 	if visibility != "public" && visibility != "private" {
-		visibility = "public"
+		// internal (GHEC) and unknown values use the private template set —
+		// public-only tools (Codecov, Octopus, CodeQL workflow) stay off.
+		visibility = "private"
 	}
 
 	return RepoData{

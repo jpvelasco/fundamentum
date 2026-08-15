@@ -32,6 +32,16 @@ func PromptProjectType(r io.Reader, w io.Writer) bool {
 	return input == "" || input == "solo" || input == "s"
 }
 
+// PromptAdvancedSecurity asks whether to enable paid GHAS features on a
+// private/internal repo. Default is no.
+func PromptAdvancedSecurity(r io.Reader, w io.Writer) bool {
+	_, _ = fmt.Fprint(w, "Enable GitHub Advanced Security (secret scanning, push protection)? Requires a paid license. [y/N]: ")
+	scanner := bufio.NewScanner(r)
+	scanner.Scan()
+	input := strings.TrimSpace(scanner.Text())
+	return strings.EqualFold(input, "y") || strings.EqualFold(input, "yes")
+}
+
 // ConfirmDefaults prompts "Apply all defaults? [Y/n]" and returns true if the
 // user accepts (empty input or 'y'/'Y').
 func ConfirmDefaults(r io.Reader, w io.Writer) bool {

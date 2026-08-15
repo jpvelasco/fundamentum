@@ -10,25 +10,39 @@ import (
 func TestEnableSecurity(t *testing.T) {
 	tests := []struct {
 		name           string
-		visibility     string
-		advancedCodeQL bool
+		opts           SecurityOptions
 		wantCodeQL     bool
+		wantSecretScan bool
 	}{
 		{
-			name:       "public enables CodeQL",
-			visibility: "public",
-			wantCodeQL: true,
+			name:           "public enables CodeQL and secret scanning",
+			opts:           SecurityOptions{Visibility: "public"},
+			wantCodeQL:     true,
+			wantSecretScan: true,
 		},
 		{
 			name:           "public with advanced workflow skips default setup",
-			visibility:     "public",
-			advancedCodeQL: true,
+			opts:           SecurityOptions{Visibility: "public", AdvancedCodeQL: true},
 			wantCodeQL:     false,
+			wantSecretScan: true,
 		},
 		{
-			name:       "private skips CodeQL",
-			visibility: "private",
-			wantCodeQL: false,
+			name:           "private skips GHAS unless opted in",
+			opts:           SecurityOptions{Visibility: "private"},
+			wantCodeQL:     false,
+			wantSecretScan: false,
+		},
+		{
+			name:           "private with paid features enables secret scanning only",
+			opts:           SecurityOptions{Visibility: "private", PaidFeatures: true},
+			wantCodeQL:     false,
+			wantSecretScan: true,
+		},
+		{
+			name:           "internal skips GHAS unless opted in",
+			opts:           SecurityOptions{Visibility: "internal"},
+			wantCodeQL:     false,
+			wantSecretScan: false,
 		},
 	}
 	for _, tt := range tests {
@@ -40,7 +54,7 @@ func TestEnableSecurity(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{})
 			}))
 			defer srv.Close()
-			if err := c.EnableSecurity("owner", "repo", tt.visibility, tt.advancedCodeQL); err != nil {
+			if err := c.EnableSecurity("owner", "repo", tt.opts); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if !paths["PUT:/repos/owner/repo/vulnerability-alerts"] {
@@ -49,8 +63,9 @@ func TestEnableSecurity(t *testing.T) {
 			if !paths["PUT:/repos/owner/repo/automated-security-fixes"] {
 				t.Error("expected automated-security-fixes PUT")
 			}
-			if !paths["PATCH:/repos/owner/repo"] {
-				t.Error("expected repo PATCH for secret scanning")
+			hasSecret := paths["PATCH:/repos/owner/repo"]
+			if hasSecret != tt.wantSecretScan {
+				t.Errorf("secret scanning PATCH: got %v, want %v", hasSecret, tt.wantSecretScan)
 			}
 			hasCodeQL := paths["PATCH:/repos/owner/repo/code-scanning/default-setup"]
 			if hasCodeQL != tt.wantCodeQL {
@@ -62,21 +77,21 @@ func TestEnableSecurity(t *testing.T) {
 
 func TestEnableSecurity_Errors(t *testing.T) {
 	tests := []struct {
-		name       string
-		visibility string
-		handler    http.HandlerFunc
-		client     func(srv string) *Client
+		name    string
+		opts    SecurityOptions
+		handler http.HandlerFunc
+		client  func(srv string) *Client
 	}{
 		{
-			name:       "network error",
-			visibility: "private",
-			client:     func(string) *Client { return newErroringClient() },
-			handler:    func(w http.ResponseWriter, r *http.Request) {},
+			name:    "network error",
+			opts:    SecurityOptions{Visibility: "private"},
+			client:  func(string) *Client { return newErroringClient() },
+			handler: func(w http.ResponseWriter, r *http.Request) {},
 		},
 		{
-			name:       "secret scanning bad status",
-			visibility: "private",
-			client:     newZeroDelayClient,
+			name:   "secret scanning bad status",
+			opts:   SecurityOptions{Visibility: "private", PaidFeatures: true},
+			client: newZeroDelayClient,
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				switch r.Method {
 				case http.MethodPut:
@@ -88,16 +103,16 @@ func TestEnableSecurity_Errors(t *testing.T) {
 			},
 		},
 		{
-			name:       "CodeQL network error",
-			visibility: "public",
-			client:     func(srv string) *Client { return newSplitTransportClient(srv, "code-scanning") },
+			name:   "CodeQL network error",
+			opts:   SecurityOptions{Visibility: "public"},
+			client: func(srv string) *Client { return newSplitTransportClient(srv, "code-scanning") },
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			},
 		},
 		{
-			name:       "CodeQL bad status",
-			visibility: "public",
+			name: "CodeQL bad status",
+			opts: SecurityOptions{Visibility: "public"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.Method == http.MethodPut:
@@ -122,10 +137,19 @@ func TestEnableSecurity_Errors(t *testing.T) {
 			} else {
 				c = NewClient("t", false).WithBaseURL(srv.URL)
 			}
-			err := c.EnableSecurity("owner", "repo", tt.visibility, false)
+			err := c.EnableSecurity("owner", "repo", tt.opts)
 			if err == nil {
 				t.Fatal("expected error")
 			}
 		})
+	}
+}
+
+func TestIsPublicVisibility(t *testing.T) {
+	if !IsPublicVisibility("public") {
+		t.Error("public should be public")
+	}
+	if IsPublicVisibility("private") || IsPublicVisibility("internal") || IsPublicVisibility("") {
+		t.Error("non-public visibilities must not count as public")
 	}
 }

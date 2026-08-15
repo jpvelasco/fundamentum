@@ -34,7 +34,7 @@ func newBuildItemsTestFull(t *testing.T, handler http.HandlerFunc, visibility st
 		t.Fatalf("Render() error: %v", err)
 	}
 
-	return buildItems(c, "owner", "repo", "main", visibility, rendered, rulesetExists, tagExists, classicExists, github.BranchProtectionOptions{})
+	return buildItems(c, "owner", "repo", "main", visibility, rendered, rulesetExists, tagExists, classicExists, github.BranchProtectionOptions{}, false)
 }
 
 func TestNewCmd(t *testing.T) {
@@ -152,17 +152,43 @@ func TestBuildItems_Private(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}), "private")
 
-	// Check that CodeQL is NOT in the security item for private repos
+	foundDependabotOnly := false
 	for _, item := range items {
 		if strings.Contains(item.Name, "CodeQL") {
 			t.Error("expected no CodeQL in security item for private repo")
 		}
+		if strings.Contains(item.Name, "secret scanning") {
+			t.Error("expected no secret scanning on private repo without paid opt-in")
+		}
+		if item.Name == "Security (Dependabot)" {
+			foundDependabotOnly = true
+		}
+	}
+	if !foundDependabotOnly {
+		t.Error("expected unpaid private security item to be Dependabot-only")
+	}
+}
+
+func TestBuildItems_PrivatePaidSecurity(t *testing.T) {
+	c := github.NewClient("", false)
+	items := buildItems(c, "owner", "repo", "main", "private", nil, false, false, false, github.BranchProtectionOptions{}, true)
+	found := false
+	for _, item := range items {
+		if item.Name == "Security (secret scanning, Dependabot)" {
+			found = true
+		}
+		if strings.Contains(item.Name, "CodeQL") {
+			t.Error("paid private must still skip CodeQL default-setup name")
+		}
+	}
+	if !found {
+		t.Error("expected secret scanning in security item when paid features opted in")
 	}
 }
 
 func TestBuildItems_TagRulesetExists(t *testing.T) {
 	c := github.NewClient("", false)
-	items := buildItems(c, "owner", "repo", "main", "private", nil, false, true, false, github.BranchProtectionOptions{})
+	items := buildItems(c, "owner", "repo", "main", "private", nil, false, true, false, github.BranchProtectionOptions{}, false)
 
 	for _, item := range items {
 		if item.Name == "Tag ruleset (protect-version-tags)" {

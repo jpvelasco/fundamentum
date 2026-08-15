@@ -92,7 +92,13 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 		_, _ = fmt.Fprintln(stdout)
 	}
 
-	items := buildItems(client, owner, repo, branch, visibility, rendered, rulesetExists, tagExists, classicExists, opts)
+	paidSecurity := globals.AdvancedSecurity
+	if !globals.DryRun && !github.IsPublicVisibility(visibility) && !paidSecurity {
+		paidSecurity = wizard.PromptAdvancedSecurity(stdin, stdout)
+		_, _ = fmt.Fprintln(stdout)
+	}
+
+	items := buildItems(client, owner, repo, branch, visibility, rendered, rulesetExists, tagExists, classicExists, opts, paidSecurity)
 
 	if globals.DryRun {
 		// Non-interactive dry run: plan table plus counts, then stop.
@@ -119,6 +125,7 @@ func buildItems(
 	rendered []templates.RenderedFile,
 	rulesetExists, tagExists, classicExists bool,
 	opts github.BranchProtectionOptions,
+	paidSecurity bool,
 ) []wizard.Item {
 	var items []wizard.Item
 
@@ -213,7 +220,7 @@ func buildItems(
 
 	// Security features: CodeQL only for public repos (free-tier private needs GHAS).
 	// Secret scanning and Dependabot work for all repos.
-	securityName := "Security (secret scanning, Dependabot)"
+	securityName := "Security (Dependabot)"
 	// When the advanced codeql.yml workflow is part of the render, default-setup
 	// CodeQL must be skipped — GitHub rejects advanced SARIF uploads while
 	// default setup is configured (it also disables the advanced workflow).
@@ -224,14 +231,22 @@ func buildItems(
 			break
 		}
 	}
-	if visibility == "public" {
+	switch {
+	case github.IsPublicVisibility(visibility):
 		securityName = "Security (secret scanning, CodeQL, Dependabot)"
+	case paidSecurity:
+		securityName = "Security (secret scanning, Dependabot)"
+	}
+	secOpts := github.SecurityOptions{
+		Visibility:     visibility,
+		AdvancedCodeQL: advancedCodeQL,
+		PaidFeatures:   paidSecurity,
 	}
 	items = append(items, wizard.Item{
 		Name:     securityName,
 		Action:   wizard.ActionCreate,
 		Optional: true,
-		Apply:    func() error { return c.EnableSecurity(owner, repo, visibility, advancedCodeQL) },
+		Apply:    func() error { return c.EnableSecurity(owner, repo, secOpts) },
 	})
 
 	return items

@@ -6,12 +6,23 @@ import (
 	"net/http"
 )
 
-// EnableSecurity enables Dependabot alerts, secret scanning, and push protection.
-// CodeQL is only enabled for public repos (private repos require GitHub Advanced Security).
-// advancedCodeQL indicates the repo ships (or will ship) the advanced codeql.yml workflow;
-// when true, default-setup CodeQL is skipped because GitHub rejects advanced uploads
-// while default setup is configured.
-func (c *Client) EnableSecurity(owner, repo, visibility string, advancedCodeQL bool) error {
+// SecurityOptions selects which security features EnableSecurity turns on.
+type SecurityOptions struct {
+	Visibility     string
+	AdvancedCodeQL bool // skip default-setup CodeQL when the advanced workflow ships
+	PaidFeatures   bool // secret scanning + push protection (GHAS on private/internal)
+}
+
+// IsPublicVisibility reports whether visibility is GitHub's free public tier.
+func IsPublicVisibility(visibility string) bool {
+	return visibility == "public"
+}
+
+// EnableSecurity enables Dependabot alerts and security updates for every repo.
+// Secret scanning and push protection are free on public repos; on private or
+// internal repos they require GitHub Advanced Security and are skipped unless
+// PaidFeatures is set. CodeQL default setup stays public-only.
+func (c *Client) EnableSecurity(owner, repo string, opts SecurityOptions) error {
 	base := repoPath(owner, repo)
 
 	for _, path := range []string{
@@ -29,6 +40,21 @@ func (c *Client) EnableSecurity(owner, repo, visibility string, advancedCodeQL b
 		}
 	}
 
+	if IsPublicVisibility(opts.Visibility) || opts.PaidFeatures {
+		if err := c.enableSecretScanning(base); err != nil {
+			return err
+		}
+	}
+
+	if IsPublicVisibility(opts.Visibility) && !opts.AdvancedCodeQL {
+		if err := c.enableCodeQL(base); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Client) enableSecretScanning(base string) error {
 	resp, err := c.patch(base, map[string]any{
 		"security_and_analysis": map[string]any{
 			"secret_scanning":                 map[string]any{"status": "enabled"},
@@ -39,16 +65,7 @@ func (c *Client) EnableSecurity(owner, repo, visibility string, advancedCodeQL b
 		return fmt.Errorf("enable secret scanning: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if err := expectStatus("enable secret scanning", resp, http.StatusOK); err != nil {
-		return err
-	}
-
-	if visibility == "public" && !advancedCodeQL {
-		if err := c.enableCodeQL(base); err != nil {
-			return err
-		}
-	}
-	return nil
+	return expectStatus("enable secret scanning", resp, http.StatusOK)
 }
 
 // enableCodeQL enables CodeQL scanning. Only available for public repos

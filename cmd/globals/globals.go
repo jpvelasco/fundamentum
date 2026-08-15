@@ -16,3 +16,7 @@ var NoOverwrite bool
 // ViaPR pushes file changes through a PR instead of direct commits.
 // Useful when branch protection blocks direct pushes (409).
 var ViaPR bool
+
+// AdvancedSecurity enables paid GitHub Advanced Security features
+// (secret scanning, push protection) on private/internal repos.
+var AdvancedSecurity bool

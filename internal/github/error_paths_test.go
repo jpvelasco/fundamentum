@@ -144,7 +144,7 @@ func TestEnableSecurity_SecretScanningNetworkError(t *testing.T) {
 	}), func(url string) *Client {
 		return newMethodSplitTransportClient(url, http.MethodPatch)
 	}, func(c *Client) {
-		if err := c.EnableSecurity("owner", "repo", "private", false); err == nil {
+		if err := c.EnableSecurity("owner", "repo", SecurityOptions{Visibility: "private", PaidFeatures: true}); err == nil {
 			t.Fatal("expected network error on secret scanning PATCH")
 		}
 	}, nil)
