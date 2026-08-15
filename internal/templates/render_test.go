@@ -36,76 +36,117 @@ func TestValidIdentifier(t *testing.T) {
 
 func TestRepoDataSanitize(t *testing.T) {
 	tests := []struct {
-		name   string
-		input  RepoData
-		want   RepoData
+		name  string
+		input RepoData
+		want  RepoData
 	}{
 		{
-			name:   "valid input unchanged",
-			input:  RepoData{Owner: "jpvelasco", RepoName: "fundamentum", DefaultBranch: "main", Visibility: "private"},
-			want:   RepoData{Owner: "jpvelasco", RepoName: "fundamentum", DefaultBranch: "main", Visibility: "private"},
+			name:  "valid input unchanged",
+			input: RepoData{Owner: "jpvelasco", RepoName: "fundamentum", DefaultBranch: "main", Visibility: "private"},
+			want:  RepoData{Owner: "jpvelasco", RepoName: "fundamentum", DefaultBranch: "main", Visibility: "private"},
 		},
 		{
-			name:   "owner with special chars stripped",
-			input:  RepoData{Owner: "jp<script>alert(1)</script>", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
-			want:   RepoData{Owner: "jpscriptalert1script", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+			name:  "owner with special chars stripped",
+			input: RepoData{Owner: "jp<script>alert(1)</script>", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+			want:  RepoData{Owner: "jpscriptalert1script", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
 		},
 		{
-			name:   "empty owner falls back",
-			input:  RepoData{Owner: "", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
-			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+			name:  "empty owner falls back",
+			input: RepoData{Owner: "", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+			want:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
 		},
 		{
-			name:   "empty repo falls back",
-			input:  RepoData{Owner: "owner", RepoName: "", DefaultBranch: "main", Visibility: "public"},
-			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+			name:  "empty repo falls back",
+			input: RepoData{Owner: "owner", RepoName: "", DefaultBranch: "main", Visibility: "public"},
+			want:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
 		},
 		{
-			name:   "empty branch falls back",
-			input:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "", Visibility: "public"},
-			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+			name:  "empty branch falls back",
+			input: RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "", Visibility: "public"},
+			want:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
 		},
 		{
-			name:   "invalid visibility falls back to private",
-			input:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "secret"},
-			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"},
+			name:  "invalid visibility falls back to private",
+			input: RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "secret"},
+			want:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"},
 		},
 		{
-			name:   "internal visibility uses private templates",
-			input:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "internal"},
-			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"},
+			name:  "internal visibility uses private templates",
+			input: RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "internal"},
+			want:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"},
 		},
 		{
-			name:   "visibility case normalized",
-			input:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "PRIVATE"},
-			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"},
+			name:  "visibility case normalized",
+			input: RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "PRIVATE"},
+			want:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"},
 		},
 		{
-			name:   "branch with slash preserved",
-			input:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "feature/my-branch_1", Visibility: "public"},
-			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "feature/my-branch_1", Visibility: "public"},
+			name:  "branch with slash preserved",
+			input: RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "feature/my-branch_1", Visibility: "public"},
+			want:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "feature/my-branch_1", Visibility: "public"},
 		},
 		{
-			name:   "branch with special chars stripped",
-			input:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "feat/<test>", Visibility: "public"},
-			want:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "feat/test", Visibility: "public"},
+			name:  "branch with special chars stripped",
+			input: RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "feat/<test>", Visibility: "public"},
+			want:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "feat/test", Visibility: "public"},
 		},
 		{
-			name:   "repo with dots preserved",
-			input:  RepoData{Owner: "owner", RepoName: "my.repo.name", DefaultBranch: "main", Visibility: "public"},
-			want:   RepoData{Owner: "owner", RepoName: "my.repo.name", DefaultBranch: "main", Visibility: "public"},
+			name:  "repo with dots preserved",
+			input: RepoData{Owner: "owner", RepoName: "my.repo.name", DefaultBranch: "main", Visibility: "public"},
+			want:  RepoData{Owner: "owner", RepoName: "my.repo.name", DefaultBranch: "main", Visibility: "public"},
 		},
 		{
-			name:   "repo with underscores preserved",
-			input:  RepoData{Owner: "owner", RepoName: "my_repo_name", DefaultBranch: "main", Visibility: "public"},
-			want:   RepoData{Owner: "owner", RepoName: "my_repo_name", DefaultBranch: "main", Visibility: "public"},
+			name:  "repo with underscores preserved",
+			input: RepoData{Owner: "owner", RepoName: "my_repo_name", DefaultBranch: "main", Visibility: "public"},
+			want:  RepoData{Owner: "owner", RepoName: "my_repo_name", DefaultBranch: "main", Visibility: "public"},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := tt.input.sanitize()
+			want := tt.want
+			if want.CodeOwnerLine == "" {
+				want.CodeOwnerLine = "* @" + want.Owner
+			}
+			if got != want {
+				t.Errorf("sanitize() = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+func TestRepoDataSanitize_CodeOwnerLine(t *testing.T) {
+	tests := []struct {
+		name  string
+		input RepoData
+		want  string
+	}{
+		{
+			name:  "user line kept",
+			input: RepoData{Owner: "alice", RepoName: "r", DefaultBranch: "main", Visibility: "public", CodeOwnerLine: "* @alice"},
+			want:  "* @alice",
+		},
+		{
+			name:  "org comment kept",
+			input: RepoData{Owner: "acme", RepoName: "r", DefaultBranch: "main", Visibility: "public", CodeOwnerLine: "# Organizations need a team (@org/team), not @acme"},
+			want:  "# Organizations need a team (@org/team), not @acme",
+		},
+		{
+			name:  "empty falls back to owner",
+			input: RepoData{Owner: "alice", RepoName: "r", DefaultBranch: "main", Visibility: "public"},
+			want:  "* @alice",
+		},
+		{
+			name:  "script tags stripped",
+			input: RepoData{Owner: "alice", RepoName: "r", DefaultBranch: "main", Visibility: "public", CodeOwnerLine: "* @alice<script>"},
+			want:  "* @alicescript",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.input.sanitize().CodeOwnerLine
 			if got != tt.want {
-				t.Errorf("sanitize() = %+v, want %+v", got, tt.want)
+				t.Errorf("CodeOwnerLine = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -165,11 +206,62 @@ func TestRender(t *testing.T) {
 	}
 }
 
+func TestRender_CodeOwners(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want string
+		deny string
+	}{
+		{
+			name: "user",
+			line: "* @jpvelasco",
+			want: "* @jpvelasco",
+		},
+		{
+			name: "org comment",
+			line: "# Organizations need a team (@org/team), not @acme",
+			want: "# Organizations need a team (@org/team), not @acme",
+			deny: "* @acme",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files, err := Render(RepoData{
+				Owner:         "acme",
+				RepoName:      "r",
+				DefaultBranch: "main",
+				Visibility:    "public",
+				CodeOwnerLine: tt.line,
+			})
+			if err != nil {
+				t.Fatalf("Render() error: %v", err)
+			}
+			var content string
+			for _, f := range files {
+				if f.Path == ".github/CODEOWNERS" {
+					content = f.Content
+					break
+				}
+			}
+			if content == "" {
+				t.Fatal("missing .github/CODEOWNERS")
+			}
+			if !strings.Contains(content, tt.want) {
+				t.Errorf("CODEOWNERS %q does not contain %q", content, tt.want)
+			}
+			if tt.deny != "" && strings.Contains(content, tt.deny) {
+				t.Errorf("CODEOWNERS %q unexpectedly contains %q", content, tt.deny)
+			}
+		})
+	}
+}
+
 func TestRenderVisibilityFiltering(t *testing.T) {
 	tests := []struct {
-		name            string
-		visibility      string
-		wantPublicFiles []string
+		name             string
+		visibility       string
+		wantPublicFiles  []string
 		wantPrivateFiles []string
 	}{
 		{
@@ -250,22 +342,28 @@ func TestSubstitute(t *testing.T) {
 		want string
 	}{
 		{
-			name:   "replace all four fields",
-			in:     "{{.Owner}}/{{.RepoName}} on {{.DefaultBranch}} ({{.Visibility}})",
-			data:   RepoData{Owner: "jpvelasco", RepoName: "fundamentum", DefaultBranch: "main", Visibility: "public"},
-			want:   "jpvelasco/fundamentum on main (public)",
+			name: "replace all four fields",
+			in:   "{{.Owner}}/{{.RepoName}} on {{.DefaultBranch}} ({{.Visibility}})",
+			data: RepoData{Owner: "jpvelasco", RepoName: "fundamentum", DefaultBranch: "main", Visibility: "public"},
+			want: "jpvelasco/fundamentum on main (public)",
 		},
 		{
-			name:   "unknown placeholders preserved",
-			in:     "{{.Owner}}/{{.Unknown}}",
-			data:   RepoData{Owner: "alice"},
-			want:   "alice/{{.Unknown}}",
+			name: "replace code owner line",
+			in:   "{{.CodeOwnerLine}}",
+			data: RepoData{CodeOwnerLine: "# Organizations need a team (@org/team), not @acme"},
+			want: "# Organizations need a team (@org/team), not @acme",
 		},
 		{
-			name:   "no placeholders",
-			in:     "hello world",
-			data:   RepoData{},
-			want:   "hello world",
+			name: "unknown placeholders preserved",
+			in:   "{{.Owner}}/{{.Unknown}}",
+			data: RepoData{Owner: "alice"},
+			want: "alice/{{.Unknown}}",
+		},
+		{
+			name: "no placeholders",
+			in:   "hello world",
+			data: RepoData{},
+			want: "hello world",
 		},
 	}
 	for _, tt := range tests {

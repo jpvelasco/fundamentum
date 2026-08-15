@@ -21,3 +21,7 @@ go.sum text eol=lf
 # npm shim JS must retain LF in Windows worktrees so CI checksums and the
 # published package stay byte-identical across platforms.
 *.js text eol=lf
+
+# Embedded templates must stay LF. Autocrlf would make //go:embed see CRLF
+# and dry-run would report false "would update" against LF blobs on GitHub.
+internal/templatefs/templates/** text eol=lf
