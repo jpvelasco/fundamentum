@@ -233,42 +233,32 @@ func TestApplyItems_SkippedItemNotApplied(t *testing.T) {
 }
 
 func TestApplyItems_ErrorHandling_NonFatal(t *testing.T) {
-	// Item errors don't cause fatal errors: optional items are always non-fatal,
-	// non-optional non-file items are non-fatal (only file items can be fatal).
-	tests := []struct {
-		name     string
-		itemName string
-		optional bool
-	}{
+	items := []wizard.Item{
 		{
-			name:     "optional item error is non-fatal",
-			itemName: "Security (secret scanning, CodeQL, Dependabot)",
-			optional: true,
-		},
-		{
-			name:     "non-optional non-file item error is non-fatal",
-			itemName: "General settings (auto-delete branches)",
-			optional: false,
+			Name:     "Security (secret scanning, CodeQL, Dependabot)",
+			Action:   wizard.ActionCreate,
+			Optional: true,
+			Apply:    func() error { return fmt.Errorf("API error") },
 		},
 	}
+	c := github.NewClient("", false)
+	if err := applyItems(c, "owner", "repo", "main", items, false); err != nil {
+		t.Errorf("optional item failure must not fail the run, got: %v", err)
+	}
+}
 
-	errFunc := func() error { return fmt.Errorf("API error") }
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			items := []wizard.Item{
-				{
-					Name:     tt.itemName,
-					Action:   wizard.ActionCreate,
-					Optional: tt.optional,
-					Apply:    errFunc,
-				},
-			}
-			c := github.NewClient("", false)
-			err := applyItems(c, "owner", "repo", "main", items, false)
-			if err != nil {
-				t.Errorf("expected no error return (non-fatal item failure), got: %v", err)
-			}
-		})
+func TestApplyItems_RequiredNonFileError(t *testing.T) {
+	items := []wizard.Item{
+		{
+			Name:   "General settings (auto-delete branches)",
+			Action: wizard.ActionCreate,
+			Apply:  func() error { return fmt.Errorf("API error") },
+		},
+	}
+	c := github.NewClient("", false)
+	err := applyItems(c, "owner", "repo", "main", items, false)
+	if err == nil || !strings.Contains(err.Error(), "required items failed") {
+		t.Errorf("expected required-items error, got: %v", err)
 	}
 }
 
@@ -629,10 +619,8 @@ func TestBranchProtectionItem_ClassicUpgradeError(t *testing.T) {
 	})
 }
 
-// TestApplyItems_FileApplyErrorNonFatal verifies a file item whose Apply
-// returns a plain error (not 409, not workflow-locked) is reported but does
-// not abort the run.
-func TestApplyItems_FileApplyErrorNonFatal(t *testing.T) {
+func TestApplyItems_RequiredFileError(t *testing.T) {
+	secApplied := false
 	items := []wizard.Item{
 		{
 			Name:    ".github/CODEOWNERS",
@@ -644,13 +632,35 @@ func TestApplyItems_FileApplyErrorNonFatal(t *testing.T) {
 			Name:    ".github/SECURITY.md",
 			Action:  wizard.ActionCreate,
 			Content: []byte("sec"),
-			Apply:   func() error { return nil },
+			Apply: func() error {
+				secApplied = true
+				return nil
+			},
 		},
 	}
 	c := github.NewClient("", false)
 	err := applyItems(c, "owner", "repo", "main", items, false)
-	if err != nil {
-		t.Errorf("expected no error return for non-fatal file item failure, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "required items failed") {
+		t.Errorf("expected required-items error, got: %v", err)
+	}
+	if !secApplied {
+		t.Error("later items should still run after a required file failure")
+	}
+}
+
+func TestApplyItems_OptionalFileError(t *testing.T) {
+	items := []wizard.Item{
+		{
+			Name:     "optional.md",
+			Action:   wizard.ActionCreate,
+			Optional: true,
+			Content:  []byte("x"),
+			Apply:    func() error { return fmt.Errorf("API error") },
+		},
+	}
+	c := github.NewClient("", false)
+	if err := applyItems(c, "owner", "repo", "main", items, false); err != nil {
+		t.Errorf("optional file failure must not fail the run, got: %v", err)
 	}
 }
 

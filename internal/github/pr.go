@@ -91,10 +91,15 @@ func (c *Client) ApplyViaPR(owner, repo, defaultBranch string, changes []FileCha
 	// branch name (POST /git/refs 422s when the branch already exists).
 	branch := fmt.Sprintf("harden-%s-%d", defaultBranch, time.Now().UnixNano())
 
+	if len(changes) == 0 {
+		return 0, nil
+	}
+
 	if err := c.CreatePRBranch(owner, repo, branch, defaultBranch); err != nil {
 		return 0, fmt.Errorf("create branch: %w", err)
 	}
 
+	wrote := 0
 	for _, ch := range changes {
 		action, err := c.UpsertFileOnBranch(owner, repo, branch, ch.Path, ch.Content)
 		if err != nil {
@@ -105,8 +110,12 @@ func (c *Client) ApplyViaPR(owner, repo, defaultBranch string, changes []FileCha
 			return 0, fmt.Errorf("upsert %s: %w", ch.Path, err)
 		}
 		if action != "skipped" {
+			wrote++
 			fmt.Printf("  %-45s  ✓ (%s)\n", ch.Path, action)
 		}
+	}
+	if wrote == 0 {
+		return 0, nil
 	}
 
 	title := "feat: harden repo — community files, settings, security"
