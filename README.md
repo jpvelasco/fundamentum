@@ -46,7 +46,7 @@ $env:GITHUB_TOKEN = "ghp_xxxxx"      # PowerShell
 
 - **Community health files**: `CONTRIBUTING.md`, `CODEOWNERS`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, pull request + issue templates, `dependabot.yml`, and more.
 - **Branch protection**: Modern ruleset on `main` (PRs, CODEOWNERS review, status checks, no force-push/delete) + optional tag protection. Falls back gracefully on free-tier private repos.
-- **Security**: Secret scanning + push protection, Dependabot alerts + updates, CodeQL (public repos).
+- **Security**: Dependabot alerts + updates everywhere; secret scanning + push protection on public repos, opt-in on private/internal repos via `--advanced-security` (requires paid GitHub Advanced Security); CodeQL (public repos).
 - **Settings**: Auto-delete merged branches.
 - **Opinionated starters**: Basic CI workflow + visibility-aware coverage/CodeQL workflows + `.codacy.yml`.
 
@@ -54,14 +54,15 @@ Everything is **idempotent** — re-running is safe and fast.
 
 ## Flags
 
-| Flag              | Description                                      |
-|-------------------|--------------------------------------------------|
-| `--dry-run`       | Print actions without applying them              |
-| `--verbose`       | Print every API call                             |
-| `--token`         | GitHub token (defaults to `GITHUB_TOKEN`)        |
-| `--no-overwrite`  | Skip any file that already exists                |
-| `--pr`            | Apply file changes via PR instead of direct push |
-| `--version`       | Print version and exit                           |
+| Flag                | Description                                      |
+|---------------------|--------------------------------------------------|
+| `--dry-run`         | Print actions without applying them              |
+| `--verbose`         | Print every API call                             |
+| `--token`           | GitHub token (defaults to `GITHUB_TOKEN`)        |
+| `--no-overwrite`    | Skip any file that already exists                |
+| `--pr`              | Apply file changes via PR instead of direct push |
+| `--advanced-security` | Enable GitHub Advanced Security (secret scanning, push protection) on private/internal repos (paid) |
+| `--version`         | Print version and exit                           |
 
 `init` also supports `--private` (default: `true`).
 
