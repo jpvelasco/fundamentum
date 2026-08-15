@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 )
 
@@ -98,34 +97,25 @@ func PlanSummary(items []Item) string {
 	return strings.Join(parts, ", ")
 }
 
-// applyAndPrint runs item.Apply and prints the outcome.
-func applyAndPrint(item Item) {
-	if err := item.Apply(); err != nil {
-		PrintItemError(os.Stdout, item, err)
-		return
-	}
-	fmt.Printf("  %-45s  ✓\n", item.Name)
-}
-
-// RunInteractive walks through each non-skipped item asking for confirmation.
-func RunInteractive(items []Item, r io.Reader) error {
+// SelectInteractive walks through each non-skipped item asking for confirmation.
+// Declined items are marked ActionSkip so applyItems (including --pr and 409
+// fallback) can run the remaining plan. Apply is not called here.
+func SelectInteractive(items []Item, r io.Reader) {
 	scanner := bufio.NewScanner(r)
-	for i, item := range items {
-		if item.IsSkip() {
-			fmt.Printf("  %-45s  already exists — skip\n", item.Name)
+	for i := range items {
+		if items[i].IsSkip() {
+			fmt.Printf("  %-45s  already exists — skip\n", items[i].Name)
 			continue
 		}
-		fmt.Printf("\n[%d/%d] %s (%s)\n", i+1, len(items), item.Name, item.LiveLabel())
+		fmt.Printf("\n[%d/%d] %s (%s)\n", i+1, len(items), items[i].Name, items[i].LiveLabel())
 		fmt.Print("  Apply? [Y/n]: ")
 		scanner.Scan()
 		input := strings.TrimSpace(scanner.Text())
 		if input != "" && !strings.EqualFold(input, "y") {
-			fmt.Printf("  %-45s  skipped by user\n", item.Name)
-			continue
+			fmt.Printf("  %-45s  skipped by user\n", items[i].Name)
+			items[i].Action = ActionSkip
 		}
-		applyAndPrint(item)
 	}
-	return nil
 }
 
 // PrintItemError formats an error for a wizard item to w.

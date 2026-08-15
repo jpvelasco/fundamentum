@@ -109,14 +109,14 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 
 	wizard.PrintSummaryTable(stdout, items, true)
 
-	if wizard.ConfirmDefaults(stdin, stdout) {
-		if err := applyItems(client, owner, repo, branch, items, globals.ViaPR); err != nil {
-			return err
-		}
-		_, _ = fmt.Fprintf(stdout, "\n  ✓ Done — https://github.com/%s/%s\n", owner, repo)
-		return nil
+	if !wizard.ConfirmDefaults(stdin, stdout) {
+		wizard.SelectInteractive(items, stdin)
 	}
-	return wizard.RunInteractive(items, stdin)
+	if err := applyItems(client, owner, repo, branch, items, globals.ViaPR); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(stdout, "\n  ✓ Done — https://github.com/%s/%s\n", owner, repo)
+	return nil
 }
 
 func buildItems(

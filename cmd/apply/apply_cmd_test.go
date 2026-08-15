@@ -376,24 +376,73 @@ func TestRunWithClient_FullFlow(t *testing.T) {
 }
 
 // TestRunWithClient_InteractiveDecline verifies that declining the defaults
-// prompt routes the flow into the interactive per-item walker.
+// prompt still applies the (interactively accepted) plan, including Done.
 func TestRunWithClient_InteractiveDecline(t *testing.T) {
 	srv := newRunFlowServer()
 	defer srv.Close()
 	c := newTestClient(srv)
 
 	var out strings.Builder
+	// Decline defaults; empty answers to per-item prompts mean accept.
 	err := runWithClient(c, "owner", "repo", newLineReader("solo\nn\n"), &out)
 	if err != nil {
 		t.Fatalf("runWithClient() error: %v", err)
 	}
-	// RunInteractive prints its per-item prompts to os.Stdout, so the captured
-	// buffer should show the defaults prompt was declined and no "Done" message.
 	if !strings.Contains(out.String(), "Apply all defaults? [Y/n]") {
 		t.Errorf("expected defaults prompt, got:\n%s", out.String())
 	}
-	if strings.Contains(out.String(), "✓ Done") {
-		t.Errorf("expected decline to skip the defaults apply path, got:\n%s", out.String())
+	if !strings.Contains(out.String(), "✓ Done") {
+		t.Errorf("expected apply after interactive selection, got:\n%s", out.String())
+	}
+}
+
+func TestRunWithClient_InteractiveViaPR(t *testing.T) {
+	t.Cleanup(func() { globals.ViaPR = false })
+	globals.ViaPR = true
+
+	var createdPR bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
+			_, _ = w.Write([]byte(`{"visibility":"public","default_branch":"main"}`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets"):
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/protection"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main"):
+			_, _ = w.Write([]byte(`{"commit":{"sha":"abc123"}}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPut:
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/pulls"):
+			createdPR = true
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"number":7}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/rulesets"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":1}`))
+		case r.Method == http.MethodPatch:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	c := newTestClient(srv)
+
+	input := "solo\nn\n" + strings.Repeat("y\n", 40)
+	err := runWithClient(c, "owner", "repo", newLineReader(input), &strings.Builder{})
+	if err != nil {
+		t.Fatalf("runWithClient() error: %v", err)
+	}
+	if !createdPR {
+		t.Error("expected --pr to open a pull request after interactive selection")
 	}
 }
 

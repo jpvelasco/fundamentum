@@ -3,7 +3,6 @@ package wizard
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -82,57 +81,67 @@ func TestConfirmDefaults(t *testing.T) {
 	runBoolPromptTest(t, "ConfirmDefaults", ConfirmDefaults, cases)
 }
 
-func TestRunInteractive(t *testing.T) {
+func TestSelectInteractive(t *testing.T) {
 	tests := []struct {
-		name  string
-		items []Item
-		input string
+		name      string
+		items     []Item
+		input     string
+		wantActs  []Action
+		wantApply int
 	}{
 		{
 			name: "accept all",
 			items: []Item{
-				{Name: "file1.md", Action: ActionCreate, Apply: func() error { return nil }},
-				{Name: "file2.md", Action: ActionCreate, Apply: func() error { return nil }},
+				{Name: "file1.md", Action: ActionCreate},
+				{Name: "file2.md", Action: ActionCreate},
 			},
-			input: "y\ny\n",
+			input:    "y\ny\n",
+			wantActs: []Action{ActionCreate, ActionCreate},
 		},
 		{
 			name: "skip one",
 			items: []Item{
-				{Name: "file1.md", Action: ActionCreate, Apply: func() error { return nil }},
-				{Name: "file2.md", Action: ActionCreate, Apply: func() error { return nil }},
+				{Name: "file1.md", Action: ActionCreate},
+				{Name: "file2.md", Action: ActionCreate},
 			},
-			input: "y\nn\n",
+			input:    "y\nn\n",
+			wantActs: []Action{ActionCreate, ActionSkip},
 		},
 		{
-			name: "skip by default",
+			name: "already skip stays skip",
 			items: []Item{
-				{Name: "file1.md", Action: ActionSkip, Apply: func() error { return nil }},
-				{Name: "file2.md", Action: ActionCreate, Apply: func() error { return nil }},
+				{Name: "file1.md", Action: ActionSkip},
+				{Name: "file2.md", Action: ActionCreate},
 			},
-			input: "y\n",
-		},
-		{
-			name: "error on optional",
-			items: []Item{
-				{Name: "file1.md", Action: ActionCreate, Optional: true, Apply: func() error { return fmt.Errorf("fail") }},
-			},
-			input: "y\n",
+			input:    "y\n",
+			wantActs: []Action{ActionSkip, ActionCreate},
 		},
 		{
 			name: "empty accept",
 			items: []Item{
-				{Name: "file1.md", Action: ActionCreate, Apply: func() error { return nil }},
+				{Name: "file1.md", Action: ActionCreate},
 			},
-			input: "\n",
+			input:    "\n",
+			wantActs: []Action{ActionCreate},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := strings.NewReader(tt.input)
-			err := RunInteractive(tt.items, r)
-			if err != nil {
-				t.Errorf("RunInteractive() unexpected error: %v", err)
+			applied := 0
+			for i := range tt.items {
+				tt.items[i].Apply = func() error { applied++; return nil }
+			}
+			SelectInteractive(tt.items, strings.NewReader(tt.input))
+			if applied != 0 {
+				t.Errorf("SelectInteractive must not apply, got %d calls", applied)
+			}
+			if len(tt.items) != len(tt.wantActs) {
+				t.Fatalf("item count %d, want %d", len(tt.items), len(tt.wantActs))
+			}
+			for i, want := range tt.wantActs {
+				if tt.items[i].Action != want {
+					t.Errorf("item %d Action=%v, want %v", i, tt.items[i].Action, want)
+				}
 			}
 		})
 	}
