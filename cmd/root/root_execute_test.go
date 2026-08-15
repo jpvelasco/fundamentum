@@ -1,6 +1,7 @@
 package root
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -80,6 +81,11 @@ func TestExecute_FlagOrder(t *testing.T) {
 // when only help is requested (no subcommand matches).
 func TestExecute_Root(t *testing.T) {
 	resetRootGlobals(t)
+	// Execute() reads os.Args. Isolate from go test package patterns
+	// (go test ./... / -coverpkg=./...) which Cobra would treat as a command.
+	old := os.Args
+	t.Cleanup(func() { os.Args = old })
+	os.Args = []string{"fundamentum"}
 	if err := Execute(); err != nil {
 		t.Errorf("expected nil error for bare root command, got: %v", err)
 	}
