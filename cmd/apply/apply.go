@@ -55,13 +55,12 @@ func run(cmd *cobra.Command, args []string) error {
 // and writing output to stdout. Extracted from run so tests can inject a
 // mock-server client and buffers.
 func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, stdout io.Writer) error {
-	branch := "main"
-
-	// Detect repo visibility to determine which tooling to apply.
-	visibility, err := client.GetRepoVisibility(owner, repo)
+	info, err := client.GetRepo(owner, repo)
 	if err != nil {
 		return fmt.Errorf("detect repo visibility: %w", err)
 	}
+	branch := info.DefaultBranch
+	visibility := info.Visibility
 
 	data := templates.RepoData{Owner: owner, RepoName: repo, DefaultBranch: branch, Visibility: visibility}
 
