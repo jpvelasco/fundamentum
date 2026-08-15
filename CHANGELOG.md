@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-08-15
+
+**Patch release.** Applies the repo's real default branch everywhere, routes `init` correctly for organizations, gates paid GitHub Advanced Security on private repos behind an explicit opt-in, and fixes a batch of apply/npm-shim edge cases.
+
+### Fixed
+
+- **Org logins in CODEOWNERS.** Organization logins cannot own files — render `* @OrgName` as a comment and drop the CODEOWNERS-review requirement instead of failing.
+- **Default branch respected.** The repo's `default_branch` is read from the API instead of forcing `main`.
+- **`init` under organizations.** Repo creation routes to `/user/repos` or `/orgs/{org}/repos` and always passes `auto_init`.
+- **Paid GHAS gated on private repos.** Private/internal repos get Dependabot only unless `--advanced-security` or an explicit yes; internal visibility uses private templates.
+- **Aliased community file updates.** Canonical paths now use file status so content drift can update; only non-canonical aliases skip.
+- **`--pr` and 409 fallback in interactive mode.** Declined items are marked skip so PR batching and the 409 auto-fallback apply there too.
+- **Required errors fail the run; no empty PRs.** Required item failures fail `apply`, and `ApplyViaPR` no longer opens an empty PR.
+- **npm shim Windows ARM64 guard.** Install no longer requests a Windows ARM64 zip that GoReleaser does not publish.
+
+### Documentation
+
+- **CLAUDE.md trimmed to a pointer.** Root CLAUDE.md now points at AGENTS.md, with the notes absorbed.
+
+### Other
+
+- macOS build/test legs now run on PRs; `actions/checkout` bumped 7.0.0 → 7.0.1.
+
 ## [0.1.3] - 2026-08-10
 
 **Template and docs release.** Codacy analysis and coverage ship as embedded templates, the standalone `Template drift` CI job is gone (the drift gate now runs inside the `Test` job), and this repo's own configs and instruction files are fully in line with the shipped behavior.
@@ -80,7 +103,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.4
 [0.1.3]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.3
 [0.1.2]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.2
 [0.1.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.1
