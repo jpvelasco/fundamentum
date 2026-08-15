@@ -57,7 +57,7 @@ That's it. A repo that went from bare-bones to release-ready in under a minute.
 
 - **Community health files** — `CONTRIBUTING.md`, `CODEOWNERS`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, issue + PR templates, `dependabot.yml`
 - **Branch protection** — modern rulesets on `main` (PR-only pushes, CODEOWNERS review, required checks, no force-push)
-- **Security** — secret scanning + push protection, Dependabot alerts, CodeQL
+- **Security** — Dependabot alerts everywhere; secret scanning + push protection on public repos, opt-in on private/internal repos via `--advanced-security`; CodeQL for public repos
 - **Starter workflows** — CI, coverage, and CodeQL pipelines that work out of the box
 - **Idempotent by design** — re-running is always safe
 
@@ -82,6 +82,7 @@ Built for solo devs and small teams who want their repos to feel like they were 
 | `--dry-run` | Preview the full plan without applying |
 | `--pr` | Batch file changes into a pull request |
 | `--no-overwrite` | Only add missing files, never touch existing ones |
+| `--advanced-security` | Enable GHAS (secret scanning, push protection) on private/internal repos (paid) |
 
 ## Prerequisites
 
