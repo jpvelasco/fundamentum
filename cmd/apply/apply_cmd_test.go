@@ -240,6 +240,39 @@ func TestBuildItems_AliasExists(t *testing.T) {
 	}
 }
 
+func TestBuildItems_AliasCanonicalUpdate(t *testing.T) {
+	t.Cleanup(func() { globals.NoOverwrite = false })
+
+	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Canonical .github/CODEOWNERS exists with different content.
+		// Root CODEOWNERS (non-canonical alias) is missing.
+		if strings.Contains(r.URL.Path, ".github") && strings.Contains(r.URL.Path, "CODEOWNERS") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"content":"b2xkCg==","sha":"abc"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}), "private")
+
+	for _, item := range items {
+		if item.Name == ".github/CODEOWNERS" {
+			if item.Action != wizard.ActionUpdate {
+				t.Errorf("expected canonical CODEOWNERS to update when content differs, got %v", item.Action)
+			}
+		}
+	}
+}
+
+func TestOtherAliases(t *testing.T) {
+	got := otherAliases(".github/CODEOWNERS", []string{".github/CODEOWNERS", "CODEOWNERS"})
+	if len(got) != 1 || got[0] != "CODEOWNERS" {
+		t.Errorf("otherAliases = %v, want [CODEOWNERS]", got)
+	}
+	if got := otherAliases("only", []string{"only"}); len(got) != 0 {
+		t.Errorf("expected empty when only canonical is listed, got %v", got)
+	}
+}
+
 func TestBuildItems_FileStatusUpdate(t *testing.T) {
 	t.Cleanup(func() { globals.NoOverwrite = false })
 
