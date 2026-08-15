@@ -664,6 +664,35 @@ func TestApplyItems_OptionalFileError(t *testing.T) {
 	}
 }
 
+func TestApplyItems_ViaPRNoWrittenFiles(t *testing.T) {
+	items := newFileItems(
+		[]string{"README.md"},
+		[][]byte{[]byte("hello")},
+		[]func() error{func() error { return nil }},
+	)
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/"):
+			_, _ = w.Write([]byte(`{"commit":{"sha":"abc"}}`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
+			_, _ = w.Write([]byte(`{"content":"aGVsbG8=","sha":"x"}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/pulls"):
+			t.Error("must not open a PR when every file is skipped")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"number":1}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}), func(c *github.Client) {
+		if err := applyItems(c, "owner", "repo", "main", items, true); err != nil {
+			t.Errorf("expected no error when PR has no file changes, got: %v", err)
+		}
+	}, nil)
+}
+
 // TestApplyItems_ViaPRFailure verifies ApplyViaPR errors propagate from
 // applyItems.
 func TestApplyItems_ViaPRFailure(t *testing.T) {
