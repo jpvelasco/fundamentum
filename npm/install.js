@@ -41,6 +41,12 @@ function getPackageVersion(pkg) {
 }
 
 function getArchiveName(version, platform, arch) {
+  // GoReleaser ignores windows/arm64; fail closed instead of a 404 download.
+  if (platform === "win32" && arch === "arm64") {
+    throw new Error(
+      `Unsupported platform: ${platform}/${arch}. Windows ARM64 binaries are not published; use Windows x64 or build from source.`
+    );
+  }
   const os = PLATFORM_MAP[platform];
   const cpu = ARCH_MAP[arch];
   if (!os || !cpu) {
