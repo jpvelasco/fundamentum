@@ -42,6 +42,11 @@ func TestPromptProjectType(t *testing.T) {
 		{"TEAM", "TEAM\n", false},
 		{"whitespace solo", "  solo  \n", true},
 		{"whitespace team", "  team  \n", false},
+		// Typos and garbage must fall back to the advertised solo default,
+		// never silently enable team-only requirements.
+		{"typo soloo", "soloo\n", true},
+		{"garbage", "1\n", true},
+		{"yes", "yes\n", true},
 	}
 	runBoolPromptTest(t, "PromptProjectType", PromptProjectType, cases)
 }
@@ -72,7 +77,8 @@ func TestConfirmDefaults(t *testing.T) {
 		{"empty input", "\n", true},
 		{"y", "y\n", true},
 		{"Y", "Y\n", true},
-		{"yes", "yes\n", false},
+		{"yes", "yes\n", true},
+		{"YES", "YES\n", true},
 		{"n", "n\n", false},
 		{"N", "N\n", false},
 		{"no", "no\n", false},

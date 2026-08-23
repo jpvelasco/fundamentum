@@ -23,12 +23,14 @@ func PrintSummaryTable(w io.Writer, items []Item, live bool) {
 
 // PromptProjectType asks whether the repo is solo or team and returns true for solo.
 // Only called when branch protection will actually be applied (ActionCreate or ActionUpgrade).
+// Unrecognized input falls back to the advertised solo default — a typo must not
+// enable code-owner review requirements that deadlock a solo maintainer.
 func PromptProjectType(r io.Reader, w io.Writer) bool {
 	_, _ = fmt.Fprint(w, "Project type? [solo/team] (default: solo): ")
 	scanner := bufio.NewScanner(r)
 	scanner.Scan()
 	input := strings.TrimSpace(strings.ToLower(scanner.Text()))
-	return input == "" || input == "solo" || input == "s"
+	return input != "team" && input != "t"
 }
 
 // PromptAdvancedSecurity asks whether to enable paid GHAS features on a
@@ -42,13 +44,13 @@ func PromptAdvancedSecurity(r io.Reader, w io.Writer) bool {
 }
 
 // ConfirmDefaults prompts "Apply all defaults? [Y/n]" and returns true if the
-// user accepts (empty input or 'y'/'Y').
+// user accepts (empty input, 'y', or 'yes').
 func ConfirmDefaults(r io.Reader, w io.Writer) bool {
 	_, _ = fmt.Fprint(w, "\nApply all defaults? [Y/n]: ")
 	scanner := bufio.NewScanner(r)
 	scanner.Scan()
 	input := strings.TrimSpace(scanner.Text())
-	return input == "" || strings.EqualFold(input, "y")
+	return input == "" || strings.EqualFold(input, "y") || strings.EqualFold(input, "yes")
 }
 
 // ShouldSkip reports whether item should be skipped rather than applied
