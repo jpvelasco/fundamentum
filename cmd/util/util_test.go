@@ -13,11 +13,17 @@ func TestParseOwnerRepo(t *testing.T) {
 		{"valid", "owner/repo", "owner", "repo", false},
 		{"with hyphens", "my-org/my-repo", "my-org", "my-repo", false},
 		{"with dots", "owner.dev/repo.test", "owner.dev", "repo.test", false},
+		{"with underscores", "owner_dev/repo_x", "owner_dev", "repo_x", false},
+		{"numeric", "123/456", "123", "456", false},
 		{"no slash", "norepo", "", "", true},
 		{"empty", "", "", "", true},
-		{"slash only", "/", "", "", false},
-		{"trailing slash", "owner/", "owner", "", false},
-		{"multiple slashes", "owner/repo/extra", "owner", "repo/extra", false},
+		{"slash only", "/", "", "", true},
+		{"empty owner", "/repo", "", "", true},
+		{"trailing slash", "owner/", "", "", true},
+		{"multiple slashes", "owner/repo/extra", "", "", true},
+		{"invalid owner chars", "own er/repo", "", "", true},
+		{"invalid repo chars", "owner/rep o", "", "", true},
+		{"invalid repo slash char", "owner/rep/o", "", "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
