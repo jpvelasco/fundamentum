@@ -35,7 +35,11 @@ func newBuildItemsTestFull(t *testing.T, handler http.HandlerFunc, visibility st
 		t.Fatalf("Render() error: %v", err)
 	}
 
-	return buildItems(c, "owner", "repo", "main", visibility, rendered, rulesetExists, tagExists, classicExists, github.BranchProtectionOptions{}, false)
+	items, err := buildItems(c, "owner", "repo", "main", visibility, rendered, rulesetExists, tagExists, classicExists, github.BranchProtectionOptions{}, false)
+	if err != nil {
+		t.Fatalf("buildItems() error: %v", err)
+	}
+	return items
 }
 
 func TestNewCmd(t *testing.T) {
@@ -172,7 +176,10 @@ func TestBuildItems_Private(t *testing.T) {
 
 func TestBuildItems_PrivatePaidSecurity(t *testing.T) {
 	c := github.NewClient("", false)
-	items := buildItems(c, "owner", "repo", "main", "private", nil, false, false, false, github.BranchProtectionOptions{}, true)
+	items, err := buildItems(c, "owner", "repo", "main", "private", nil, false, false, false, github.BranchProtectionOptions{}, true)
+	if err != nil {
+		t.Fatalf("buildItems() error: %v", err)
+	}
 	found := false
 	for _, item := range items {
 		if item.Name == "Security (secret scanning, Dependabot)" {
@@ -189,7 +196,10 @@ func TestBuildItems_PrivatePaidSecurity(t *testing.T) {
 
 func TestBuildItems_TagRulesetExists(t *testing.T) {
 	c := github.NewClient("", false)
-	items := buildItems(c, "owner", "repo", "main", "private", nil, false, true, false, github.BranchProtectionOptions{}, false)
+	items, err := buildItems(c, "owner", "repo", "main", "private", nil, false, true, false, github.BranchProtectionOptions{}, false)
+	if err != nil {
+		t.Fatalf("buildItems() error: %v", err)
+	}
 
 	for _, item := range items {
 		if item.Name == "Tag ruleset (protect-version-tags)" {
@@ -298,8 +308,14 @@ func TestBuildItems_FileStatusUpdate(t *testing.T) {
 
 func TestBuildItems_ClassicExists(t *testing.T) {
 	items := newBuildItemsTestFull(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":1}`))
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
+			// No files exist yet.
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":1}`))
+		}
 	}), "private", false, false, true)
 
 	// Branch protection should be ActionUpgrade

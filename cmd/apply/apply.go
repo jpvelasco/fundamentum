@@ -108,7 +108,10 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 		_, _ = fmt.Fprintln(stdout)
 	}
 
-	items := buildItems(client, owner, repo, branch, visibility, rendered, rulesetExists, tagExists, classicExists, opts, paidSecurity)
+	items, err := buildItems(client, owner, repo, branch, visibility, rendered, rulesetExists, tagExists, classicExists, opts, paidSecurity)
+	if err != nil {
+		return fmt.Errorf("plan %s/%s: %w (verify the token grants Contents read access and retry)", owner, repo, err)
+	}
 
 	if globals.DryRun {
 		// Non-interactive dry run: plan table plus counts, then stop.
@@ -136,7 +139,7 @@ func buildItems(
 	rulesetExists, tagExists, classicExists bool,
 	opts github.BranchProtectionOptions,
 	paidSecurity bool,
-) []wizard.Item {
+) ([]wizard.Item, error) {
 	var items []wizard.Item
 
 	// aliases maps template output paths to known case/path variants that count as "already exists".
@@ -191,12 +194,20 @@ func buildItems(
 		// as already present so we do not write a second copy. The canonical
 		// path still goes through FileStatus so content drift can update.
 		if variants, ok := aliases[file.Path]; ok {
-			if exists, err := c.AnyFileExists(owner, repo, otherAliases(file.Path, variants)); err == nil && exists {
+			exists, err := c.AnyFileExists(owner, repo, otherAliases(file.Path, variants))
+			if err != nil {
+				return nil, fmt.Errorf("check aliases of %s: %w", file.Path, err)
+			}
+			if exists {
 				action = wizard.ActionSkip
 			}
 		}
 		if action != wizard.ActionSkip {
-			action = fileItemAction(c, owner, repo, file.Path, file.Content)
+			var err error
+			action, err = fileItemAction(c, owner, repo, file.Path, file.Content)
+			if err != nil {
+				return nil, fmt.Errorf("check status of %s: %w", file.Path, err)
+			}
 		}
 		items = append(items, wizard.Item{
 			Name:    file.Path,
@@ -253,7 +264,7 @@ func buildItems(
 		Apply:    func() error { return c.EnableSecurity(owner, repo, secOpts) },
 	})
 
-	return items
+	return items, nil
 }
 
 // branchProtectionItem returns the correct Item for branch protection based on current state:
@@ -315,21 +326,23 @@ func otherAliases(canonical string, variants []string) []string {
 }
 
 // fileItemAction maps FileStatus to a wizard action, honoring --no-overwrite.
-func fileItemAction(c *github.Client, owner, repo, path, content string) wizard.Action {
+// Status-check errors are surfaced, not defaulted: pretending "create" on a
+// failed check would misreport the plan and fail later with confusing PUTs.
+func fileItemAction(c *github.Client, owner, repo, path, content string) (wizard.Action, error) {
 	status, err := c.FileStatus(owner, repo, path, []byte(content))
 	if err != nil {
-		return wizard.ActionCreate
+		return wizard.ActionCreate, err
 	}
 	switch status {
 	case "skip":
-		return wizard.ActionSkip
+		return wizard.ActionSkip, nil
 	case "update":
 		if globals.NoOverwrite {
-			return wizard.ActionSkip
+			return wizard.ActionSkip, nil
 		}
-		return wizard.ActionUpdate
+		return wizard.ActionUpdate, nil
 	default:
-		return wizard.ActionCreate
+		return wizard.ActionCreate, nil
 	}
 }
 

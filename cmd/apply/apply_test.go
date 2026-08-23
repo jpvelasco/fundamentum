@@ -113,7 +113,10 @@ func TestBuildItems(t *testing.T) {
 
 func TestBuildItems_WithExistingRuleset(t *testing.T) {
 	c := &github.Client{}
-	items := buildItems(c, "owner", "repo", "main", "public", nil, true, true, false, github.BranchProtectionOptions{}, false)
+	items, err := buildItems(c, "owner", "repo", "main", "public", nil, true, true, false, github.BranchProtectionOptions{}, false)
+	if err != nil {
+		t.Fatalf("buildItems() error: %v", err)
+	}
 
 	// Branch protection should be skipped
 	for _, item := range items {
@@ -500,7 +503,10 @@ func TestBuildItems_AdvancedCodeQLSkipsDefaultSetup(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Render() error: %v", err)
 		}
-		items := buildItems(c, "owner", "repo", "main", "public", rendered, false, false, false, github.BranchProtectionOptions{}, false)
+		items, err := buildItems(c, "owner", "repo", "main", "public", rendered, false, false, false, github.BranchProtectionOptions{}, false)
+		if err != nil {
+			t.Fatalf("buildItems() error: %v", err)
+		}
 		for _, item := range items {
 			if item.Name == "Security (secret scanning, CodeQL, Dependabot)" {
 				if err := item.Apply(); err != nil {
@@ -553,7 +559,10 @@ func TestBuildItems_FileStatusSkip(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNotFound)
 	}), func(c *github.Client) {
-		items := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{}, false)
+		items, err := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{}, false)
+		if err != nil {
+			t.Fatalf("buildItems() error: %v", err)
+		}
 		for _, item := range items {
 			if item.Name == target {
 				if item.Action != wizard.ActionSkip {
@@ -708,6 +717,69 @@ func TestApplyItems_ViaPRFailure(t *testing.T) {
 		err := applyItems(c, "owner", "repo", "main", items, true)
 		if err == nil || !strings.Contains(err.Error(), "apply via PR") {
 			t.Errorf("expected apply-via-PR error, got: %v", err)
+		}
+	}, nil)
+}
+
+
+// TestBuildItems_FileStatusErrorFailsPlan verifies that a failed canonical
+// status check surfaces as an error instead of silently defaulting the plan
+// to "create" (which misreports dry-runs and fails later with confusing PUTs).
+func TestBuildItems_FileStatusErrorFailsPlan(t *testing.T) {
+	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"}
+	rendered, err := templates.Render(data)
+	if err != nil {
+		t.Fatalf("Render() error: %v", err)
+	}
+	// Plain 403 is not retried, so this fails fast. socket.yml has no alias
+	// variants, so the canonical FileStatus GET is what fails. Earlier files
+	// in the render order must behave normally (404 = create).
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/contents/socket.yml") {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}), func(c *github.Client) {
+		items, err := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{}, false)
+		if err == nil {
+			t.Fatal("expected buildItems to fail when FileStatus errors, got nil")
+		}
+		if !strings.Contains(err.Error(), "check status of socket.yml") {
+			t.Errorf("expected error to name the failing path, got: %v", err)
+		}
+		if items != nil {
+			t.Errorf("expected nil items on error, got %d items", len(items))
+		}
+	}, nil)
+}
+
+// TestBuildItems_AliasCheckErrorFailsPlan verifies that a failed alias
+// existence check (e.g. root CODEOWNERS variant) also fails the plan instead
+// of being swallowed and risking a duplicate write.
+func TestBuildItems_AliasCheckErrorFailsPlan(t *testing.T) {
+	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"}
+	rendered, err := templates.Render(data)
+	if err != nil {
+		t.Fatalf("Render() error: %v", err)
+	}
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/contents/CODEOWNERS"):
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}), func(c *github.Client) {
+		items, err := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{}, false)
+		if err == nil {
+			t.Fatal("expected buildItems to fail when the alias check errors, got nil")
+		}
+		if !strings.Contains(err.Error(), "check aliases of .github/CODEOWNERS") {
+			t.Errorf("expected error to name the alias check, got: %v", err)
+		}
+		if items != nil {
+			t.Errorf("expected nil items on error, got %d items", len(items))
 		}
 	}, nil)
 }
