@@ -209,6 +209,39 @@ func TestCodecovTemplateDrift(t *testing.T) {
 	}
 }
 
+// TestCodecovGateFieldsDetectedWithComments closes the vacuous-pass hole: both
+// real files carry `id-token: write` with a trailing YAML comment, which the
+// old `\s*$` anchors could not see — parity held even though neither side
+// registered the permission. Both sides must now parse as actively enabled,
+// so a synchronized removal of id-token: write fails this test.
+func TestCodecovGateFieldsDetectedWithComments(t *testing.T) {
+	liveBytes, err := os.ReadFile(liveCIWorkflow)
+	if err != nil {
+		t.Fatalf("read live workflow %s: %v", liveCIWorkflow, err)
+	}
+	tplBytes, err := fs.ReadFile(FS, "dotgithub/workflows/public_ci.yml")
+	if err != nil {
+		t.Fatalf("read embed template: %v", err)
+	}
+	live := ParseCodecovFunctional(string(liveBytes))
+	tpl := ParseCodecovFunctional(string(tplBytes))
+	if !live.IDTokenWrite {
+		t.Error("live ci.yml has id-token: write (with trailing comment) but parser reports false — gate would be vacuous")
+	}
+	if !tpl.IDTokenWrite {
+		t.Error("embed template has id-token: write (with trailing comment) but parser reports false — gate would be vacuous")
+	}
+	if !live.UseOIDC || !tpl.UseOIDC {
+		t.Error("use_oidc must register on both sides")
+	}
+	if !live.UsePyPI || !tpl.UsePyPI {
+		t.Error("use_pypi must register on both sides")
+	}
+	if !live.HasTestResults || !tpl.HasTestResults {
+		t.Error("report_type: test_results must register on both sides")
+	}
+}
+
 // TestLintWindowsParity guards the CI job matrix: the embed template that
 // fundamentum ships and the live workflow must both define the Windows lint
 // leg, otherwise repos hardened from the template inherit a dead job matrix

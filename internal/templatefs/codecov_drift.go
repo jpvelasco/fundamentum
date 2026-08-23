@@ -31,25 +31,30 @@ type CodecovFunctional struct {
 }
 
 var (
-	reIDTokenWrite = regexp.MustCompile(`(?m)^\s*id-token:\s*write\s*$`)
+	// Value regexes tolerate an optional trailing `# comment` so files like
+	// the live ci.yml (`id-token: write  # OIDC; ...`) parse as enabled. The
+	// original `\s*$` anchors silently reported false for commented lines on
+	// BOTH sides, making the parity check vacuous — a synchronized removal
+	// would still pass.
+	reIDTokenWrite = regexp.MustCompile(`(?m)^\s*id-token:\s*write\s*(#.*)?$`)
 	// use_oidc must be either literal true or the exact XOR-auth expression
 	// ${{ secrets.CODECOV_TOKEN == '' }}. A bare ${{ ... }} blob is NOT accepted:
 	// expressions like ${{ false }} or the inverted token check would silently
 	// disable OIDC while still passing the drift gate.
-	reUseOIDC = regexp.MustCompile(`(?m)^\s*use_oidc:\s*(true|\$\{\{\s*secrets\.CODECOV_TOKEN\s*==\s*''\s*\}\})\s*$`)
-	reUsePyPI         = regexp.MustCompile(`(?m)^\s*use_pypi:\s*true\s*$`)
-	reFailCIIfError   = regexp.MustCompile(`(?m)^\s*fail_ci_if_error:\s*true\s*$`)
+	reUseOIDC = regexp.MustCompile(`(?m)^\s*use_oidc:\s*(true|\$\{\{\s*secrets\.CODECOV_TOKEN\s*==\s*''\s*\}\})\s*(#.*)?$`)
+	reUsePyPI         = regexp.MustCompile(`(?m)^\s*use_pypi:\s*true\s*(#.*)?$`)
+	reFailCIIfError   = regexp.MustCompile(`(?m)^\s*fail_ci_if_error:\s*true\s*(#.*)?$`)
 	// Pin to the coverage filename specifically so a two-upload workflow
 	// (coverage + test_results) can't have CoverageFiles capture ./junit.xml
 	// if the upload steps are ever reordered.
-	reCoverageFiles   = regexp.MustCompile(`(?m)^\s*files:\s*(\./coverage\.out|coverage\.out|coverage)\s*$`)
+	reCoverageFiles   = regexp.MustCompile(`(?m)^\s*files:\s*(\./coverage\.out|coverage\.out|coverage)\s*(?:#.*)?$`)
 	reCoverprofile    = regexp.MustCompile(`-coverprofile=(\S+)`)
 	reCovermodeAtomic = regexp.MustCompile(`-covermode=atomic`)
 	reOverrideCommit  = regexp.MustCompile(`(?m)^\s*override_commit:\s*\S`)
 	reOverrideBranch  = regexp.MustCompile(`(?m)^\s*override_branch:\s*\S`)
 	reOverridePR      = regexp.MustCompile(`(?m)^\s*override_pr:\s*\S`)
 	reSlug            = regexp.MustCompile(`(?m)^\s*slug:\s*\S`)
-	reTestResults     = regexp.MustCompile(`(?m)^\s*report_type:\s*test_results\s*$`)
+	reTestResults     = regexp.MustCompile(`(?m)^\s*report_type:\s*test_results\s*(#.*)?$`)
 	reCodecovSHAPin   = regexp.MustCompile(`codecov/codecov-action@[0-9a-fA-F]{40}`)
 )
 
