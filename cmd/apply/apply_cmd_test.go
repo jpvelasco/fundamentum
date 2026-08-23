@@ -820,3 +820,39 @@ func TestRunWithClient_OrgOwnerSkipsCodeOwners(t *testing.T) {
 		t.Error("org owner must not require CODEOWNERS reviews")
 	}
 }
+
+
+// TestRunWithClient_FileStatusErrorFailsPlan verifies the run-level wrap: a
+// failed pre-flight status check aborts with a "plan owner/repo" error that
+// carries the actionable hint, instead of proceeding with a wrong plan.
+func TestRunWithClient_FileStatusErrorFailsPlan(t *testing.T) {
+	t.Cleanup(func() { globals.DryRun = false })
+	globals.DryRun = false
+
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/repos/owner/repo"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"visibility":"public","default_branch":"main","owner":{"type":"User"}}`))
+		case strings.HasSuffix(r.URL.Path, "/rulesets"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[]`))
+		case strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	err := runWithClient(c, "owner", "repo", newLineReader("\n\n"), &strings.Builder{})
+	if err == nil {
+		t.Fatal("expected plan error when file status check fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "plan owner/repo") {
+		t.Errorf("expected error to name plan owner/repo, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Contents read") {
+		t.Errorf("expected actionable hint in error, got: %v", err)
+	}
+}
