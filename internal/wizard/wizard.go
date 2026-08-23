@@ -1,11 +1,34 @@
 package wizard
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"strings"
 )
+
+// readLine reads one line from r, consuming exactly up to and including the
+// newline so the remaining input survives for subsequent prompts. Unlike a
+// fresh bufio.Scanner per prompt — which may buffer ahead and swallow piped or
+// scripted answers meant for later prompts — each call takes only its own
+// line. Errors (including EOF) return whatever was read so prompts fall back
+// to their defaults, matching the previous Scanner behavior.
+func readLine(r io.Reader) string {
+	var sb strings.Builder
+	buf := make([]byte, 1)
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			if buf[0] == '\n' {
+				break
+			}
+			sb.WriteByte(buf[0])
+		}
+		if err != nil {
+			break
+		}
+	}
+	return sb.String()
+}
 
 // PrintSummaryTable writes the action plan table to w.
 // live=false uses dry-run labels; live=true uses live labels.
@@ -27,9 +50,7 @@ func PrintSummaryTable(w io.Writer, items []Item, live bool) {
 // enable code-owner review requirements that deadlock a solo maintainer.
 func PromptProjectType(r io.Reader, w io.Writer) bool {
 	_, _ = fmt.Fprint(w, "Project type? [solo/team] (default: solo): ")
-	scanner := bufio.NewScanner(r)
-	scanner.Scan()
-	input := strings.TrimSpace(strings.ToLower(scanner.Text()))
+	input := strings.ToLower(strings.TrimSpace(readLine(r)))
 	return input != "team" && input != "t"
 }
 
@@ -37,9 +58,7 @@ func PromptProjectType(r io.Reader, w io.Writer) bool {
 // private/internal repo. Default is no.
 func PromptAdvancedSecurity(r io.Reader, w io.Writer) bool {
 	_, _ = fmt.Fprint(w, "Enable GitHub Advanced Security (secret scanning, push protection)? Requires a paid license. [y/N]: ")
-	scanner := bufio.NewScanner(r)
-	scanner.Scan()
-	input := strings.TrimSpace(scanner.Text())
+	input := strings.TrimSpace(readLine(r))
 	return strings.EqualFold(input, "y") || strings.EqualFold(input, "yes")
 }
 
@@ -47,9 +66,7 @@ func PromptAdvancedSecurity(r io.Reader, w io.Writer) bool {
 // user accepts (empty input, 'y', or 'yes').
 func ConfirmDefaults(r io.Reader, w io.Writer) bool {
 	_, _ = fmt.Fprint(w, "\nApply all defaults? [Y/n]: ")
-	scanner := bufio.NewScanner(r)
-	scanner.Scan()
-	input := strings.TrimSpace(scanner.Text())
+	input := strings.TrimSpace(readLine(r))
 	return input == "" || strings.EqualFold(input, "y") || strings.EqualFold(input, "yes")
 }
 
@@ -103,7 +120,6 @@ func PlanSummary(items []Item) string {
 // Declined items are marked ActionSkip so applyItems (including --pr and 409
 // fallback) can run the remaining plan. Apply is not called here.
 func SelectInteractive(items []Item, r io.Reader) {
-	scanner := bufio.NewScanner(r)
 	for i := range items {
 		if items[i].IsSkip() {
 			fmt.Printf("  %-45s  already exists — skip\n", items[i].Name)
@@ -111,8 +127,7 @@ func SelectInteractive(items []Item, r io.Reader) {
 		}
 		fmt.Printf("\n[%d/%d] %s (%s)\n", i+1, len(items), items[i].Name, items[i].LiveLabel())
 		fmt.Print("  Apply? [Y/n]: ")
-		scanner.Scan()
-		input := strings.TrimSpace(scanner.Text())
+		input := strings.TrimSpace(readLine(r))
 		if input != "" && !strings.EqualFold(input, "y") {
 			fmt.Printf("  %-45s  skipped by user\n", items[i].Name)
 			items[i].Action = ActionSkip
