@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2026-08-24
+
+**Patch release.** Fixes the private-repo CI workflow template, pre-flight file-status error handling, wizard prompt input handling, and a vacuous coverage-gate check; OWNER/REPO arguments are now validated strictly, and Dependabot groups action bumps into one PR.
+
+### Fixed
+
+- **Private-repo CI template was invalid YAML.** A lost indentation in `private_ci.yml` made GitHub Actions reject the whole workflow, so privately hardened repos shipped with no working CI; embedded templates are now parsed at test time so this class cannot ship silently.
+- **Pre-flight file-status errors no longer fake "create".** Transient failures or a token without Contents read aborted planning with an actionable error instead of misreporting dry-runs and failing later with confusing PUTs.
+- **Piped stdin no longer loses answers after the first prompt.** Per-prompt scanners buffered ahead, so scripted runs silently took defaults — declined items got applied; prompts now consume exactly one line each.
+- **Solo/team typos can't enable team-only requirements.** Only exact `team`/`t` selects team; anything else takes the advertised solo default so a solo maintainer isn't deadlocked by CODEOWNERS review. `ConfirmDefaults` also accepts `yes`.
+- **OWNER/REPO arguments validated strictly.** `/`, `owner/`, and `owner/repo/extra` fail fast with the expected shape instead of surfacing as confusing API 404s.
+- **Codecov drift gate sees trailing comments.** `id-token: write  # …` previously registered as absent on both sides, making parity vacuous; the gate now requires both files to parse as actively enabled.
+
+### Documentation
+
+- **AGENTS.md refreshed.** Documents the new gates, one-line wizard prompts, strict OWNER/REPO parsing, and the single test-only dependency.
+
+### Other
+
+- `github/codeql-action` bumped to 4.37.7 across init/analyze/autobuild (live workflow + shipped template); Dependabot now groups github-actions bumps into one PR.
 ## [Unreleased]
 
 ## [0.1.5] - 2026-08-15
@@ -111,7 +131,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.6
 [0.1.5]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.5
 [0.1.4]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.4
 [0.1.3]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.3
