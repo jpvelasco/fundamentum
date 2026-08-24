@@ -31,6 +31,9 @@ go test ./internal/github/...
 # Template drift gate (also runs first in pre-commit)
 go test ./internal/templatefs/ -run TestCodecovTemplateDrift -count=1
 
+# Embedded YAML validity gate (raw templates, pre-substitution)
+go test ./internal/templatefs/ -run TestEmbeddedYAMLParses -count=1
+
 # Run
 echo $env:GITHUB_TOKEN   # must be set, or pass --token
 # OWNER is the GitHub username or organization, REPO is the repository name.
@@ -40,22 +43,27 @@ go run . init OWNER/REPO
 
 Pre-commit order: template drift → build → lint → test.
 
-**Codecov template drift gate:** `TestCodecovTemplateDrift` (`internal/templatefs/codecov_drift_test.go`) compares live `.github/workflows/ci.yml` Codecov upload settings against the embed template `public_ci.yml` (Codecov is folded into the CI Test job, fabrica standard). Checks: `id-token: write`, `use_oidc` (literal `true` or the XOR `${{ secrets.CODECOV_TOKEN == '' }}` expression), `use_pypi`, `fail_ci_if_error`, `-covermode=atomic`, coverage `files`/`-coverprofile`, `override_commit`/`override_branch`/`override_pr`, `slug`, `report_type: test_results`, and SHA-pinned `codecov/codecov-action`. Runs in pre-commit (fail-fast) and in CI inside the `Test` job's `go test ./...` — there is no standalone `Template drift` job anymore. Action SHAs and branch names may differ intentionally.
+**Codecov template drift gates:** `internal/templatefs/codecov_drift_test.go` compares live `.github/workflows/ci.yml` against the embed template `dotgithub/workflows/public_ci.yml`. Two gates:
+- `TestCodecovTemplateDrift` — Codecov upload settings must match functionally (Codecov is folded into the CI Test job, fabrica standard): `id-token: write`, `use_oidc` (literal `true` or the XOR `${{ secrets.CODECOV_TOKEN == '' }}` expression), `use_pypi`, `fail_ci_if_error`, `-covermode=atomic`, coverage `files`/`-coverprofile`, `override_commit`/`override_branch`/`override_pr`, `slug`, `report_type: test_results`, SHA-pinned `codecov/codecov-action`. Value regexes tolerate trailing YAML comments (`TestCodecovGateFieldsDetectedWithComments` asserts both files parse as actively enabled — without this the gate was vacuous: both sides carried `id-token: write  # …` and neither registered).
+- `TestLintWindowsParity` — both live workflow and embed template must define the `lint-windows` job (`Lint (Windows)` on windows-latest).
 
-**Codecov required check (current):** branch protection requires `codecov/patch`, not `codecov/project` — Codecov only posts the former on PRs, so requiring the latter would deadlock merges. Re-add `codecov/project` only if Codecov starts posting that check.
+Runs in pre-commit (fail-fast first step) and in CI inside the `Test` job's `go test ./...` — no standalone `Template drift` job. Action SHAs may differ intentionally.
+
+**Embedded YAML must parse raw.** `TestEmbeddedYAMLParses` unmarshals every embedded `.yml/.yaml` template with `gopkg.in/yaml.v3` before substitution — GitHub rejects an invalid workflow file outright, silently killing CI on every hardened repo (this shipped broken once). Consequence: placeholders in YAML value position must be quoted (`branches: ["{{.DefaultBranch}}"]`, never bare `[{{.DefaultBranch}}]`) so the raw file parses.
+
+**Codecov is NOT a required check (deliberate).** `codecov.yml` marks coverage a soft gate; the `protect-main` ruleset contains no `codecov/*` contexts because Codecov App lag/outage would deadlock merges (patch/project checks only post after base+head reports process). Do not add `codecov/patch` or `codecov/project` back unless Codecov guarantees timely posting. Coverage gates live in `codecov.yml`: project threshold 1% drift, patch target 90%.
 
 **CI job names (fabrica standard):** `.github/workflows/ci.yml` jobs are `Lint`,
-`Lint (Windows)`, `Vulnerability scan`, `Build (ubuntu-latest|windows-latest|macos-latest)`,
-`Test (ubuntu-latest|…)`, `gosec`, `Trivy`, `Release build (snapshot)` (GoReleaser build-only —
-never publishes); PR-level Codacy checks come from the GitHub integration webhook — no `Codacy
+`Lint (Windows)`, `Vulnerability scan`, `Build (<os>)` and `Test (<os>)` — both 3-OS matrices
+(ubuntu/windows/macos) on every run, public repo so Actions minutes are unlimited — plus `gosec`
+and `Trivy`. PR-level Codacy checks come from the GitHub integration webhook — no `Codacy
 Analysis` CI job needed (verified: cloud analysis updates the dashboard on push to main, and the
 CLI's upload completion is rejected for cloud-analyzed repos with `Feature "Repository Analysis"
-is disabled`). CodeQL runs as `Analyze (actions|go)` in `codeql.yml`. macOS legs run on PRs and
-push (public repo: Actions minutes are unlimited). Required checks in the `protect-main` ruleset must match the reportable jobs on PRs —
+is disabled`). CodeQL runs as `Analyze (actions|go)` in `codeql.yml`. Required checks in the `protect-main` ruleset must match the reportable jobs on PRs —
 currently `Lint`, `security`, `review`, `Vulnerability scan`,
 `Build (ubuntu-latest|windows-latest)`, `Test (ubuntu-latest|windows-latest)`, `gosec`, `Trivy`,
-`Analyze (actions)`, `Analyze (go)`, and `Lint (Windows)`. `Release build (snapshot)` is NOT a
-required check. When renaming/adding jobs, update the ruleset required-status-checks list to
+`Analyze (actions)`, `Analyze (go)`, and `Lint (Windows)`. macOS legs run but are NOT required;
+neither is any Codecov context. When renaming/adding jobs, update the ruleset required-status-checks list to
 match, or PRs deadlock on contexts that never report.
 
 ## Release (tag `v*`)
@@ -68,9 +76,7 @@ publishing (`id-token: write`). `.goreleaser.yml` pins version ldflags to
 `fundamentum_<version>_<os>_<arch>.{tar.gz,zip}`, ignores Windows/arm64 — the npm shim
 (`npm/install.js` + `npm/run.js`) must match that naming and the release-asset layout
 (nyx/ludus/juggernaut pattern). `npm/package.json` version stays `0.0.0` in the repo; the
-workflow sets it to the tag version before publishing. The CI snapshot job
-(`Release build (snapshot)`) verifies the config compiles all platforms and
-smoke-tests the linux/amd64 binary's `--version` output (must not be ` dev`). Local check:
+workflow sets it to the tag version before publishing. Local check:
 `goreleaser build --snapshot --clean`, then run `dist/.../fundamentum.exe --version`. Never
 publish a release from CI without an explicit tag.
 
@@ -95,7 +101,7 @@ Two subcommands:
 - **apply OWNER/REPO** — harden an existing repo: upsert community health files, set branch protection, enable security features
 - **init OWNER/REPO** — create a new repo then apply hardening
 
-Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`, `--pr`.
+Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`, `--pr`, `--advanced-security`.
 `init` also takes `--private` (default `true`; pass `--private=false` for public).
 
 ### Packages
@@ -103,7 +109,7 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`, `--
 - `cmd/root` — root Cobra command, flags
 - `cmd/apply` — apply logic: renders templates, checks existing state, builds item list, runs wizard
 - `cmd/repoinit` — creates repo via API, then delegates to apply
-- `cmd/globals` — shared mutable flag state (DryRun, Token, Verbose, NoOverwrite, ViaPR)
+- `cmd/globals` — shared mutable flag state (DryRun, Token, Verbose, NoOverwrite, ViaPR, AdvancedSecurity)
 - `cmd/util` — shared utilities (ParseOwnerRepo)
 - `internal/github` — thin HTTP client for GitHub API (net/http, no SDK)
 - `internal/wizard` — interactive summary table + Y/N apply flow
@@ -116,7 +122,7 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`, `--
 
 `resolveTarget` path mapping: `dotgithub/` → `.github/`, `dotcodacy.yml` → `.codacy.yml`; top-level template files map to repo root (`public_codecov.yml` → `codecov.yml`, `socket.yml` → `socket.yml`).
 
-Shipped CI follows the **fabrica standard**: `public_ci.yml` (full Go CI — Lint, Vulnerability scan, Build/Test OS matrices, gosec, Trivy — with Codecov coverage + Test Analytics folded into the Test job's Linux leg), `private_ci.yml` (same minus Codecov — private repos keep `private_octocov.yml`), root `public_codeql.yml` (2-language matrix `actions`|`go` with autobuild; add a commented-out `javascript-typescript` leg if the target repo ships JS/TS), root `socket.yml` (Socket Security supply-chain scan via GitHub App — no visibility prefix, ships for every repo; requires the app installed), root `public_octopus.yml` (Octopus Review PR-triaging bot via `pull_request_target`, public only), and `dependabot.yml` watching only the `github-actions` ecosystem (no `gomod` entry).
+Shipped CI follows the **fabrica standard**: `public_ci.yml` (full Go CI — Lint, Lint (Windows), Vulnerability scan, 3-OS Build/Test matrices, gosec, Trivy — with Codecov coverage + Test Analytics folded into the Test job's Linux leg), `private_ci.yml` (same minus Codecov — private repos keep `private_octocov.yml`), root `public_codeql.yml` plus `codeql/public_codeql-config.yml` (`security-extended` queries; add a commented-out `javascript-typescript` leg if the target repo ships JS/TS), root `socket.yml` (Socket Security supply-chain scan via GitHub App — no visibility prefix, ships for every repo; requires the app installed), root `public_octopus.yml` (Octopus Review PR-triaging bot via `pull_request_target`, public only), `instructions/codacy.instructions.md` (Copilot rules for Codacy MCP), and `dependabot.yml` watching only the `github-actions` ecosystem (no `gomod` entry).
 
 ### Key behavior
 
@@ -125,10 +131,12 @@ Shipped CI follows the **fabrica standard**: `public_ci.yml` (full Go CI — Lin
 - **Workflow 404 handling** (`internal/github/files.go` `putFileContents`, sentinel `ErrWorkflowLocked` in `pr.go`): GitHub Actions locks workflow files — HTTP PUT returns 404 when updating an existing workflow via the Contents API. Returns `action="skipped"` so apply continues.
 - **409 auto-fallback to PR mode** (`cmd/apply/apply.go` `applyItems`): a direct file commit rejected with 409 (branch protection requires PR) switches the remaining file changes into a single batch PR — no re-run needed.
 - **Retry/backoff** (`internal/github/client.go`): transient failures (429, 5xx, 403 rate-limit exhaustion) retry up to `maxAttempts` (3) with exponential backoff + full jitter (capped 30s), honoring `Retry-After`. Jitter uses `crypto/rand` (gosec), not `math/rand`.
-- **Solo/team prompt**: `apply` asks solo/team (default solo) only when the `protect-main` ruleset doesn't already exist. Solo disables the CODEOWNERS-review and stale-review-dismissal requirements (`github.BranchProtectionOptions.Solo`) so a single maintainer isn't deadlocked.
+- **Solo/team prompt**: `apply` asks solo/team only when the `protect-main` ruleset doesn't already exist. Only exact `team`/`t` selects team — anything else (typos included) takes the advertised solo default, because team mode enables CODEOWNERS review a solo maintainer can't satisfy. Solo disables the CODEOWNERS-review and stale-review-dismissal requirements (`github.BranchProtectionOptions.Solo`). `ConfirmDefaults` accepts `y` **and** `yes`.
+- **Wizard prompts consume exactly one line each** (`readLine` in `internal/wizard/wizard.go`): never swap them back to per-prompt `bufio.Scanner` — Scanner buffers ahead, so piped/scripted stdin loses answers after the first prompt and later prompts silently take defaults (declined items got applied once). Regression tests live in `wizard/piped_input_test.go`.
+- **Pre-flight status errors abort the plan** (`buildItems` returns error): a failed `FileStatus`/alias check fails fast with path context — it must not default to "create", which misreports dry-runs and fails later with confusing PUTs.
 - **`--no-overwrite`**: skips any file that already exists, even if content differs
 - **`--pr`**: batches file changes into a single PR; non-file items (settings, security, protection) still apply directly
-- **Paid GHAS gating** (`cmd/apply/apply.go` `apply`): private/internal repos get Dependabot only unless `--advanced-security` is passed or the wizard prompt is answered yes (prompt only when not dry-run). Public repos always get secret scanning + push protection. Internal visibility uses private templates.
+- **Paid GHAS gating** (`cmd/apply/apply.go` `buildItems`): private/internal repos get Dependabot only unless `--advanced-security` is passed or the wizard prompt is answered yes (prompt only when not dry-run). Public repos always get secret scanning + push protection. Internal visibility uses private templates.
 - **Dry-run "would create" labels**: `General settings (auto-delete branches)` and `Security (…)` are hardcoded `ActionCreate` in `cmd/apply/apply.go` `buildItems` — they always show "would create" even when already enabled. The applies are idempotent PUTs; verify live state via `gh api repos/O/R --jq '{delete_branch_on_merge, security_and_analysis}'` instead of trusting the label.
 - **Windows CRLF embed trap**: template files under `internal/templatefs/templates/` that get rewritten externally with CRLF (editor, scripting) become invisible to git — the clean filter normalizes CRLF→LF, matching the LF blob, so `git status` stays clean and checkout/restore never rewrite the bytes. `//go:embed` then embeds the CRLF bytes and dry-run falsely reports `would update` for content-identical files (live blobs are LF). Fix: delete the file and `git checkout HEAD -- <file>` (or clone fresh). Verify with `git hash-object --no-filters <file>` — it must equal `git rev-parse HEAD:<file>`.
 - Auth: `--token` flag or `GITHUB_TOKEN` env var, used as Bearer token
@@ -136,24 +144,23 @@ Shipped CI follows the **fabrica standard**: `public_ci.yml` (full Go CI — Lin
 ### Testing
 
 - Always use `github.NewClient(token, verbose).WithBaseURL(srv.URL)` to create test clients — never construct `Client` directly (the `client *http.Client` field must be initialized)
-- All wizard prompt functions accept `io.Reader`/`io.Writer` for testability
+- All wizard prompt functions accept `io.Reader`/`io.Writer` for testability; multi-prompt sequences must feed one reader through all prompts so per-line consumption stays honest
 - `cmd/globals` is mutable package-level state — use `t.Cleanup` to reset after tests
+- Known local flake on Windows: `dial tcp 127.0.0.1:… connectex` timeouts against httptest servers under parallel load — rerun before diagnosing; CI legs are unaffected
 
 ### Conventions
 
 - Two import groups: stdlib first, then third-party + internal (mirrors ludus)
 - Error wrapping: `fmt.Errorf("ctx: %w", err)`
 - No `exec.Command` anywhere
-- Table-driven tests, stdlib only
+- Table-driven tests; stdlib-only at runtime — `gopkg.in/yaml.v3` is the single sanctioned dependency and it is test-only (embedded-template validation)
 - golangci-lint v2 with staticcheck `-ST1005` excluded; gosec excludes G104, G204, G304, G704
 
 ## Codacy
 
-- **Cloud CLI (latest, no install confusion):** `npx --yes @codacy/codacy-cloud-cli@latest issues gh jpvelasco fundamentum --overview` (or set CODACY_API_TOKEN)
-- **Local analysis (latest):** `npx --yes @codacy/analysis-cli@latest analyze ...` (or `codacy-analysis` if globally installed)
+- **Cloud CLI:** `npx --yes @codacy/codacy-cloud-cli@latest issues gh jpvelasco fundamentum --overview`; local analysis: `npx --yes @codacy/analysis-cli@latest analyze ...` (or set CODACY_API_TOKEN / use a global `codacy-analysis`)
 - `.codacy.yml` controls exclude paths and engine configs (`engines:` section)
 - **Cannot disable tools via `.codacy.yml`.** The `enabled: false` option only works for languages (`languages.<lang>.enabled: false`). Disable tools on the [Code patterns page](https://docs.codacy.com/repositories-configure/configuring-code-patterns/) instead.
 - **Legacy `tools:` key ignored.** The `.codacy/codacy.yaml` format is from Codacy CLI v2 and not recognized by the current cloud config.
-- **Use npm CLIs via npx.** For local and cloud interaction, use `@codacy/codacy-cloud-cli` and `@codacy/analysis-cli`.
 - **Trivy noise:** Trivy reports "no patterns configured" on repos without Dockerfiles or Kubernetes manifests. Disable Trivy in the Codacy UI per-repo to eliminate this noise. If the repo adds container files later, re-enable Trivy.
-- **This-repo workflows (now shipped templates):** `.github/workflows/codacy-coverage.yml` (`workflow_run`) re-sends the CI test artifact's coverage to Codacy — part of the embedded templates (`codacy-coverage.yml` is a shared workflow); re-apply to other repos via `go run . apply`, not manual copy. Codacy analysis itself is entirely webhook/cloud-driven: PR checks come from the GitHub integration, and the main dashboard updates on push without any CI job (the former `Codacy Analysis` CLI-upload job was removed after proving it can never succeed — the CLI's final notification is rejected for cloud-analyzed repos with `Feature "Repository Analysis" is disabled`). If "Run analysis on your build server" is ever enabled in Codacy settings, re-add a push-only CLI job; otherwise keep Codacy fully webhook-driven. `github.DefaultStatusChecks` always includes `Codacy Static Code Analysis`.
+- **This-repo workflows (now shipped templates):** `.github/workflows/codacy-coverage.yml` (`workflow_run`) re-sends the CI test artifact's coverage to Codacy — part of the embedded templates; re-apply to other repos via `go run . apply`, not manual copy. Codacy analysis itself is entirely webhook/cloud-driven: PR checks come from the GitHub integration, and the main dashboard updates on push without any CI job (the former `Codacy Analysis` CLI-upload job was removed after proving it can never succeed — the CLI's final notification is rejected for cloud-analyzed repos with `Feature "Repository Analysis" is disabled`). If "Run analysis on your build server" is ever enabled in Codacy settings, re-add a push-only CLI job; otherwise keep Codacy fully webhook-driven. `github.DefaultStatusChecks` always includes `Codacy Static Code Analysis`.

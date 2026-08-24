@@ -2,9 +2,9 @@ name: Octocov
 
 on:
   push:
-    branches: [{{.DefaultBranch}}]
+    branches: ["{{.DefaultBranch}}"]
   pull_request:
-    branches: [{{.DefaultBranch}}]
+    branches: ["{{.DefaultBranch}}"]
 
 permissions:
   contents: read
