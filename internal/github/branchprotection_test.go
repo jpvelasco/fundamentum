@@ -97,6 +97,31 @@ func TestApplyClassicBranchProtection(t *testing.T) {
 	})
 }
 
+func TestApplyClassicBranchProtection_SkipStatusChecks(t *testing.T) {
+	var got any
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			RequiredStatusChecks any `json:"required_status_checks"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Errorf("decode protection: %v", err)
+		}
+		got = payload.RequiredStatusChecks
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{})
+	}))
+	defer srv.Close()
+
+	err := c.ApplyClassicBranchProtection("owner", "repo", "main", DefaultStatusChecks, BranchProtectionOptions{SkipStatusChecks: true})
+	if err != nil {
+		t.Fatalf("ApplyClassicBranchProtection() error: %v", err)
+	}
+	if got != nil {
+		t.Errorf("required_status_checks = %#v, want nil when SkipStatusChecks is set", got)
+	}
+}
+
 func TestApplyClassicBranchProtection_SkipCodeOwners(t *testing.T) {
 	var got bool
 	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

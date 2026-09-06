@@ -69,7 +69,7 @@ func newFileItems(names []string, content [][]byte, applies []func() error) []wi
 func runApplyItemsExpectNoError(t *testing.T, handler http.HandlerFunc, items []wizard.Item, viaPR bool) {
 	t.Helper()
 	testWithServer(t, handler, func(c *github.Client) {
-		if err := applyItems(c, "owner", "repo", "main", items, viaPR); err != nil {
+		if err := applyItems(c, "owner", "repo", "main", items, viaPR, nil); err != nil {
 			t.Errorf("expected no error, got: %v", err)
 		}
 	}, nil)
@@ -113,7 +113,7 @@ func TestBuildItems(t *testing.T) {
 
 func TestBuildItems_WithExistingRuleset(t *testing.T) {
 	c := &github.Client{}
-	items, err := buildItems(c, "owner", "repo", "main", "public", nil, true, true, false, github.BranchProtectionOptions{}, false)
+	items, err := buildItems(c, "owner", "repo", "main", "public", nil, true, true, false, &github.BranchProtectionOptions{}, false)
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestApplyItems_SkippedItemNotApplied(t *testing.T) {
 		},
 	}
 	c := github.NewClient("", false)
-	if err := applyItems(c, "owner", "repo", "main", items, false); err != nil {
+	if err := applyItems(c, "owner", "repo", "main", items, false, nil); err != nil {
 		t.Errorf("expected no error, got: %v", err)
 	}
 	if applyCalled {
@@ -245,7 +245,7 @@ func TestApplyItems_ErrorHandling_NonFatal(t *testing.T) {
 		},
 	}
 	c := github.NewClient("", false)
-	if err := applyItems(c, "owner", "repo", "main", items, false); err != nil {
+	if err := applyItems(c, "owner", "repo", "main", items, false, nil); err != nil {
 		t.Errorf("optional item failure must not fail the run, got: %v", err)
 	}
 }
@@ -259,10 +259,86 @@ func TestApplyItems_BranchProtectionFailureFailsRun(t *testing.T) {
 		},
 	}
 	c := github.NewClient("", false)
-	err := applyItems(c, "owner", "repo", "main", items, false)
+	err := applyItems(c, "owner", "repo", "main", items, false, nil)
 	if err == nil || !strings.Contains(err.Error(), "required items failed") {
 		t.Errorf("core branch-protection failure must fail the run, got: %v", err)
 	}
+}
+
+func TestApplyItems_ViaPR_DefersRequiredChecks(t *testing.T) {
+	assertDeferredRequiredChecks(t, true, func() error { return nil }, "PR mode must not require status checks the open harden PR cannot satisfy")
+}
+
+func TestApplyItems_409Fallback_DefersRequiredChecks(t *testing.T) {
+	assertDeferredRequiredChecks(t, false, err409, "409 fallback must not require status checks the open harden PR cannot satisfy")
+}
+
+func assertDeferredRequiredChecks(t *testing.T, viaPR bool, fileApply func() error, failMsg string) {
+	t.Helper()
+	var rulesetBody map[string]any
+	opts := &github.BranchProtectionOptions{}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/rulesets"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/rulesets"):
+			_ = json.NewDecoder(r.Body).Decode(&rulesetBody)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":1}`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"commit":{"sha":"abc123"}}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"content":{"sha":"x"}}`))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/pulls"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"number":1}`))
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	})
+	testWithServer(t, handler, func(c *github.Client) {
+		items := []wizard.Item{
+			{
+				Name:    ".github/CODEOWNERS",
+				Action:  wizard.ActionCreate,
+				Content: []byte("me"),
+				Apply:   fileApply,
+			},
+			branchProtectionItem(c, "owner", "repo", "main", "public", false, false, opts),
+		}
+		if err := applyItems(c, "owner", "repo", "main", items, viaPR, opts); err != nil {
+			t.Fatalf("applyItems() error: %v", err)
+		}
+	}, func(t *testing.T) {
+		if !opts.SkipStatusChecks {
+			t.Error("expected SkipStatusChecks after PR-mode apply")
+		}
+		if rulesetHasRequiredChecks(rulesetBody) {
+			t.Error(failMsg)
+		}
+	})
+}
+
+func rulesetHasRequiredChecks(body map[string]any) bool {
+	rules, ok := body["rules"].([]any)
+	if !ok {
+		return false
+	}
+	for _, rule := range rules {
+		rm, ok := rule.(map[string]any)
+		if ok && rm["type"] == "required_status_checks" {
+			return true
+		}
+	}
+	return false
 }
 
 func TestApplyItems_RequiredNonFileError(t *testing.T) {
@@ -274,7 +350,7 @@ func TestApplyItems_RequiredNonFileError(t *testing.T) {
 		},
 	}
 	c := github.NewClient("", false)
-	err := applyItems(c, "owner", "repo", "main", items, false)
+	err := applyItems(c, "owner", "repo", "main", items, false, nil)
 	if err == nil || !strings.Contains(err.Error(), "required items failed") {
 		t.Errorf("expected required-items error, got: %v", err)
 	}
@@ -367,7 +443,7 @@ func TestBranchProtectionItem_FallbackOnlyOn403(t *testing.T) {
 					w.WriteHeader(http.StatusNoContent)
 				}
 			}), func(c *github.Client) {
-				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, false, false, github.BranchProtectionOptions{})
+				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, false, false, &github.BranchProtectionOptions{})
 				err := item.Apply()
 				if tt.wantErr && err == nil {
 					t.Error("expected error, got nil")
@@ -518,7 +594,7 @@ func TestBuildItems_AdvancedCodeQLSkipsDefaultSetup(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Render() error: %v", err)
 		}
-		items, err := buildItems(c, "owner", "repo", "main", "public", rendered, false, false, false, github.BranchProtectionOptions{}, false)
+		items, err := buildItems(c, "owner", "repo", "main", "public", rendered, false, false, false, &github.BranchProtectionOptions{}, false)
 		if err != nil {
 			t.Fatalf("buildItems() error: %v", err)
 		}
@@ -574,7 +650,7 @@ func TestBuildItems_FileStatusSkip(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNotFound)
 	}), func(c *github.Client) {
-		items, err := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{}, false)
+		items, err := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, &github.BranchProtectionOptions{}, false)
 		if err != nil {
 			t.Fatalf("buildItems() error: %v", err)
 		}
@@ -605,7 +681,7 @@ func TestBranchProtectionItem_ClassicUpgradeApply(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}), func(c *github.Client) {
-		item := branchProtectionItem(c, "owner", "repo", "main", "public", false, true, github.BranchProtectionOptions{})
+		item := branchProtectionItem(c, "owner", "repo", "main", "public", false, true, &github.BranchProtectionOptions{})
 		if item.Action != wizard.ActionUpgrade {
 			t.Fatalf("expected ActionUpgrade, got %v", item.Action)
 		}
@@ -632,7 +708,7 @@ func TestBranchProtectionItem_ClassicUpgradeError(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}), func(c *github.Client) {
-		item := branchProtectionItem(c, "owner", "repo", "main", "public", false, true, github.BranchProtectionOptions{})
+		item := branchProtectionItem(c, "owner", "repo", "main", "public", false, true, &github.BranchProtectionOptions{})
 		if err := item.Apply(); err == nil {
 			t.Fatal("expected error when ruleset creation fails")
 		}
@@ -663,7 +739,7 @@ func TestApplyItems_RequiredFileError(t *testing.T) {
 		},
 	}
 	c := github.NewClient("", false)
-	err := applyItems(c, "owner", "repo", "main", items, false)
+	err := applyItems(c, "owner", "repo", "main", items, false, nil)
 	if err == nil || !strings.Contains(err.Error(), "required items failed") {
 		t.Errorf("expected required-items error, got: %v", err)
 	}
@@ -683,7 +759,7 @@ func TestApplyItems_OptionalFileError(t *testing.T) {
 		},
 	}
 	c := github.NewClient("", false)
-	if err := applyItems(c, "owner", "repo", "main", items, false); err != nil {
+	if err := applyItems(c, "owner", "repo", "main", items, false, nil); err != nil {
 		t.Errorf("optional file failure must not fail the run, got: %v", err)
 	}
 }
@@ -711,7 +787,7 @@ func TestApplyItems_ViaPRNoWrittenFiles(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}), func(c *github.Client) {
-		if err := applyItems(c, "owner", "repo", "main", items, true); err != nil {
+		if err := applyItems(c, "owner", "repo", "main", items, true, nil); err != nil {
 			t.Errorf("expected no error when PR has no file changes, got: %v", err)
 		}
 	}, nil)
@@ -729,7 +805,7 @@ func TestApplyItems_ViaPRFailure(t *testing.T) {
 	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}), func(c *github.Client) {
-		err := applyItems(c, "owner", "repo", "main", items, true)
+		err := applyItems(c, "owner", "repo", "main", items, true, nil)
 		if err == nil || !strings.Contains(err.Error(), "apply via PR") {
 			t.Errorf("expected apply-via-PR error, got: %v", err)
 		}
@@ -756,7 +832,7 @@ func TestBuildItems_FileStatusErrorFailsPlan(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNotFound)
 	}), func(c *github.Client) {
-		items, err := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{}, false)
+		items, err := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, &github.BranchProtectionOptions{}, false)
 		if err == nil {
 			t.Fatal("expected buildItems to fail when FileStatus errors, got nil")
 		}
@@ -786,7 +862,7 @@ func TestBuildItems_AliasCheckErrorFailsPlan(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}), func(c *github.Client) {
-		items, err := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, github.BranchProtectionOptions{}, false)
+		items, err := buildItems(c, "owner", "repo", "main", "private", rendered, false, false, false, &github.BranchProtectionOptions{}, false)
 		if err == nil {
 			t.Fatal("expected buildItems to fail when the alias check errors, got nil")
 		}

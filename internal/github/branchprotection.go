@@ -32,6 +32,9 @@ func (c *Client) ClassicProtectionExists(owner, repo, branch string) (bool, erro
 // statusChecks are the required CI/status check names; use DefaultStatusChecks for Codacy,
 // or append additional checks (e.g., Socket) as needed.
 func (c *Client) ApplyClassicBranchProtection(owner, repo, branch string, statusChecks []string, opts BranchProtectionOptions) error {
+	if opts.SkipStatusChecks {
+		statusChecks = nil
+	}
 	var checksReq any
 	if len(statusChecks) > 0 {
 		checksReq = map[string]any{

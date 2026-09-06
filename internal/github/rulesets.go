@@ -36,6 +36,10 @@ type BranchProtectionOptions struct {
 	// SkipCodeOwners disables CODEOWNERS review when the shipped CODEOWNERS
 	// file cannot name a valid owner (organization without a team).
 	SkipCodeOwners bool
+	// SkipStatusChecks omits required status checks. Used in --pr / 409
+	// fallback so the open harden PR is not blocked by checks that only
+	// exist after that PR merges (Codacy, shipped CI jobs).
+	SkipStatusChecks bool
 }
 
 func (o BranchProtectionOptions) requireCodeOwners() bool {
@@ -92,7 +96,10 @@ func (c *Client) EnsureTagRuleset(owner, repo string) error {
 // statusChecks are additional checks on top of DefaultStatusChecks (Codacy).
 // Pass nil to use only the defaults.
 func (c *Client) CreateBranchRuleset(owner, repo string, statusChecks []string, opts BranchProtectionOptions) error {
-	allChecks := dedup(append(append([]string{}, DefaultStatusChecks...), statusChecks...))
+	var allChecks []string
+	if !opts.SkipStatusChecks {
+		allChecks = dedup(append(append([]string{}, DefaultStatusChecks...), statusChecks...))
+	}
 	checks := make([]map[string]any, len(allChecks))
 	for i, name := range allChecks {
 		checks[i] = map[string]any{"context": name}

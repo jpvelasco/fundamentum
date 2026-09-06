@@ -482,6 +482,31 @@ func TestCreateBranchRuleset_DedupStatusChecks(t *testing.T) {
 	}
 }
 
+func TestCreateBranchRuleset_SkipStatusChecks(t *testing.T) {
+	var postBody map[string]any
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&postBody)
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 1})
+	}), nil, func(c *Client) {
+		err := c.CreateBranchRuleset("owner", "repo", nil, BranchProtectionOptions{SkipStatusChecks: true})
+		if err != nil {
+			t.Fatalf("CreateBranchRuleset() error: %v", err)
+		}
+	}, func(t *testing.T) {
+		rules, ok := postBody["rules"].([]any)
+		if !ok {
+			t.Fatal("expected rules array in body")
+		}
+		for _, rule := range rules {
+			rm, ok := rule.(map[string]any)
+			if ok && rm["type"] == "required_status_checks" {
+				t.Fatal("required_status_checks must be omitted when SkipStatusChecks is set")
+			}
+		}
+	})
+}
+
 func TestNewClient_EmptyToken(t *testing.T) {
 	// When token is empty, it falls back to env var (which is empty in test)
 	c := NewClient("", false)
