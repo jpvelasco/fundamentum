@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -109,30 +110,64 @@ func (c *Client) GetRuleset(owner, repo, name string) (*Ruleset, error) {
 }
 
 func (c *Client) rulesetID(owner, repo, name string) (int64, bool, error) {
-	resp, err := c.get(repoPath(owner, repo) + "/rulesets")
-	if err != nil {
-		return 0, false, fmt.Errorf("list rulesets: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if err := expectStatus("list rulesets", resp, http.StatusOK, http.StatusNotFound); err != nil {
-		return 0, false, err
-	}
-	if resp.StatusCode == http.StatusNotFound {
-		return 0, false, nil
-	}
-	var rulesets []struct {
-		ID   int64  `json:"id"`
-		Name string `json:"name"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&rulesets); err != nil {
-		return 0, false, fmt.Errorf("decode rulesets: %w", err)
-	}
-	for _, r := range rulesets {
-		if r.Name == name {
-			return r.ID, true, nil
+	path := repoPath(owner, repo) + "/rulesets?per_page=100"
+	for path != "" {
+		resp, err := c.get(path)
+		if err != nil {
+			return 0, false, fmt.Errorf("list rulesets: %w", err)
 		}
+		if err := expectStatus("list rulesets", resp, http.StatusOK, http.StatusNotFound); err != nil {
+			_ = resp.Body.Close()
+			return 0, false, err
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			_ = resp.Body.Close()
+			return 0, false, nil
+		}
+		var rulesets []struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&rulesets)
+		next := nextLink(resp.Header.Get("Link"))
+		_ = resp.Body.Close()
+		if err != nil {
+			return 0, false, fmt.Errorf("decode rulesets: %w", err)
+		}
+		for _, r := range rulesets {
+			if r.Name == name {
+				return r.ID, true, nil
+			}
+		}
+		path = next
 	}
 	return 0, false, nil
+}
+
+// nextLink returns the request path (including query) from a GitHub Link
+// header's rel="next", or empty. Full URLs are reduced to path+query so
+// they stay on the client's base URL.
+func nextLink(header string) string {
+	for _, part := range strings.Split(header, ",") {
+		part = strings.TrimSpace(part)
+		if !strings.Contains(part, `rel="next"`) {
+			continue
+		}
+		start := strings.Index(part, "<")
+		end := strings.Index(part, ">")
+		if start < 0 || end <= start {
+			continue
+		}
+		raw := part[start+1 : end]
+		if u, err := url.Parse(raw); err == nil && u.Path != "" {
+			if u.RawQuery != "" {
+				return u.Path + "?" + u.RawQuery
+			}
+			return u.Path
+		}
+		return raw
+	}
+	return ""
 }
 
 // PlanBranchRuleset reports whether protect-main exists and which owned fields drifted.

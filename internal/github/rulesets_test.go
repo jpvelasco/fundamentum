@@ -388,6 +388,67 @@ func TestPlanBranchRuleset_Missing(t *testing.T) {
 	}, nil)
 }
 
+func TestNextLink(t *testing.T) {
+	got := nextLink(`<https://api.github.com/repos/o/r/rulesets?page=2>; rel="next", <https://api.github.com/repos/o/r/rulesets?page=3>; rel="last"`)
+	if got != "/repos/o/r/rulesets?page=2" {
+		t.Errorf("nextLink() = %q", got)
+	}
+	if nextLink("") != "" || nextLink(`<https://example/x>; rel="last"`) != "" {
+		t.Error("expected empty next when no rel=next")
+	}
+}
+
+func TestNextLink_MalformedAndPathOnly(t *testing.T) {
+	if nextLink(`rel="next"`) != "" {
+		t.Error("malformed next must be empty")
+	}
+	if got := nextLink(`</repos/o/r/rulesets>; rel="next"`); got != "/repos/o/r/rulesets" {
+		t.Errorf("path-only next = %q", got)
+	}
+}
+
+func TestRulesetID_List404(t *testing.T) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}), nil, func(c *Client) {
+		id, found, err := c.rulesetID("owner", "repo", "protect-main")
+		if err != nil || found || id != 0 {
+			t.Fatalf("rulesetID() = (%d, %v, %v), want missing", id, found, err)
+		}
+	}, nil)
+}
+
+func TestRulesetID_Paginates(t *testing.T) {
+	pages := 0
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages++
+		page := r.URL.Query().Get("page")
+		if page == "" || page == "1" {
+			w.Header().Set("Link", `<https://api.github.com/repos/owner/repo/rulesets?page=2>; rel="next"`)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":1,"name":"other"}]`))
+			return
+		}
+		if page != "2" {
+			t.Errorf("unexpected page %q", page)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[{"id":99,"name":"protect-main"}]`))
+	}), nil, func(c *Client) {
+		id, found, err := c.rulesetID("owner", "repo", "protect-main")
+		if err != nil {
+			t.Fatalf("rulesetID() error: %v", err)
+		}
+		if !found || id != 99 {
+			t.Fatalf("rulesetID() = (%d, %v), want (99, true)", id, found)
+		}
+	}, func(t *testing.T) {
+		if pages != 2 {
+			t.Errorf("pages fetched = %d, want 2", pages)
+		}
+	})
+}
+
 func TestRequireCodeOwners(t *testing.T) {
 	tests := []struct {
 		opts BranchProtectionOptions
