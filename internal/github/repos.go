@@ -98,22 +98,35 @@ func (c *Client) accountType(login string) (string, error) {
 	return u.Type, nil
 }
 
-// Repo is the subset of GET /repos/{owner}/{repo} that apply needs.
+// Repo is the subset of GET /repos/{owner}/{repo} that apply and audit need.
 type Repo struct {
-	Visibility    string
-	DefaultBranch string
-	OwnerType     string // "User" or "Organization"
+	Visibility           string
+	DefaultBranch        string
+	OwnerType            string // "User" or "Organization"
+	DeleteBranchOnMerge  bool
+	SecretScanning       bool
+	SecretPushProtection bool
 }
 
-// GetRepo returns visibility, default branch, and owner account type.
+// GetRepo returns visibility, default branch, owner account type, and
+// the settings/security fields audit compares against the baseline.
 // An empty default_branch falls back to "main" so callers always have a ref name.
 func (c *Client) GetRepo(owner, repo string) (Repo, error) {
 	var result struct {
-		Visibility    string `json:"visibility"`
-		DefaultBranch string `json:"default_branch"`
-		Owner         struct {
+		Visibility          string `json:"visibility"`
+		DefaultBranch       string `json:"default_branch"`
+		DeleteBranchOnMerge bool   `json:"delete_branch_on_merge"`
+		Owner               struct {
 			Type string `json:"type"`
 		} `json:"owner"`
+		SecurityAndAnalysis struct {
+			SecretScanning struct {
+				Status string `json:"status"`
+			} `json:"secret_scanning"`
+			SecretScanningPushProtection struct {
+				Status string `json:"status"`
+			} `json:"secret_scanning_push_protection"`
+		} `json:"security_and_analysis"`
 	}
 	if err := c.getDecode(repoPath(owner, repo), "get repo", &result); err != nil {
 		return Repo{}, err
@@ -122,9 +135,12 @@ func (c *Client) GetRepo(owner, repo string) (Repo, error) {
 		result.DefaultBranch = "main"
 	}
 	return Repo{
-		Visibility:    result.Visibility,
-		DefaultBranch: result.DefaultBranch,
-		OwnerType:     result.Owner.Type,
+		Visibility:           result.Visibility,
+		DefaultBranch:        result.DefaultBranch,
+		OwnerType:            result.Owner.Type,
+		DeleteBranchOnMerge:  result.DeleteBranchOnMerge,
+		SecretScanning:       result.SecurityAndAnalysis.SecretScanning.Status == "enabled",
+		SecretPushProtection: result.SecurityAndAnalysis.SecretScanningPushProtection.Status == "enabled",
 	}, nil
 }
 

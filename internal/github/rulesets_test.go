@@ -231,6 +231,19 @@ func TestTagRulesetDrift_Emptied(t *testing.T) {
 	}
 }
 
+func TestResolveRequiredChecks(t *testing.T) {
+	if got := ResolveRequiredChecks(nil); len(got) != len(DefaultStatusChecks) {
+		t.Fatalf("nil = %#v", got)
+	}
+	if got := ResolveRequiredChecks([]string{}); len(got) != 0 {
+		t.Fatalf("empty = %#v", got)
+	}
+	got := ResolveRequiredChecks([]string{" Lint ", "", "Lint"})
+	if len(got) != 1 || got[0] != "Lint" {
+		t.Fatalf("trim/dedup = %#v", got)
+	}
+}
+
 func TestIntendedChecksAndHelpers(t *testing.T) {
 	if got := intendedChecks(nil, BranchProtectionOptions{SkipStatusChecks: true}); got != nil {
 		t.Errorf("SkipStatusChecks = %v, want nil", got)

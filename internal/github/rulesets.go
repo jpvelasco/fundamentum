@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 // dedup removes duplicate strings while preserving order.
@@ -325,6 +326,25 @@ func TagRulesetDrift(got *Ruleset) []string {
 		drift = append(drift, "non_fast_forward")
 	}
 	return drift
+}
+
+// ResolveRequiredChecks normalizes --require-checks. nil means the shipped
+// CI defaults; an empty list requires no status checks.
+func ResolveRequiredChecks(in []string) []string {
+	if in == nil {
+		return append([]string{}, DefaultStatusChecks...)
+	}
+	return dedup(trimNonEmpty(in))
+}
+
+func trimNonEmpty(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, name := range in {
+		if name = strings.TrimSpace(name); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func intendedChecks(statusChecks []string, opts BranchProtectionOptions) []string {

@@ -18,6 +18,20 @@ func IsPublicVisibility(visibility string) bool {
 	return visibility == "public"
 }
 
+// DependabotAlertsEnabled reports whether Dependabot alerts are on.
+// GitHub returns 204 when enabled and 404 when disabled.
+func (c *Client) DependabotAlertsEnabled(owner, repo string) (bool, error) {
+	resp, err := c.get(repoPath(owner, repo) + "/vulnerability-alerts")
+	if err != nil {
+		return false, fmt.Errorf("check dependabot alerts: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if err := expectStatus("check dependabot alerts", resp, http.StatusNoContent, http.StatusNotFound); err != nil {
+		return false, err
+	}
+	return resp.StatusCode == http.StatusNoContent, nil
+}
+
 // EnableSecurity enables Dependabot alerts and security updates for every repo.
 // Secret scanning and push protection are free on public repos; on private or
 // internal repos they require GitHub Advanced Security and are skipped unless
