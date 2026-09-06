@@ -43,13 +43,17 @@ func (o BranchProtectionOptions) requireCodeOwners() bool {
 }
 
 // RulesetExists returns true if a ruleset with the given name already exists.
+// Only 404 counts as missing — auth, rate-limit, and server errors are returned.
 func (c *Client) RulesetExists(owner, repo, name string) (bool, error) {
 	resp, err := c.get(repoPath(owner, repo) + "/rulesets")
 	if err != nil {
 		return false, fmt.Errorf("list rulesets: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
+	if err := expectStatus("list rulesets", resp, http.StatusOK, http.StatusNotFound); err != nil {
+		return false, err
+	}
+	if resp.StatusCode == http.StatusNotFound {
 		return false, nil
 	}
 	var rulesets []struct {

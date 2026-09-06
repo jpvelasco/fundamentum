@@ -14,12 +14,16 @@ func branchProtectionPath(owner, repo, branch string) string {
 }
 
 // ClassicProtectionExists returns true if classic branch protection is set on the given branch.
+// Only 404 counts as missing — auth, rate-limit, and server errors are returned.
 func (c *Client) ClassicProtectionExists(owner, repo, branch string) (bool, error) {
 	resp, err := c.get(branchProtectionPath(owner, repo, branch))
 	if err != nil {
 		return false, fmt.Errorf("check classic protection: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if err := expectStatus("check classic protection", resp, http.StatusOK, http.StatusNotFound); err != nil {
+		return false, err
+	}
 	return resp.StatusCode == http.StatusOK, nil
 }
 
