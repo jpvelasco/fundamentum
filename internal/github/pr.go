@@ -154,7 +154,6 @@ func IsConflict409(err error) bool {
 }
 
 // IsForbidden403 returns true if the error contains a 403 Forbidden status.
-// Used to detect when rulesets are unavailable on free-tier private repos.
 func IsForbidden403(err error) bool {
 	if err == nil {
 		return false
@@ -163,4 +162,27 @@ func IsForbidden403(err error) bool {
 		return true
 	}
 	return strings.Contains(err.Error(), "403")
+}
+
+// IsRulesetUnavailable reports a 403 that means repository rulesets are not
+// offered on this plan (free-tier private). Other 403s — token scope, SSO,
+// IP allow lists — must surface instead of falling back to classic protection.
+func IsRulesetUnavailable(err error) bool {
+	if !IsForbidden403(err) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, needle := range []string{
+		"upgrade to github",
+		"github pro",
+		"github team",
+		"make this repository public",
+		"not available for this repository",
+		"using the free plan",
+	} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
 }

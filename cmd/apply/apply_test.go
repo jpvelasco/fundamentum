@@ -454,13 +454,22 @@ func TestBranchProtectionItem_FallbackOnlyOn403(t *testing.T) {
 		wantClassic     bool // true if classic API should be called
 	}{
 		{
-			name:          "403 private falls back to classic",
+			name:          "403 private upgrade message falls back to classic",
 			visibility:    "private",
 			rulesetStatus: http.StatusForbidden,
-			rulesetBody:   `{"message":"Forbidden"}`,
+			rulesetBody:   `{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature."}`,
 			classicStatus: http.StatusOK,
 			wantErr:       false,
 			wantClassic:   true,
+		},
+		{
+			name:            "403 private token-scope does not fall back",
+			visibility:      "private",
+			rulesetStatus:   http.StatusForbidden,
+			rulesetBody:     `{"message":"Resource not accessible by integration"}`,
+			wantErr:         true,
+			wantErrContains: "403",
+			wantClassic:     false,
 		},
 		{
 			name:            "403 public returns error",

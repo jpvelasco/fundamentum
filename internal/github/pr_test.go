@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -386,6 +387,29 @@ func TestIsConflict409_HTTPError(t *testing.T) {
 	}
 	if IsConflict409(&HTTPError{StatusCode: http.StatusForbidden, Msg: "forbidden"}) {
 		t.Error("expected false for HTTPError with a non-409 StatusCode")
+	}
+}
+
+func TestIsRulesetUnavailable(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"generic 403", &HTTPError{StatusCode: http.StatusForbidden, Msg: "403 Forbidden: Forbidden"}, false},
+		{"token scope", &HTTPError{StatusCode: http.StatusForbidden, Msg: "403 Forbidden: Resource not accessible by integration"}, false},
+		{"upgrade to pro", &HTTPError{StatusCode: http.StatusForbidden, Msg: "403 Forbidden: Upgrade to GitHub Pro or make this repository public to enable this feature."}, true},
+		{"github team", fmt.Errorf("create branch ruleset: 403 Forbidden: GitHub Team is required"), true},
+		{"free plan", &HTTPError{StatusCode: http.StatusForbidden, Msg: "403: this repository is using the free plan"}, true},
+		{"409", &HTTPError{StatusCode: http.StatusConflict, Msg: "409 Conflict"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsRulesetUnavailable(tt.err); got != tt.want {
+				t.Errorf("IsRulesetUnavailable(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }
 
