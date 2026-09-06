@@ -79,15 +79,15 @@ func TestBranchProtectionItem_RulesetExists(t *testing.T) {
 
 func TestBranchProtectionItem_Creation(t *testing.T) {
 	// Test branch protection action determination: ActionUpgrade when classic exists,
-	// ActionCreate for new repos (both public and private, public is optional).
+	// ActionCreate for new repos. protect-main is required so a failed apply
+	// cannot print overall success.
 	tests := []struct {
 		name          string
 		visibility    string
 		rulesetExists bool
 		classicExists bool
 		wantAction    wizard.Action
-		checkOptional bool
-		wantOptional  bool // only checked if checkOptional=true
+		wantOptional  bool
 	}{
 		{
 			name:          "new public repo",
@@ -95,8 +95,7 @@ func TestBranchProtectionItem_Creation(t *testing.T) {
 			rulesetExists: false,
 			classicExists: false,
 			wantAction:    wizard.ActionCreate,
-			checkOptional: true,
-			wantOptional:  true,
+			wantOptional:  false,
 		},
 		{
 			name:          "new private repo",
@@ -104,7 +103,7 @@ func TestBranchProtectionItem_Creation(t *testing.T) {
 			rulesetExists: false,
 			classicExists: false,
 			wantAction:    wizard.ActionCreate,
-			checkOptional: false,
+			wantOptional:  false,
 		},
 		{
 			name:          "upgrade from classic",
@@ -112,7 +111,7 @@ func TestBranchProtectionItem_Creation(t *testing.T) {
 			rulesetExists: false,
 			classicExists: true,
 			wantAction:    wizard.ActionUpgrade,
-			checkOptional: false,
+			wantOptional:  false,
 		},
 	}
 
@@ -126,7 +125,7 @@ func TestBranchProtectionItem_Creation(t *testing.T) {
 				if item.Action != tt.wantAction {
 					t.Errorf("expected action %v, got %v", tt.wantAction, item.Action)
 				}
-				if tt.checkOptional && item.Optional != tt.wantOptional {
+				if item.Optional != tt.wantOptional {
 					t.Errorf("expected Optional=%v, got %v", tt.wantOptional, item.Optional)
 				}
 			}, nil)

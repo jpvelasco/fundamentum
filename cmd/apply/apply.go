@@ -291,9 +291,8 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 		}
 	default:
 		return wizard.Item{
-			Name:     "Branch protection (protect-main)",
-			Action:   wizard.ActionCreate,
-			Optional: true,
+			Name:   "Branch protection (protect-main)",
+			Action: wizard.ActionCreate,
 			Apply: func() error {
 				err := c.EnsureBranchRuleset(owner, repo, nil, opts)
 				if err == nil {
