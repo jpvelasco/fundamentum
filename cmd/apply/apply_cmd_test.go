@@ -611,6 +611,38 @@ func TestRunWithClient_DryRun(t *testing.T) {
 	}
 }
 
+func TestRunWithClient_DryRunPrivateShowsAdvancedSecurity(t *testing.T) {
+	t.Cleanup(func() {
+		globals.DryRun = false
+		globals.AdvancedSecurity = false
+	})
+	globals.DryRun = true
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
+			_, _ = w.Write([]byte(`{"visibility":"private","default_branch":"main","owner":{"type":"User"}}`))
+		case strings.Contains(r.URL.Path, "/rulesets"):
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	var out strings.Builder
+	err := runWithClient(newTestClient(srv), "owner", "repo", strings.NewReader(""), &out)
+	if err != nil {
+		t.Fatalf("runWithClient() error: %v", err)
+	}
+	if !strings.Contains(out.String(), "secret scanning") {
+		t.Errorf("private dry-run must show offered GHAS plan lines, got:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "Enable GitHub Advanced Security") {
+		t.Errorf("dry-run must not prompt for GHAS, got:\n%s", out.String())
+	}
+}
+
 // TestRunWithClient_VisibilityError verifies visibility detection failures
 // surface a wrapped error.
 func TestRunWithClient_VisibilityError(t *testing.T) {
