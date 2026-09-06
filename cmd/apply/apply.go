@@ -306,9 +306,9 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 				if visibility == "public" {
 					return err
 				}
-				// Only fall back to classic on 403 — rulesets unavailable on free-tier private repos.
-				// Other errors (rate limit, bad token, network, 422) should surface as-is.
-				if !github.IsForbidden403(err) {
+				// Only fall back to classic when rulesets are not offered on this
+				// plan. Other 403s (token scope, SSO, IP allow lists) surface as-is.
+				if !github.IsRulesetUnavailable(err) {
 					return err
 				}
 				return c.ApplyClassicBranchProtection(owner, repo, branch, checks, *opts)
