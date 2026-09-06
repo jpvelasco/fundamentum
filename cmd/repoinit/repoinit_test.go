@@ -80,6 +80,9 @@ func TestRun_DryRunPrivate(t *testing.T) {
 	if !strings.Contains(out.String(), "would create repo owner/new-repo (private)") {
 		t.Errorf("expected private visibility, got:\n%s", out.String())
 	}
+	if !strings.Contains(out.String(), "secret scanning") {
+		t.Errorf("private init --dry-run must show offered GHAS plan lines, got:\n%s", out.String())
+	}
 }
 
 func TestRun_CreateRepo_Fails(t *testing.T) {

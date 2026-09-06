@@ -110,9 +110,15 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	}
 
 	paidSecurity := globals.AdvancedSecurity
-	if !globals.DryRun && !github.IsPublicVisibility(visibility) && !paidSecurity {
-		paidSecurity = wizard.PromptAdvancedSecurity(stdin, stdout)
-		_, _ = fmt.Fprintln(stdout)
+	if !github.IsPublicVisibility(visibility) && !paidSecurity {
+		if globals.DryRun {
+			// Show the GHAS plan lines a live run would offer for this
+			// visibility; live still prompts before applying them.
+			paidSecurity = true
+		} else {
+			paidSecurity = wizard.PromptAdvancedSecurity(stdin, stdout)
+			_, _ = fmt.Fprintln(stdout)
+		}
 	}
 
 	items, err := buildItems(client, owner, repo, branch, visibility, rendered, branchPlan, tagPlan, classicExists, &opts, paidSecurity)
@@ -154,7 +160,7 @@ func PlanNewRepo(owner, repo, visibility string, stdout io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("render templates: %w", err)
 	}
-	paid := globals.AdvancedSecurity || github.IsPublicVisibility(visibility)
+	paid := globals.AdvancedSecurity || github.IsPublicVisibility(visibility) || globals.DryRun
 	items, err := buildItems(nil, owner, repo, "main", visibility, rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, paid)
 	if err != nil {
 		return err
