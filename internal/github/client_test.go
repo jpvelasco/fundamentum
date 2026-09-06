@@ -55,6 +55,10 @@ func TestWithBaseURL_RejectsNonHTTPS(t *testing.T) {
 		{"https scheme", "https://api.github.com", true},
 		{"localhost", "http://localhost:8080", true},
 		{"127.0.0.1", "http://127.0.0.1:8080", true},
+		{"ipv6 loopback", "http://[::1]:8080", true},
+		{"localhost prefix attack", "http://localhost.evil.com", false},
+		{"loopback prefix attack", "http://127.0.0.1.evil.com", false},
+		{"localhostfoo", "http://localhostfoo:8080", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
