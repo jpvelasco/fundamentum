@@ -108,7 +108,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 		_, _ = fmt.Fprintln(stdout)
 	}
 
-	items, err := buildItems(client, owner, repo, branch, visibility, rendered, rulesetExists, tagExists, classicExists, opts, paidSecurity)
+	items, err := buildItems(client, owner, repo, branch, visibility, rendered, rulesetExists, tagExists, classicExists, &opts, paidSecurity)
 	if err != nil {
 		return fmt.Errorf("plan %s/%s: %w (verify the token grants Contents read access and retry)", owner, repo, err)
 	}
@@ -125,7 +125,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	if !wizard.ConfirmDefaults(stdin, stdout) {
 		wizard.SelectInteractive(items, stdin)
 	}
-	if err := applyItems(client, owner, repo, branch, items, globals.ViaPR); err != nil {
+	if err := applyItems(client, owner, repo, branch, items, globals.ViaPR, &opts); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(stdout, "\n  ✓ Done — https://github.com/%s/%s\n", owner, repo)
@@ -137,7 +137,7 @@ func buildItems(
 	owner, repo, branch, visibility string,
 	rendered []templates.RenderedFile,
 	rulesetExists, tagExists, classicExists bool,
-	opts github.BranchProtectionOptions,
+	opts *github.BranchProtectionOptions,
 	paidSecurity bool,
 ) ([]wizard.Item, error) {
 	var items []wizard.Item
@@ -271,7 +271,10 @@ func buildItems(
 //   - ruleset exists → skip
 //   - classic exists → upgrade (create ruleset + remove classic)
 //   - neither exists → ruleset for public repos; try ruleset then fall back to classic for private
-func branchProtectionItem(c *github.Client, owner, repo, branch, visibility string, rulesetExists, classicExists bool, opts github.BranchProtectionOptions) wizard.Item {
+func branchProtectionItem(c *github.Client, owner, repo, branch, visibility string, rulesetExists, classicExists bool, opts *github.BranchProtectionOptions) wizard.Item {
+	if opts == nil {
+		opts = &github.BranchProtectionOptions{}
+	}
 	switch {
 	case rulesetExists:
 		return wizard.Item{
@@ -283,7 +286,7 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			Name:   "Branch protection (upgrade classic → ruleset)",
 			Action: wizard.ActionUpgrade,
 			Apply: func() error {
-				if err := c.EnsureBranchRuleset(owner, repo, nil, opts); err != nil {
+				if err := c.EnsureBranchRuleset(owner, repo, nil, *opts); err != nil {
 					return err
 				}
 				return c.RemoveClassicBranchProtection(owner, repo, branch)
@@ -294,7 +297,7 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			Name:   "Branch protection (protect-main)",
 			Action: wizard.ActionCreate,
 			Apply: func() error {
-				err := c.EnsureBranchRuleset(owner, repo, nil, opts)
+				err := c.EnsureBranchRuleset(owner, repo, nil, *opts)
 				if err == nil {
 					return nil
 				}
@@ -307,7 +310,7 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 				if !github.IsForbidden403(err) {
 					return err
 				}
-				return c.ApplyClassicBranchProtection(owner, repo, branch, github.DefaultStatusChecks, opts)
+				return c.ApplyClassicBranchProtection(owner, repo, branch, github.DefaultStatusChecks, *opts)
 			},
 		}
 	}
@@ -363,11 +366,14 @@ func actionFromExists(exists bool) wizard.Action {
 // into a single PR instead of direct commits. If viaPR is false and a 409
 // is detected, the tool automatically falls back to PR mode for remaining
 // file items — no re-run needed.
-func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Item, viaPR bool) error {
+func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Item, viaPR bool, opts *github.BranchProtectionOptions) error {
 	var fileChanges []github.FileChange
 	var nonFileItems []wizard.Item
 	fallback := false // true after first 409 triggers auto-fallback to PR mode
 	requiredFailed := false
+	if viaPR {
+		deferRequiredChecks(opts)
+	}
 
 	for _, item := range items {
 		if wizard.ShouldSkip(item) {
@@ -400,6 +406,7 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 						Content: item.Content,
 					})
 					fallback = true
+					deferRequiredChecks(opts)
 					continue
 				}
 				fmt.Print("\r")
@@ -448,4 +455,12 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 		return fmt.Errorf("one or more required items failed")
 	}
 	return nil
+}
+
+// deferRequiredChecks drops merge-blocking status checks so an open harden
+// PR is not required to report Codacy/CI contexts that only exist after merge.
+func deferRequiredChecks(opts *github.BranchProtectionOptions) {
+	if opts != nil {
+		opts.SkipStatusChecks = true
+	}
 }
