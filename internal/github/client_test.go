@@ -206,6 +206,22 @@ func TestDo_RetriesServerError(t *testing.T) {
 	}
 }
 
+func TestDo_NoRetryOnPostTransient(t *testing.T) {
+	srv, count := countingServer(http.StatusBadGateway, http.StatusOK)
+	defer srv.Close()
+
+	resp, err := newZeroDelayClient(srv.URL).post("/git/refs", map[string]any{"ref": "refs/heads/x"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("POST must not retry; got %d, want 502", resp.StatusCode)
+	}
+	if *count != 1 {
+		t.Errorf("expected 1 POST attempt, got %d", *count)
+	}
+}
+
 // Given a client error (401), the request must NOT be retried.
 func TestDo_NoRetryOnClientError(t *testing.T) {
 	srv, count := countingServer(http.StatusUnauthorized)

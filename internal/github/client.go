@@ -94,7 +94,7 @@ func (c *Client) do(method, path string, body any) (*http.Response, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !retryableStatus(resp) || attempt >= maxAttempts-1 {
+		if !retryable(method, resp) || attempt >= maxAttempts-1 {
 			return resp, nil
 		}
 		// Drain and close before retrying so the connection can be reused.
@@ -159,6 +159,16 @@ func cryptoJitter(max time.Duration) time.Duration {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
 	return time.Duration(binary.BigEndian.Uint64(b[:]) % uint64(int64(max))) // #nosec G115 -- max is a small duration
+}
+
+// retryable reports whether this method+response is safe to retry.
+// POST is never retried: a lost 5xx after the server applied the write can
+// duplicate a repo, ruleset, branch, or pull request.
+func retryable(method string, resp *http.Response) bool {
+	if method == http.MethodPost {
+		return false
+	}
+	return retryableStatus(resp)
 }
 
 // retryableStatus reports whether a response signals a transient failure worth
