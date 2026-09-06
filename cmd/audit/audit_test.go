@@ -93,6 +93,74 @@ func TestAudit_AliasFileCountsAsPresent(t *testing.T) {
 	}
 }
 
+func TestAudit_PreflightErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		path   string
+		status int
+		want   string
+	}{
+		{"ruleset", "/repos/owner/repo/rulesets", http.StatusForbidden, "check branch ruleset"},
+		{"tag ruleset", "/repos/owner/repo/rulesets/2", http.StatusForbidden, "check tag ruleset"},
+		{"classic", "/repos/owner/repo/branches/main/protection", http.StatusForbidden, "check classic protection"},
+		{"dependabot", "/repos/owner/repo/vulnerability-alerts", http.StatusForbidden, "check dependabot"},
+		{"file", "/repos/owner/repo/contents/.github/CODEOWNERS", http.StatusForbidden, "check file"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == tt.path {
+					w.WriteHeader(tt.status)
+					return
+				}
+				writePassingAudit(w, r, true, true)
+			}))
+			defer srv.Close()
+			err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &strings.Builder{})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestAudit_RenderError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/owner/repo" {
+			_, _ = w.Write([]byte(`{"visibility":"public","default_branch":"feat/<test>","delete_branch_on_merge":true,"owner":{"type":"User"}}`))
+			return
+		}
+		writePassingAudit(w, r, true, true)
+	}))
+	defer srv.Close()
+	err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "render templates") {
+		t.Fatalf("expected render error, got %v", err)
+	}
+}
+
+func TestTagCheck(t *testing.T) {
+	if got := tagCheck(github.RulesetPlan{Exists: true}); !got.Pass || !got.Optional {
+		t.Errorf("match = %+v", got)
+	}
+	if got := tagCheck(github.RulesetPlan{}); got.Pass || got.Detail != "missing" {
+		t.Errorf("missing = %+v", got)
+	}
+}
+
+func TestFailedRequired(t *testing.T) {
+	t.Cleanup(func() { globals.Strict = false })
+	if failedRequired([]check{{Pass: true}}) {
+		t.Error("all pass must not fail")
+	}
+	if !failedRequired([]check{{Pass: false}}) {
+		t.Error("required fail must fail")
+	}
+	if failedRequired([]check{{Pass: false, Optional: true}}) {
+		t.Error("optional fail must not fail without --strict")
+	}
+}
+
 func TestAudit_RepoError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

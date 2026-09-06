@@ -7,6 +7,12 @@ import (
 	"testing"
 )
 
+func TestDependabotAlertsEnabled_NetworkError(t *testing.T) {
+	if _, err := newErroringClient().DependabotAlertsEnabled("owner", "repo"); err == nil {
+		t.Fatal("expected network error")
+	}
+}
+
 func TestDependabotAlertsEnabled(t *testing.T) {
 	tests := []struct {
 		name   string
