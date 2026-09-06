@@ -63,12 +63,21 @@ func (c *Client) WithBaseURL(baseURL string) *Client {
 	if err != nil {
 		return c
 	}
-	// Only allow localhost for testing or HTTPS for production.
-	if u.Scheme != "https" && !strings.HasPrefix(u.Host, "localhost") && !strings.HasPrefix(u.Host, "127.0.0.1") {
+	// Only allow true loopback for testing or HTTPS for production.
+	if u.Scheme != "https" && !isLoopbackHost(u.Hostname()) {
 		return c
 	}
 	c.baseURL = u.String()
 	return c
+}
+
+func isLoopbackHost(host string) bool {
+	switch strings.ToLower(host) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *Client) base() string {
