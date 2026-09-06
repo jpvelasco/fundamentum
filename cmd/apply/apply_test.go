@@ -236,6 +236,33 @@ func TestApplyItems_SkippedItemNotApplied(t *testing.T) {
 	}
 }
 
+func TestParseRequireChecks(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"nil uses defaults", nil, github.DefaultStatusChecks},
+		{"empty requires none", []string{}, []string{}},
+		{"explicit list", []string{"Lint", "Test (ubuntu-latest)"}, []string{"Lint", "Test (ubuntu-latest)"}},
+		{"trims blanks", []string{" Lint ", "", "gosec"}, []string{"Lint", "gosec"}},
+		{"dedups", []string{"Lint", "Lint"}, []string{"Lint"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseRequireChecks(tt.in)
+			if len(got) != len(tt.want) {
+				t.Fatalf("parseRequireChecks(%#v) = %#v, want %#v", tt.in, got, tt.want)
+			}
+			for i, name := range tt.want {
+				if got[i] != name {
+					t.Errorf("parseRequireChecks(...)[%d] = %q, want %q", i, got[i], name)
+				}
+			}
+		})
+	}
+}
+
 func TestItemFailedRequired(t *testing.T) {
 	t.Cleanup(func() { globals.Strict = false })
 	tests := []struct {

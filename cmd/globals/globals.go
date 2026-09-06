@@ -24,3 +24,8 @@ var AdvancedSecurity bool
 // Strict treats optional core harden steps (tag ruleset, security) as
 // required so a failed apply exits non-zero instead of printing Done.
 var Strict bool
+
+// RequireChecks is the explicit required-status-check list from
+// --require-checks. nil means use github.DefaultStatusChecks (shipped CI
+// jobs). An empty slice requires no status checks.
+var RequireChecks []string

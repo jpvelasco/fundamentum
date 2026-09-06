@@ -63,6 +63,7 @@ Everything is **idempotent** — re-running is safe and fast.
 | `--pr`              | Apply file changes via PR instead of direct push |
 | `--advanced-security` | Enable GitHub Advanced Security (secret scanning, push protection) on private/internal repos (paid) |
 | `--strict`          | Fail the run when any core harden step fails, including optional tag/security items |
+| `--require-checks`  | Required status-check contexts for `protect-main` (comma-separated; default: shipped CI jobs, not Codacy) |
 | `--version`         | Print version and exit                           |
 
 `init` also supports `--private` (default: `true`).
