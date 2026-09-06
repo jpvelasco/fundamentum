@@ -36,6 +36,7 @@ Examples:
   fundamentum apply OWNER/REPO              # interactive harden
   fundamentum --dry-run apply OWNER/REPO    # preview without changes
   fundamentum --pr apply OWNER/REPO         # apply via pull request
+  fundamentum --strict apply OWNER/REPO     # fail if any core step fails
   fundamentum --token $GITHUB_TOKEN apply OWNER/REPO`,
 		Args: cobra.ExactArgs(1),
 		RunE: run,
@@ -411,7 +412,7 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 				}
 				fmt.Print("\r")
 				wizard.PrintItemError(os.Stdout, item, err)
-				if !item.Optional {
+				if itemFailedRequired(item) {
 					requiredFailed = true
 				}
 			} else {
@@ -442,7 +443,7 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 		if err := item.Apply(); err != nil {
 			fmt.Print("\r")
 			wizard.PrintItemError(os.Stdout, item, err)
-			if !item.Optional {
+			if itemFailedRequired(item) {
 				requiredFailed = true
 			}
 			continue
@@ -463,4 +464,10 @@ func deferRequiredChecks(opts *github.BranchProtectionOptions) {
 	if opts != nil {
 		opts.SkipStatusChecks = true
 	}
+}
+
+// itemFailedRequired reports whether a failed item should fail the run.
+// --strict treats optional core steps (tag ruleset, security) as required.
+func itemFailedRequired(item wizard.Item) bool {
+	return !item.Optional || globals.Strict
 }

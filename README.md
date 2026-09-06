@@ -62,6 +62,7 @@ Everything is **idempotent** — re-running is safe and fast.
 | `--no-overwrite`    | Skip any file that already exists                |
 | `--pr`              | Apply file changes via PR instead of direct push |
 | `--advanced-security` | Enable GitHub Advanced Security (secret scanning, push protection) on private/internal repos (paid) |
+| `--strict`          | Fail the run when any core harden step fails, including optional tag/security items |
 | `--version`         | Print version and exit                           |
 
 `init` also supports `--private` (default: `true`).

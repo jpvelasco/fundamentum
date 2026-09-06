@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jpvelasco/fundamentum/cmd/globals"
 	"github.com/jpvelasco/fundamentum/internal/github"
 	"github.com/jpvelasco/fundamentum/internal/templates"
 	"github.com/jpvelasco/fundamentum/internal/wizard"
@@ -232,6 +233,48 @@ func TestApplyItems_SkippedItemNotApplied(t *testing.T) {
 	}
 	if applyCalled {
 		t.Error("expected Apply not to be called")
+	}
+}
+
+func TestItemFailedRequired(t *testing.T) {
+	t.Cleanup(func() { globals.Strict = false })
+	tests := []struct {
+		name     string
+		optional bool
+		strict   bool
+		want     bool
+	}{
+		{"required default", false, false, true},
+		{"optional default", true, false, false},
+		{"required strict", false, true, true},
+		{"optional strict", true, true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			globals.Strict = tt.strict
+			got := itemFailedRequired(wizard.Item{Optional: tt.optional})
+			if got != tt.want {
+				t.Errorf("itemFailedRequired(optional=%v, strict=%v) = %v, want %v", tt.optional, tt.strict, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyItems_StrictOptionalFailureFailsRun(t *testing.T) {
+	t.Cleanup(func() { globals.Strict = false })
+	globals.Strict = true
+	items := []wizard.Item{
+		{
+			Name:     "Tag ruleset (protect-version-tags)",
+			Action:   wizard.ActionCreate,
+			Optional: true,
+			Apply:    func() error { return fmt.Errorf("API error") },
+		},
+	}
+	c := github.NewClient("", false)
+	err := applyItems(c, "owner", "repo", "main", items, false, nil)
+	if err == nil || !strings.Contains(err.Error(), "required items failed") {
+		t.Errorf("--strict must fail the run when an optional core step fails, got: %v", err)
 	}
 }
 
