@@ -233,8 +233,8 @@ func TestRulesetExists(t *testing.T) {
 			want:       false,
 		},
 		{
-			name:       "non-200 status",
-			statusCode: http.StatusForbidden,
+			name:       "not found status",
+			statusCode: http.StatusNotFound,
 			response:   ``,
 			want:       false,
 		},
@@ -248,6 +248,30 @@ func TestRulesetExists(t *testing.T) {
 				}
 				if got != tt.want {
 					t.Errorf("RulesetExists() = %v, want %v", got, tt.want)
+				}
+			}, nil)
+		})
+	}
+}
+
+func TestRulesetExists_NonOKErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+	}{
+		{"forbidden", http.StatusForbidden},
+		{"unauthorized", http.StatusUnauthorized},
+		{"server error", http.StatusInternalServerError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testWithServer(t, newJSONResponseHandler(tt.status, ``), nil, func(c *Client) {
+				got, err := c.RulesetExists("owner", "repo", "protect-main")
+				if err == nil {
+					t.Fatal("RulesetExists() error = nil, want status error")
+				}
+				if got {
+					t.Error("RulesetExists() = true on error, want false")
 				}
 			}, nil)
 		})
@@ -522,22 +546,6 @@ func TestErrorResponses(t *testing.T) {
 			}, nil)
 		})
 	}
-}
-
-func TestClassicProtectionExists_Error(t *testing.T) {
-	// The function doesn't return an error for non-200 status — it just returns false
-	// Test that API errors still propagate
-	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}), nil, func(c *Client) {
-		exists, err := c.ClassicProtectionExists("owner", "repo", "main")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !exists {
-			t.Error("expected true for 200 response")
-		}
-	}, nil)
 }
 
 func TestClient_DoVerbose(t *testing.T) {

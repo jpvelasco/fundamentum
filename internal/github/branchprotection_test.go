@@ -44,6 +44,32 @@ func TestClassicProtectionExists(t *testing.T) {
 	}
 }
 
+func TestClassicProtectionExists_NonOKErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+	}{
+		{"forbidden", http.StatusForbidden},
+		{"unauthorized", http.StatusUnauthorized},
+		{"server error", http.StatusInternalServerError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+			}))
+			defer srv.Close()
+			got, err := c.ClassicProtectionExists("owner", "repo", "main")
+			if err == nil {
+				t.Fatal("ClassicProtectionExists() error = nil, want status error")
+			}
+			if got {
+				t.Error("ClassicProtectionExists() = true on error, want false")
+			}
+		})
+	}
+}
+
 func TestClassicProtectionExists_NetworkError(t *testing.T) {
 	c := newErroringClient()
 	_, err := c.ClassicProtectionExists("owner", "repo", "main")
