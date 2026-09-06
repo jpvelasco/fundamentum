@@ -66,7 +66,7 @@ Everything is **idempotent** — re-running is safe and fast.
 | `--verbose`         | Print every API call                             |
 | `--token`           | GitHub token (defaults to `GITHUB_TOKEN`)        |
 | `--no-overwrite`    | Skip any file that already exists                |
-| `--pr`              | Apply file changes via PR instead of direct push |
+| `--pr`              | Batch file changes into a PR; settings/security/protection still apply live |
 | `--advanced-security` | Enable GitHub Advanced Security (secret scanning, push protection) on private/internal repos (paid) |
 | `--strict`          | Fail the run when any core harden step fails, including optional tag/security items |
 | `--require-checks`  | Required status-check contexts for `protect-main` (comma-separated; default: shipped CI jobs, not Codacy) |
@@ -79,7 +79,7 @@ Everything is **idempotent** — re-running is safe and fast.
 1. fundamentum detects your repo's current state (existing files, branch protection, visibility).
 2. It renders opinionated templates and shows a summary table of what will change.
 3. You confirm all defaults or step through items interactively.
-4. Files are created or updated directly (or via PR with `--pr`). Settings, security, and branch protection are applied via the GitHub API.
+4. Files are created or updated directly (or via PR with `--pr`). Settings, security, and branch protection are applied via the GitHub API even in `--pr` mode.
 
 ## Install
 
