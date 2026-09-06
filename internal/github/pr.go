@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -86,7 +87,7 @@ func (c *Client) CreatePullRequest(owner, repo, title, body, head, base string) 
 
 // ApplyViaPR creates a feature branch, pushes all file changes, and opens a PR.
 // Returns the PR number on success.
-func (c *Client) ApplyViaPR(owner, repo, defaultBranch string, changes []FileChange) (int, error) {
+func (c *Client) ApplyViaPR(owner, repo, defaultBranch string, changes []FileChange, stdout io.Writer) (int, error) {
 	// UnixNano keeps consecutive runs in the same second from colliding on a
 	// branch name (POST /git/refs 422s when the branch already exists).
 	branch := fmt.Sprintf("harden-%s-%d", defaultBranch, time.Now().UnixNano())
@@ -104,7 +105,7 @@ func (c *Client) ApplyViaPR(owner, repo, defaultBranch string, changes []FileCha
 		action, err := c.UpsertFileOnBranch(owner, repo, branch, ch.Path, ch.Content)
 		if err != nil {
 			if IsWorkflowLocked(err) {
-				fmt.Printf("  %-45s  ⚠ workflow locked by GitHub Actions\n", ch.Path)
+				_, _ = fmt.Fprintf(stdout, "  %-45s  ⚠ workflow locked by GitHub Actions\n", ch.Path)
 				continue
 			}
 			_ = c.deleteBranch(owner, repo, branch)
@@ -112,7 +113,7 @@ func (c *Client) ApplyViaPR(owner, repo, defaultBranch string, changes []FileCha
 		}
 		if action != "skipped" {
 			wrote++
-			fmt.Printf("  %-45s  ✓ (%s)\n", ch.Path, action)
+			_, _ = fmt.Fprintf(stdout, "  %-45s  ✓ (%s)\n", ch.Path, action)
 		}
 	}
 	if wrote == 0 {

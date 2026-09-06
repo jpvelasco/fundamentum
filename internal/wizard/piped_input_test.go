@@ -2,6 +2,7 @@ package wizard
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 )
@@ -48,7 +49,7 @@ func TestPipedAnswersSurviveAcrossPrompts(t *testing.T) {
 			if got := ConfirmDefaults(r, &out); got != tt.decline {
 				t.Fatalf("ConfirmDefaults()=%v, want %v", got, tt.decline)
 			}
-			SelectInteractive(items, r)
+			SelectInteractive(items, r, io.Discard)
 			for i, want := range tt.wantActs {
 				if items[i].Action != want {
 					t.Errorf("item %d Action=%v, want %v", i, items[i].Action, want)
@@ -74,7 +75,7 @@ func TestAnswersSharedAcrossDistinctPrompts(t *testing.T) {
 		t.Error("ConfirmDefaults: expected n (false)")
 	}
 	items := []Item{{Name: "a.md", Action: ActionCreate}}
-	SelectInteractive(items, r)
+	SelectInteractive(items, r, io.Discard)
 	if items[0].Action != ActionCreate {
 		t.Errorf("SelectInteractive: expected item accepted, got %v", items[0].Action)
 	}

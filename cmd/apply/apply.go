@@ -4,7 +4,6 @@ package apply
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -131,9 +130,9 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	wizard.PrintSummaryTable(stdout, items, true)
 
 	if !wizard.ConfirmDefaults(stdin, stdout) {
-		wizard.SelectInteractive(items, stdin)
+		wizard.SelectInteractive(items, stdin, stdout)
 	}
-	if err := applyItems(client, owner, repo, branch, items, globals.ViaPR, &opts); err != nil {
+	if err := applyItems(client, owner, repo, branch, items, globals.ViaPR, &opts, stdout); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(stdout, "\n  ✓ Done — https://github.com/%s/%s\n", owner, repo)
@@ -377,7 +376,7 @@ func codeOwnerLine(owner string, org bool) string {
 // into a single PR instead of direct commits. If viaPR is false and a 409
 // is detected, the tool automatically falls back to PR mode for remaining
 // file items — no re-run needed.
-func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Item, viaPR bool, opts *github.BranchProtectionOptions) error {
+func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Item, viaPR bool, opts *github.BranchProtectionOptions, stdout io.Writer) error {
 	var fileChanges []github.FileChange
 	var nonFileItems []wizard.Item
 	fallback := false // true after first 409 triggers auto-fallback to PR mode
@@ -387,7 +386,7 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 	}
 
 	for _, item := range items {
-		if wizard.ShouldSkip(item) {
+		if wizard.ShouldSkip(item, stdout) {
 			continue
 		}
 
@@ -403,14 +402,14 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 			}
 
 			// Direct apply — detect 409 and auto-fallback to PR mode.
-			fmt.Printf("  %-45s  applying...", item.Name)
+			_, _ = fmt.Fprintf(stdout, "  %-45s  applying...", item.Name)
 			if err := item.Apply(); err != nil {
 				if github.IsWorkflowLocked(err) {
-					fmt.Printf("\r  %-45s  ⚠ workflow locked by GitHub Actions\n", item.Name)
+					_, _ = fmt.Fprintf(stdout, "\r  %-45s  ⚠ workflow locked by GitHub Actions\n", item.Name)
 					continue
 				}
 				if github.IsConflict409(err) {
-					fmt.Printf("\r  %-45s  ⚠ branch protection requires PR — switching to PR mode\n", item.Name)
+					_, _ = fmt.Fprintf(stdout, "\r  %-45s  ⚠ branch protection requires PR — switching to PR mode\n", item.Name)
 					// Retry this item via PR mode.
 					fileChanges = append(fileChanges, github.FileChange{
 						Path:    item.Name,
@@ -420,13 +419,13 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 					deferRequiredChecks(opts)
 					continue
 				}
-				fmt.Print("\r")
-				wizard.PrintItemError(os.Stdout, item, err)
+				_, _ = fmt.Fprint(stdout, "\r")
+				wizard.PrintItemError(stdout, item, err)
 				if itemFailedRequired(item) {
 					requiredFailed = true
 				}
 			} else {
-				fmt.Printf("\r  %-45s  ✓\n", item.Name)
+				_, _ = fmt.Fprintf(stdout, "\r  %-45s  ✓\n", item.Name)
 			}
 		} else {
 			nonFileItems = append(nonFileItems, item)
@@ -435,33 +434,33 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 
 	// If we collected file changes for PR mode, batch them.
 	if len(fileChanges) > 0 {
-		fmt.Printf("\n  Creating PR with %d file changes...\n", len(fileChanges))
-		prNum, err := c.ApplyViaPR(owner, repo, branch, fileChanges)
+		_, _ = fmt.Fprintf(stdout, "\n  Creating PR with %d file changes...\n", len(fileChanges))
+		prNum, err := c.ApplyViaPR(owner, repo, branch, fileChanges, stdout)
 		if err != nil {
 			return fmt.Errorf("apply via PR: %w", err)
 		}
 		if prNum > 0 {
-			fmt.Printf("  ✓ PR #%d created: https://github.com/%s/%s/pull/%d\n", prNum, owner, repo, prNum)
+			_, _ = fmt.Fprintf(stdout, "  ✓ PR #%d created: https://github.com/%s/%s/pull/%d\n", prNum, owner, repo, prNum)
 		} else {
-			fmt.Printf("  no file changes to put in a PR\n")
+			_, _ = fmt.Fprintf(stdout, "  no file changes to put in a PR\n")
 		}
 	}
 
 	// Apply non-file items (settings, security) directly.
 	for _, item := range nonFileItems {
-		fmt.Printf("  %-45s  applying...", item.Name)
+		_, _ = fmt.Fprintf(stdout, "  %-45s  applying...", item.Name)
 		if err := item.Apply(); err != nil {
-			fmt.Print("\r")
-			wizard.PrintItemError(os.Stdout, item, err)
+			_, _ = fmt.Fprint(stdout, "\r")
+			wizard.PrintItemError(stdout, item, err)
 			if itemFailedRequired(item) {
 				requiredFailed = true
 			}
 			continue
 		}
-		fmt.Printf("\r  %-45s  ✓\n", item.Name)
+		_, _ = fmt.Fprintf(stdout, "\r  %-45s  ✓\n", item.Name)
 	}
 
-	fmt.Printf("\n  Repo: https://github.com/%s/%s\n", owner, repo)
+	_, _ = fmt.Fprintf(stdout, "\n  Repo: https://github.com/%s/%s\n", owner, repo)
 	if requiredFailed {
 		return fmt.Errorf("one or more required items failed")
 	}

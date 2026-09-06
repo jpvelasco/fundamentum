@@ -72,9 +72,9 @@ func ConfirmDefaults(r io.Reader, w io.Writer) bool {
 
 // ShouldSkip reports whether item should be skipped rather than applied
 // (already exists) and prints a "skipped" line so the user sees the decision.
-func ShouldSkip(item Item) bool {
+func ShouldSkip(item Item, w io.Writer) bool {
 	if item.IsSkip() {
-		fmt.Printf("  %-45s  skipped\n", item.Name)
+		_, _ = fmt.Fprintf(w, "  %-45s  skipped\n", item.Name)
 		return true
 	}
 	return false
@@ -119,17 +119,17 @@ func PlanSummary(items []Item) string {
 // SelectInteractive walks through each non-skipped item asking for confirmation.
 // Declined items are marked ActionSkip so applyItems (including --pr and 409
 // fallback) can run the remaining plan. Apply is not called here.
-func SelectInteractive(items []Item, r io.Reader) {
+func SelectInteractive(items []Item, r io.Reader, w io.Writer) {
 	for i := range items {
 		if items[i].IsSkip() {
-			fmt.Printf("  %-45s  already exists — skip\n", items[i].Name)
+			_, _ = fmt.Fprintf(w, "  %-45s  already exists — skip\n", items[i].Name)
 			continue
 		}
-		fmt.Printf("\n[%d/%d] %s (%s)\n", i+1, len(items), items[i].Name, items[i].LiveLabel())
-		fmt.Print("  Apply? [Y/n]: ")
+		_, _ = fmt.Fprintf(w, "\n[%d/%d] %s (%s)\n", i+1, len(items), items[i].Name, items[i].LiveLabel())
+		_, _ = fmt.Fprint(w, "  Apply? [Y/n]: ")
 		input := strings.TrimSpace(readLine(r))
 		if input != "" && !strings.EqualFold(input, "y") {
-			fmt.Printf("  %-45s  skipped by user\n", items[i].Name)
+			_, _ = fmt.Fprintf(w, "  %-45s  skipped by user\n", items[i].Name)
 			items[i].Action = ActionSkip
 		}
 	}

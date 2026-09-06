@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -452,10 +453,10 @@ func TestApplyViaPR_UniqueBranchNames(t *testing.T) {
 	})
 	testWithServer(t, handler, nil, func(c *Client) {
 		changes := []FileChange{{Path: "README.md", Content: []byte("hi")}}
-		if _, err := c.ApplyViaPR("owner", "repo", "main", changes); err != nil {
+		if _, err := c.ApplyViaPR("owner", "repo", "main", changes, io.Discard); err != nil {
 			t.Fatalf("first ApplyViaPR: %v", err)
 		}
-		if _, err := c.ApplyViaPR("owner", "repo", "main", changes); err != nil {
+		if _, err := c.ApplyViaPR("owner", "repo", "main", changes, io.Discard); err != nil {
 			t.Fatalf("second ApplyViaPR: %v", err)
 		}
 	}, func(t *testing.T) {
@@ -839,7 +840,7 @@ func TestApplyViaPR(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			testWithServer(t, tt.handler, nil, func(c *Client) {
-				prNum, err := c.ApplyViaPR("owner", "repo", "main", tt.changes)
+				prNum, err := c.ApplyViaPR("owner", "repo", "main", tt.changes, io.Discard)
 				if tt.wantErr {
 					if err == nil {
 						t.Fatal("expected error, got nil")
