@@ -501,6 +501,23 @@ func TestIsWorkflowLocked_ErrorsIs(t *testing.T) {
 	}, nil)
 }
 
+func TestDeleteBranch_Errors(t *testing.T) {
+	c := newErroringClient()
+	if err := c.deleteBranch("owner", "repo", "harden-main-1"); err == nil {
+		t.Fatal("expected network error")
+	}
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Errorf("method = %s, want DELETE", r.Method)
+		}
+		w.WriteHeader(http.StatusConflict)
+	}), nil, func(c *Client) {
+		if err := c.deleteBranch("owner", "repo", "harden-main-1"); err == nil {
+			t.Fatal("expected status error")
+		}
+	}, nil)
+}
+
 func TestApplyViaPR(t *testing.T) {
 	tests := []struct {
 		name    string
