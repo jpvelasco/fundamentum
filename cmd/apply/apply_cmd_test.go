@@ -611,6 +611,29 @@ func TestRunWithClient_DryRun(t *testing.T) {
 	}
 }
 
+func TestRunWithClient_PrivatePromptsAdvancedSecurity(t *testing.T) {
+	t.Cleanup(func() { globals.AdvancedSecurity = false })
+	inner := newRunFlowServer()
+	defer inner.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo" {
+			_, _ = w.Write([]byte(`{"visibility":"private","default_branch":"main","owner":{"type":"User"}}`))
+			return
+		}
+		inner.Config.Handler.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	var out strings.Builder
+	err := runWithClient(newTestClient(srv), "owner", "repo", newLineReader("solo\ny\ny\n"), &out)
+	if err != nil {
+		t.Fatalf("runWithClient() error: %v", err)
+	}
+	if !strings.Contains(out.String(), "Enable GitHub Advanced Security") {
+		t.Errorf("live private apply must prompt for GHAS, got:\n%s", out.String())
+	}
+}
+
 func TestRunWithClient_DryRunPrivateShowsAdvancedSecurity(t *testing.T) {
 	t.Cleanup(func() {
 		globals.DryRun = false
