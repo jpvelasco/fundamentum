@@ -17,6 +17,17 @@ func TestNewCmd(t *testing.T) {
 	}
 }
 
+func TestRun_MissingToken(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Cleanup(func() { globals.Token = "" })
+	globals.Token = ""
+	cmd := NewCmd()
+	cmd.SetArgs([]string{"owner/repo"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "GitHub token is required") {
+		t.Fatalf("expected missing-token error, got %v", err)
+	}
+}
+
 func TestRun_InvalidArg(t *testing.T) {
 	cmd := NewCmd()
 	cmd.SetArgs([]string{"norepo"})

@@ -1,6 +1,10 @@
 package util
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 func TestParseOwnerRepo(t *testing.T) {
 	tests := []struct {
@@ -40,4 +44,21 @@ func TestParseOwnerRepo(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRequireToken(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	if _, err := RequireToken(""); err == nil || !strings.Contains(err.Error(), "GitHub token is required") {
+		t.Fatalf("empty token error = %v", err)
+	}
+	got, err := RequireToken("flag-token")
+	if err != nil || got != "flag-token" {
+		t.Fatalf("flag token = (%q, %v)", got, err)
+	}
+	t.Setenv("GITHUB_TOKEN", "env-token")
+	got, err = RequireToken("")
+	if err != nil || got != "env-token" {
+		t.Fatalf("env token = (%q, %v)", got, err)
+	}
+	_ = os.Unsetenv("GITHUB_TOKEN")
 }

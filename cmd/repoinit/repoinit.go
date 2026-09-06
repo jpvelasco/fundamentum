@@ -65,7 +65,11 @@ func run(ownerRepo string, private bool, stdout io.Writer) error {
 		return apply.PlanNewRepo(owner, repo, visibility, stdout)
 	}
 
-	client := newClient(globals.Token, globals.Verbose)
+	token, err := util.RequireToken(globals.Token)
+	if err != nil {
+		return err
+	}
+	client := newClient(token, globals.Verbose)
 	_, _ = fmt.Fprintf(stdout, "Creating repo %s...\n", ownerRepo)
 	if err := client.CreateRepo(owner, repo, private); err != nil {
 		return fmt.Errorf("create repo: %w", err)

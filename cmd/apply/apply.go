@@ -50,7 +50,11 @@ func run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	client := newClient(globals.Token, globals.Verbose)
+	token, err := util.RequireToken(globals.Token)
+	if err != nil {
+		return err
+	}
+	client := newClient(token, globals.Verbose)
 	return runWithClient(client, owner, repo, cmd.InOrStdin(), cmd.OutOrStdout())
 }
 

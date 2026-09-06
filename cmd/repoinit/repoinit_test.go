@@ -100,8 +100,9 @@ func TestRun_CreateRepo_Fails(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resetGlobals(t)
+			globals.Token = "t"
 
-			// With no token and no mock server, CreateRepo will fail with a
+			// With a dummy token and no mock server, CreateRepo will fail with a
 			// network error. The error should contain "create repo".
 			err := run("owner/repo", tt.private, nil)
 			if err == nil {
@@ -114,8 +115,18 @@ func TestRun_CreateRepo_Fails(t *testing.T) {
 	}
 }
 
+func TestRun_MissingToken(t *testing.T) {
+	resetGlobals(t)
+	t.Setenv("GITHUB_TOKEN", "")
+	err := run("owner/repo", true, nil)
+	if err == nil || !strings.Contains(err.Error(), "GitHub token is required") {
+		t.Fatalf("expected missing-token error, got %v", err)
+	}
+}
+
 func TestRun_CreateRepoSuccess(t *testing.T) {
 	resetGlobals(t)
+	globals.Token = "t"
 	t.Cleanup(func() { newClient = github.NewClient })
 	t.Cleanup(func() { runApply = func(ownerRepo string) error {
 		applyCmd := apply.NewCmd()
@@ -150,6 +161,7 @@ func TestRun_CreateRepoSuccess(t *testing.T) {
 
 func TestExecute_RunE(t *testing.T) {
 	resetGlobals(t)
+	globals.Token = "t"
 	t.Cleanup(func() { newClient = github.NewClient })
 	t.Cleanup(func() { runApply = func(ownerRepo string) error {
 		applyCmd := apply.NewCmd()
