@@ -65,8 +65,8 @@ func (c *Client) upsertFile(owner, repo, branch, path string, content []byte) (s
 	getPath := contentsPath(owner, repo, path)
 	describe := func() string { return "upsert file " + path }
 	if branch != "" {
-		getPath = fmt.Sprintf("/repos/%s/%s/contents/%s?ref=%s",
-			url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(path), url.PathEscape(branch))
+		q := url.Values{"ref": {branch}}
+		getPath = contentsPath(owner, repo, path) + "?" + q.Encode()
 		describe = func() string { return fmt.Sprintf("upsert file %s on %s", path, branch) }
 	}
 
