@@ -265,6 +265,17 @@ func TestApplyItems_BranchProtectionFailureFailsRun(t *testing.T) {
 	}
 }
 
+func TestBranchProtectionItem_NilOpts(t *testing.T) {
+	item := branchProtectionItem(nil, "owner", "repo", "main", "public", true, false, nil)
+	if item.Action != wizard.ActionSkip {
+		t.Errorf("Action = %v, want skip", item.Action)
+	}
+}
+
+func TestDeferRequiredChecks_NilOpts(t *testing.T) {
+	deferRequiredChecks(nil)
+}
+
 func TestApplyItems_ViaPR_DefersRequiredChecks(t *testing.T) {
 	assertDeferredRequiredChecks(t, true, func() error { return nil }, "PR mode must not require status checks the open harden PR cannot satisfy")
 }
