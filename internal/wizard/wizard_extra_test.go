@@ -137,7 +137,7 @@ func TestSelectInteractive(t *testing.T) {
 			for i := range tt.items {
 				tt.items[i].Apply = func() error { applied++; return nil }
 			}
-			SelectInteractive(tt.items, strings.NewReader(tt.input))
+			SelectInteractive(tt.items, strings.NewReader(tt.input), io.Discard)
 			if applied != 0 {
 				t.Errorf("SelectInteractive must not apply, got %d calls", applied)
 			}
@@ -185,7 +185,7 @@ func TestShouldSkip(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ShouldSkip(tt.item); got != tt.want {
+			if got := ShouldSkip(tt.item, io.Discard); got != tt.want {
 				t.Errorf("ShouldSkip() = %v, want %v", got, tt.want)
 			}
 		})

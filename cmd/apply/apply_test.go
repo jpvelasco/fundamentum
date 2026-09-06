@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -70,7 +71,7 @@ func newFileItems(names []string, content [][]byte, applies []func() error) []wi
 func runApplyItemsExpectNoError(t *testing.T, handler http.HandlerFunc, items []wizard.Item, viaPR bool) {
 	t.Helper()
 	testWithServer(t, handler, func(c *github.Client) {
-		if err := applyItems(c, "owner", "repo", "main", items, viaPR, nil); err != nil {
+		if err := applyItems(c, "owner", "repo", "main", items, viaPR, nil, io.Discard); err != nil {
 			t.Errorf("expected no error, got: %v", err)
 		}
 	}, nil)
@@ -140,6 +141,25 @@ func TestBuildItems_WithExistingRuleset(t *testing.T) {
 				t.Errorf("expected branch protection to be skipped, got %v", item.Action)
 			}
 		}
+	}
+}
+
+func TestApplyItems_WritesToInjectedWriter(t *testing.T) {
+	var out strings.Builder
+	items := []wizard.Item{
+		{
+			Name:    ".github/CODEOWNERS",
+			Action:  wizard.ActionCreate,
+			Content: []byte("me"),
+			Apply:   func() error { return nil },
+		},
+	}
+	c := github.NewClient("", false)
+	if err := applyItems(c, "owner", "repo", "main", items, false, nil, &out); err != nil {
+		t.Fatalf("applyItems() error: %v", err)
+	}
+	if !strings.Contains(out.String(), "CODEOWNERS") {
+		t.Errorf("expected progress on injected writer, got %q", out.String())
 	}
 }
 
@@ -233,7 +253,7 @@ func TestApplyItems_SkippedItemNotApplied(t *testing.T) {
 		},
 	}
 	c := github.NewClient("", false)
-	if err := applyItems(c, "owner", "repo", "main", items, false, nil); err != nil {
+	if err := applyItems(c, "owner", "repo", "main", items, false, nil, io.Discard); err != nil {
 		t.Errorf("expected no error, got: %v", err)
 	}
 	if applyCalled {
@@ -304,7 +324,7 @@ func TestApplyItems_StrictOptionalFailureFailsRun(t *testing.T) {
 		},
 	}
 	c := github.NewClient("", false)
-	err := applyItems(c, "owner", "repo", "main", items, false, nil)
+	err := applyItems(c, "owner", "repo", "main", items, false, nil, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "required items failed") {
 		t.Errorf("--strict must fail the run when an optional core step fails, got: %v", err)
 	}
@@ -320,7 +340,7 @@ func TestApplyItems_ErrorHandling_NonFatal(t *testing.T) {
 		},
 	}
 	c := github.NewClient("", false)
-	if err := applyItems(c, "owner", "repo", "main", items, false, nil); err != nil {
+	if err := applyItems(c, "owner", "repo", "main", items, false, nil, io.Discard); err != nil {
 		t.Errorf("optional item failure must not fail the run, got: %v", err)
 	}
 }
@@ -334,7 +354,7 @@ func TestApplyItems_BranchProtectionFailureFailsRun(t *testing.T) {
 		},
 	}
 	c := github.NewClient("", false)
-	err := applyItems(c, "owner", "repo", "main", items, false, nil)
+	err := applyItems(c, "owner", "repo", "main", items, false, nil, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "required items failed") {
 		t.Errorf("core branch-protection failure must fail the run, got: %v", err)
 	}
@@ -400,7 +420,7 @@ func assertDeferredRequiredChecks(t *testing.T, viaPR bool, fileApply func() err
 			},
 			branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, false, opts),
 		}
-		if err := applyItems(c, "owner", "repo", "main", items, viaPR, opts); err != nil {
+		if err := applyItems(c, "owner", "repo", "main", items, viaPR, opts, io.Discard); err != nil {
 			t.Fatalf("applyItems() error: %v", err)
 		}
 	}, func(t *testing.T) {
@@ -436,7 +456,7 @@ func TestApplyItems_RequiredNonFileError(t *testing.T) {
 		},
 	}
 	c := github.NewClient("", false)
-	err := applyItems(c, "owner", "repo", "main", items, false, nil)
+	err := applyItems(c, "owner", "repo", "main", items, false, nil, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "required items failed") {
 		t.Errorf("expected required-items error, got: %v", err)
 	}
@@ -834,7 +854,7 @@ func TestApplyItems_RequiredFileError(t *testing.T) {
 		},
 	}
 	c := github.NewClient("", false)
-	err := applyItems(c, "owner", "repo", "main", items, false, nil)
+	err := applyItems(c, "owner", "repo", "main", items, false, nil, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "required items failed") {
 		t.Errorf("expected required-items error, got: %v", err)
 	}
@@ -854,7 +874,7 @@ func TestApplyItems_OptionalFileError(t *testing.T) {
 		},
 	}
 	c := github.NewClient("", false)
-	if err := applyItems(c, "owner", "repo", "main", items, false, nil); err != nil {
+	if err := applyItems(c, "owner", "repo", "main", items, false, nil, io.Discard); err != nil {
 		t.Errorf("optional file failure must not fail the run, got: %v", err)
 	}
 }
@@ -882,7 +902,7 @@ func TestApplyItems_ViaPRNoWrittenFiles(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}), func(c *github.Client) {
-		if err := applyItems(c, "owner", "repo", "main", items, true, nil); err != nil {
+		if err := applyItems(c, "owner", "repo", "main", items, true, nil, io.Discard); err != nil {
 			t.Errorf("expected no error when PR has no file changes, got: %v", err)
 		}
 	}, nil)
@@ -900,7 +920,7 @@ func TestApplyItems_ViaPRFailure(t *testing.T) {
 	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}), func(c *github.Client) {
-		err := applyItems(c, "owner", "repo", "main", items, true, nil)
+		err := applyItems(c, "owner", "repo", "main", items, true, nil, io.Discard)
 		if err == nil || !strings.Contains(err.Error(), "apply via PR") {
 			t.Errorf("expected apply-via-PR error, got: %v", err)
 		}
