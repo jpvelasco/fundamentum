@@ -13,7 +13,21 @@ func resetRootGlobals(t *testing.T) {
 		globals.Verbose = false
 		globals.Token = ""
 		globals.NoOverwrite = false
+		globals.Strict = false
 	})
+}
+
+func TestStrictFlag(t *testing.T) {
+	resetRootGlobals(t)
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"--strict", "--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !globals.Strict {
+		t.Error("expected Strict=true after --strict flag")
+	}
 }
 
 func TestDryRunFlag(t *testing.T) {

@@ -83,6 +83,7 @@ Built for solo devs and small teams who want their repos to feel like they were 
 | `--pr` | Batch file changes into a pull request |
 | `--no-overwrite` | Only add missing files, never touch existing ones |
 | `--advanced-security` | Enable GHAS (secret scanning, push protection) on private/internal repos (paid) |
+| `--strict` | Fail the run when any core harden step fails, including optional tag/security items |
 
 ## Prerequisites
 

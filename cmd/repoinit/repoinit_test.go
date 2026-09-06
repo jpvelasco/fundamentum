@@ -41,6 +41,7 @@ func resetGlobals(t *testing.T) {
 		globals.DryRun = false
 		globals.Token = ""
 		globals.Verbose = false
+		globals.Strict = false
 	})
 }
 

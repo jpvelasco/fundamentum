@@ -20,3 +20,7 @@ var ViaPR bool
 // AdvancedSecurity enables paid GitHub Advanced Security features
 // (secret scanning, push protection) on private/internal repos.
 var AdvancedSecurity bool
+
+// Strict treats optional core harden steps (tag ruleset, security) as
+// required so a failed apply exits non-zero instead of printing Done.
+var Strict bool
