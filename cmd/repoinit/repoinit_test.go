@@ -29,7 +29,7 @@ func TestNewCmd_PrivateFlag(t *testing.T) {
 }
 
 func TestRun_InvalidArg(t *testing.T) {
-	err := run("norepo", false)
+	err := run("norepo", false, nil)
 	if err == nil {
 		t.Error("expected error for invalid arg")
 	}
@@ -48,14 +48,37 @@ func resetGlobals(t *testing.T) {
 
 func TestRun_DryRunPath(t *testing.T) {
 	resetGlobals(t)
-
 	globals.DryRun = true
-	err := run("owner/repo", false)
-	// In dry-run mode, run() should skip CreateRepo entirely.
-	// Any error should NOT contain "create repo" — that would mean
-	// the dry-run branch was not taken.
-	if err != nil && strings.Contains(err.Error(), "create repo") {
-		t.Errorf("dry-run path should skip CreateRepo, got: %v", err)
+
+	var out strings.Builder
+	err := run("owner/new-repo", false, &out)
+	if err != nil {
+		t.Fatalf("init --dry-run must succeed without inspecting the missing repo, got: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "would create repo owner/new-repo (public)") {
+		t.Errorf("expected create-repo line, got:\n%s", got)
+	}
+	if !strings.Contains(got, "would create") {
+		t.Errorf("expected harden plan, got:\n%s", got)
+	}
+	if !strings.Contains(got, "Branch protection") {
+		t.Errorf("expected branch protection in plan, got:\n%s", got)
+	}
+	if !strings.Contains(got, "Dry run complete") {
+		t.Errorf("expected dry-run complete, got:\n%s", got)
+	}
+}
+
+func TestRun_DryRunPrivate(t *testing.T) {
+	resetGlobals(t)
+	globals.DryRun = true
+	var out strings.Builder
+	if err := run("owner/new-repo", true, &out); err != nil {
+		t.Fatalf("init --dry-run private: %v", err)
+	}
+	if !strings.Contains(out.String(), "would create repo owner/new-repo (private)") {
+		t.Errorf("expected private visibility, got:\n%s", out.String())
 	}
 }
 
@@ -80,7 +103,7 @@ func TestRun_CreateRepo_Fails(t *testing.T) {
 
 			// With no token and no mock server, CreateRepo will fail with a
 			// network error. The error should contain "create repo".
-			err := run("owner/repo", tt.private)
+			err := run("owner/repo", tt.private, nil)
 			if err == nil {
 				t.Error("expected error when CreateRepo fails")
 			}
@@ -120,7 +143,7 @@ func TestRun_CreateRepoSuccess(t *testing.T) {
 	}
 	runApply = func(string) error { return nil }
 
-	if err := run("owner/repo", false); err != nil {
+	if err := run("owner/repo", false, nil); err != nil {
 		t.Fatalf("run() error: %v", err)
 	}
 }

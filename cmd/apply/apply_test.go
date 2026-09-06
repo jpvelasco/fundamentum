@@ -76,6 +76,20 @@ func runApplyItemsExpectNoError(t *testing.T, handler http.HandlerFunc, items []
 	}, nil)
 }
 
+func TestPlanNewRepo(t *testing.T) {
+	var out strings.Builder
+	if err := PlanNewRepo("owner", "new-repo", "public", &out); err != nil {
+		t.Fatalf("PlanNewRepo() error: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "would create") || !strings.Contains(got, "Dry run complete") {
+		t.Errorf("expected dry-run plan, got:\n%s", got)
+	}
+	if !strings.Contains(got, "Branch protection") {
+		t.Errorf("expected branch protection, got:\n%s", got)
+	}
+}
+
 func TestBuildItems(t *testing.T) {
 	// Mock server that returns file not found for all files
 	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
