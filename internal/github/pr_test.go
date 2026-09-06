@@ -501,6 +501,23 @@ func TestIsWorkflowLocked_ErrorsIs(t *testing.T) {
 	}, nil)
 }
 
+func TestDeleteBranch_Errors(t *testing.T) {
+	c := newErroringClient()
+	if err := c.deleteBranch("owner", "repo", "harden-main-1"); err == nil {
+		t.Fatal("expected network error")
+	}
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Errorf("method = %s, want DELETE", r.Method)
+		}
+		w.WriteHeader(http.StatusConflict)
+	}), nil, func(c *Client) {
+		if err := c.deleteBranch("owner", "repo", "harden-main-1"); err == nil {
+			t.Fatal("expected status error")
+		}
+	}, nil)
+}
+
 func TestApplyViaPR(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -670,6 +687,11 @@ func TestApplyViaPR(t *testing.T) {
 					}
 				case http.MethodPut:
 					w.WriteHeader(http.StatusCreated)
+				case http.MethodDelete:
+					if !strings.Contains(r.URL.Path, "/git/refs/heads/harden-") {
+						t.Errorf("unexpected DELETE %s", r.URL.Path)
+					}
+					w.WriteHeader(http.StatusNoContent)
 				}
 			},
 			changes: []FileChange{
@@ -708,6 +730,11 @@ func TestApplyViaPR(t *testing.T) {
 						t.Error("must not open a PR when every file is skipped")
 					}
 					w.WriteHeader(http.StatusCreated)
+				case http.MethodDelete:
+					if !strings.Contains(r.URL.Path, "/git/refs/heads/harden-") {
+						t.Errorf("unexpected DELETE %s", r.URL.Path)
+					}
+					w.WriteHeader(http.StatusNoContent)
 				}
 			},
 			changes:    []FileChange{{Path: "README.md", Content: []byte("hello")}},
@@ -753,6 +780,35 @@ func TestApplyViaPR(t *testing.T) {
 				{Path: "README.md", Content: []byte("hello")},
 				{Path: "LICENSE", Content: []byte("MIT")},
 			},
+		},
+		{
+			name: "upsert error deletes branch",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					if strings.Contains(r.URL.Path, "/branches/") {
+						w.WriteHeader(http.StatusOK)
+						_ = json.NewEncoder(w).Encode(map[string]any{
+							"commit": map[string]any{"sha": "aaaa1111"},
+						})
+						return
+					}
+					w.WriteHeader(http.StatusNotFound)
+				case http.MethodPost:
+					w.WriteHeader(http.StatusCreated)
+				case http.MethodPut:
+					w.WriteHeader(http.StatusUnprocessableEntity)
+					_, _ = w.Write([]byte(`{"message":"invalid"}`))
+				case http.MethodDelete:
+					if !strings.Contains(r.URL.Path, "/git/refs/heads/harden-") {
+						t.Errorf("unexpected DELETE %s", r.URL.Path)
+					}
+					w.WriteHeader(http.StatusNoContent)
+				}
+			},
+			changes: []FileChange{{Path: "README.md", Content: []byte("hello")}},
+			wantErr: true,
+			errMsg:  "upsert",
 		},
 	}
 
