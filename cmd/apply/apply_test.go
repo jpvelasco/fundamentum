@@ -241,13 +241,13 @@ func TestParseRequireChecks(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseRequireChecks(tt.in)
+			got := github.ResolveRequiredChecks(tt.in)
 			if len(got) != len(tt.want) {
-				t.Fatalf("parseRequireChecks(%#v) = %#v, want %#v", tt.in, got, tt.want)
+				t.Fatalf("ResolveRequiredChecks(%#v) = %#v, want %#v", tt.in, got, tt.want)
 			}
 			for i, name := range tt.want {
 				if got[i] != name {
-					t.Errorf("parseRequireChecks(...)[%d] = %q, want %q", i, got[i], name)
+					t.Errorf("ResolveRequiredChecks(...)[%d] = %q, want %q", i, got[i], name)
 				}
 			}
 		})

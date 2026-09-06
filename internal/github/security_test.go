@@ -7,6 +7,37 @@ import (
 	"testing"
 )
 
+func TestDependabotAlertsEnabled(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		want   bool
+		err    bool
+	}{
+		{"enabled", http.StatusNoContent, true, false},
+		{"disabled", http.StatusNotFound, false, false},
+		{"forbidden", http.StatusForbidden, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/repos/owner/repo/vulnerability-alerts" {
+					t.Errorf("unexpected path %s", r.URL.Path)
+				}
+				w.WriteHeader(tt.status)
+			}), nil, func(c *Client) {
+				got, err := c.DependabotAlertsEnabled("owner", "repo")
+				if (err != nil) != tt.err {
+					t.Fatalf("error = %v, wantErr %v", err, tt.err)
+				}
+				if got != tt.want {
+					t.Errorf("got %v, want %v", got, tt.want)
+				}
+			}, nil)
+		})
+	}
+}
+
 func TestEnableSecurity(t *testing.T) {
 	tests := []struct {
 		name           string

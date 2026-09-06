@@ -5,6 +5,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jpvelasco/fundamentum/cmd/apply"
+	"github.com/jpvelasco/fundamentum/cmd/audit"
 	"github.com/jpvelasco/fundamentum/cmd/globals"
 	"github.com/jpvelasco/fundamentum/cmd/repoinit"
 )
@@ -22,6 +23,7 @@ health files to a GitHub repository in one shot.
 Examples:
   fundamentum apply OWNER/REPO              # harden existing repo
   fundamentum init OWNER/REPO               # create and harden new repo
+  fundamentum audit OWNER/REPO              # verify the harden baseline
   fundamentum --dry-run apply OWNER/REPO    # preview without changes
   fundamentum --version                     # show version`,
 		Version: Version,
@@ -36,6 +38,7 @@ Examples:
 	cmd.PersistentFlags().StringSliceVar(&globals.RequireChecks, "require-checks", nil, "required status-check contexts for protect-main (comma-separated; default: shipped CI jobs, not Codacy)")
 	cmd.AddCommand(apply.NewCmd())
 	cmd.AddCommand(repoinit.NewCmd())
+	cmd.AddCommand(audit.NewCmd())
 	return cmd
 }
 

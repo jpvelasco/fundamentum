@@ -79,6 +79,7 @@ Built for solo devs and small teams who want their repos to feel like they were 
 |---------|---------|
 | `apply OWNER/REPO` | Harden an existing repo |
 | `init OWNER/REPO` | Create a new repo, then harden it |
+| `audit OWNER/REPO` | Verify the repo matches the harden baseline |
 | `--dry-run` | Preview the full plan without applying |
 | `--pr` | Batch file changes into a pull request |
 | `--no-overwrite` | Only add missing files, never touch existing ones |

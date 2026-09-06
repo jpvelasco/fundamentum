@@ -262,6 +262,12 @@ func TestGetRepo(t *testing.T) {
 			wantBranch: "main",
 			wantOwner:  "Organization",
 		},
+		{
+			name:     "reads settings and secret scanning",
+			response: `{"visibility":"public","default_branch":"main","delete_branch_on_merge":true,"security_and_analysis":{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"}}}`,
+			wantVis:  "public",
+			wantBranch: "main",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -284,6 +290,12 @@ func TestGetRepo(t *testing.T) {
 				}
 				if got.OwnerType != tt.wantOwner {
 					t.Errorf("OwnerType=%q, want %q", got.OwnerType, tt.wantOwner)
+				}
+				if strings.Contains(tt.response, `"delete_branch_on_merge":true`) && !got.DeleteBranchOnMerge {
+					t.Error("expected DeleteBranchOnMerge")
+				}
+				if strings.Contains(tt.response, `"secret_scanning"`) && (!got.SecretScanning || !got.SecretPushProtection) {
+					t.Error("expected secret scanning fields")
 				}
 			}, nil)
 		})

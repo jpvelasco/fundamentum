@@ -83,7 +83,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	// Pre-flight: check branch protection state before asking solo/team.
 	var opts github.BranchProtectionOptions
 	opts.SkipCodeOwners = orgOwner
-	branchPlan, err := client.PlanBranchRuleset(owner, repo, parseRequireChecks(globals.RequireChecks), opts)
+	branchPlan, err := client.PlanBranchRuleset(owner, repo, github.ResolveRequiredChecks(globals.RequireChecks), opts)
 	if err != nil {
 		return fmt.Errorf("check branch ruleset: %w", err)
 	}
@@ -147,48 +147,7 @@ func buildItems(
 ) ([]wizard.Item, error) {
 	var items []wizard.Item
 
-	// aliases maps template output paths to known case/path variants that count as "already exists".
-	// Covers legacy root placements, case variants, and format variants (.yml vs .md).
-	aliases := map[string][]string{
-		".github/CODEOWNERS": {
-			".github/CODEOWNERS",
-			"CODEOWNERS",
-		},
-		".github/CONTRIBUTING.md": {
-			".github/CONTRIBUTING.md",
-			"CONTRIBUTING.md",
-		},
-		".github/CODE_OF_CONDUCT.md": {
-			".github/CODE_OF_CONDUCT.md",
-			"CODE_OF_CONDUCT.md",
-		},
-		".github/SECURITY.md": {
-			".github/SECURITY.md",
-			"SECURITY.md",
-		},
-		".github/PULL_REQUEST_TEMPLATE.md": {
-			".github/PULL_REQUEST_TEMPLATE.md",
-			".github/pull_request_template.md",
-		},
-		".codacy.yml": {
-			".codacy.yml",
-			".codacy.yaml",
-			".codacy/codacy.yaml",
-			".codacy/codacy.yml",
-		},
-		".github/ISSUE_TEMPLATE/bug_report.yml": {
-			".github/ISSUE_TEMPLATE/bug_report.yml",
-			".github/ISSUE_TEMPLATE/bug_report.md",
-		},
-		".github/ISSUE_TEMPLATE/feature_request.yml": {
-			".github/ISSUE_TEMPLATE/feature_request.yml",
-			".github/ISSUE_TEMPLATE/feature_request.md",
-		},
-		".github/workflows/octopus.yml": {
-			".github/workflows/octopus.yml",
-			".github/workflows/octopus-review.yml",
-		},
-	}
+	aliases := templates.FileAliases()
 
 	// Files first — branch protection applied after, so direct commits are still allowed.
 	for _, f := range rendered {
@@ -287,7 +246,7 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			Name:   "Branch protection (reconcile protect-main)",
 			Action: wizard.ActionUpdate,
 			Apply: func() error {
-				return c.EnsureBranchRuleset(owner, repo, parseRequireChecks(globals.RequireChecks), *opts)
+				return c.EnsureBranchRuleset(owner, repo, github.ResolveRequiredChecks(globals.RequireChecks), *opts)
 			},
 		}
 	case classicExists:
@@ -295,7 +254,7 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			Name:   "Branch protection (upgrade classic → ruleset)",
 			Action: wizard.ActionUpgrade,
 			Apply: func() error {
-				if err := c.EnsureBranchRuleset(owner, repo, parseRequireChecks(globals.RequireChecks), *opts); err != nil {
+				if err := c.EnsureBranchRuleset(owner, repo, github.ResolveRequiredChecks(globals.RequireChecks), *opts); err != nil {
 					return err
 				}
 				return c.RemoveClassicBranchProtection(owner, repo, branch)
@@ -306,7 +265,7 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			Name:   "Branch protection (protect-main)",
 			Action: wizard.ActionCreate,
 			Apply: func() error {
-				checks := parseRequireChecks(globals.RequireChecks)
+				checks := github.ResolveRequiredChecks(globals.RequireChecks)
 				err := c.EnsureBranchRuleset(owner, repo, checks, *opts)
 				if err == nil {
 					return nil
@@ -491,24 +450,4 @@ func itemFailedRequired(item wizard.Item) bool {
 	return !item.Optional || globals.Strict
 }
 
-// parseRequireChecks normalizes --require-checks. nil means the shipped CI
-// defaults; an empty list requires no status checks.
-func parseRequireChecks(in []string) []string {
-	if in == nil {
-		return append([]string{}, github.DefaultStatusChecks...)
-	}
-	out := make([]string, 0, len(in))
-	seen := make(map[string]struct{}, len(in))
-	for _, name := range in {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		seen[name] = struct{}{}
-		out = append(out, name)
-	}
-	return out
-}
+

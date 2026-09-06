@@ -24,6 +24,9 @@ fundamentum apply OWNER/REPO
 # Create a new repo + harden it
 fundamentum init OWNER/REPO
 
+# Verify the harden baseline
+fundamentum audit OWNER/REPO
+
 # Preview without changes
 fundamentum --dry-run apply OWNER/REPO
 
