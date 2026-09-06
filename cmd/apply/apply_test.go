@@ -250,6 +250,21 @@ func TestApplyItems_ErrorHandling_NonFatal(t *testing.T) {
 	}
 }
 
+func TestApplyItems_BranchProtectionFailureFailsRun(t *testing.T) {
+	items := []wizard.Item{
+		{
+			Name:   "Branch protection (protect-main)",
+			Action: wizard.ActionCreate,
+			Apply:  func() error { return fmt.Errorf("ruleset create failed") },
+		},
+	}
+	c := github.NewClient("", false)
+	err := applyItems(c, "owner", "repo", "main", items, false)
+	if err == nil || !strings.Contains(err.Error(), "required items failed") {
+		t.Errorf("core branch-protection failure must fail the run, got: %v", err)
+	}
+}
+
 func TestApplyItems_RequiredNonFileError(t *testing.T) {
 	items := []wizard.Item{
 		{
