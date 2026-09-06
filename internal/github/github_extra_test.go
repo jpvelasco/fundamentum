@@ -413,31 +413,26 @@ func TestCreateBranchRuleset_DedupStatusChecks(t *testing.T) {
 		{
 			name:         "no duplicates",
 			statusChecks: []string{"ci", "lint"},
-			wantCount:    3, // Codacy + ci + lint
+			wantCount:    2,
 		},
 		{
-			name:         "duplicate with default",
-			statusChecks: []string{"Codacy Static Code Analysis"},
-			wantCount:    1, // Codacy deduped
+			name:         "explicit replaces defaults",
+			statusChecks: []string{"Lint"},
+			wantCount:    1,
 		},
 		{
-			name:         "empty",
+			name:         "nil uses shipped defaults",
 			statusChecks: nil,
-			wantCount:    1, // Codacy only
+			wantCount:    len(DefaultStatusChecks),
 		},
 		{
-			name:         "empty string slice",
+			name:         "empty string slice requires none",
 			statusChecks: []string{},
-			wantCount:    1, // Codacy only
+			wantCount:    0,
 		},
 		{
 			name:         "self duplicate",
 			statusChecks: []string{"ci", "ci"},
-			wantCount:    2, // Codacy + ci
-		},
-		{
-			name:         "all duplicates",
-			statusChecks: []string{"Codacy Static Code Analysis", "Codacy Static Code Analysis"},
 			wantCount:    1,
 		},
 	}
@@ -455,30 +450,61 @@ func TestCreateBranchRuleset_DedupStatusChecks(t *testing.T) {
 					t.Fatalf("unexpected error: %v", err)
 				}
 			}, func(t *testing.T) {
-				// Count required_status_checks entries in the rules array
-				rules, ok := postBody["rules"].([]any)
-				if !ok {
-					t.Fatal("expected rules array in body")
-				}
-				for _, rule := range rules {
-					rm, ok := rule.(map[string]any)
-					if !ok || rm["type"] != "required_status_checks" {
-						continue
-					}
-					params, ok := rm["parameters"].(map[string]any)
-					if !ok {
-						continue
-					}
-					checks, ok := params["required_status_checks"].([]any)
-					if !ok {
-						continue
-					}
-					if len(checks) != tt.wantCount {
-						t.Errorf("expected %d checks, got %d", tt.wantCount, len(checks))
-					}
+				got := countRequiredStatusChecks(postBody)
+				if got != tt.wantCount {
+					t.Errorf("expected %d checks, got %d", tt.wantCount, got)
 				}
 			})
 		})
+	}
+}
+
+func countRequiredStatusChecks(body map[string]any) int {
+	rules, ok := body["rules"].([]any)
+	if !ok {
+		return 0
+	}
+	for _, rule := range rules {
+		rm, ok := rule.(map[string]any)
+		if !ok || rm["type"] != "required_status_checks" {
+			continue
+		}
+		params, ok := rm["parameters"].(map[string]any)
+		if !ok {
+			continue
+		}
+		checks, ok := params["required_status_checks"].([]any)
+		if !ok {
+			return 0
+		}
+		return len(checks)
+	}
+	return 0
+}
+
+func TestDefaultStatusChecks_NoCodacy(t *testing.T) {
+	for _, name := range DefaultStatusChecks {
+		if name == "Codacy Static Code Analysis" {
+			t.Fatal("DefaultStatusChecks must not hard-require Codacy")
+		}
+	}
+	want := []string{
+		"Lint",
+		"Vulnerability scan",
+		"Build (ubuntu-latest)",
+		"Build (windows-latest)",
+		"Test (ubuntu-latest)",
+		"Test (windows-latest)",
+		"gosec",
+		"Trivy",
+	}
+	if len(DefaultStatusChecks) != len(want) {
+		t.Fatalf("DefaultStatusChecks = %#v, want %#v", DefaultStatusChecks, want)
+	}
+	for i, name := range want {
+		if DefaultStatusChecks[i] != name {
+			t.Errorf("DefaultStatusChecks[%d] = %q, want %q", i, DefaultStatusChecks[i], name)
+		}
 	}
 }
 

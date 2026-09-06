@@ -33,6 +33,7 @@ Examples:
 	cmd.PersistentFlags().BoolVar(&globals.ViaPR, "pr", false, "push file changes through a PR instead of direct commits")
 	cmd.PersistentFlags().BoolVar(&globals.AdvancedSecurity, "advanced-security", false, "enable GitHub Advanced Security (secret scanning, push protection) on private/internal repos")
 	cmd.PersistentFlags().BoolVar(&globals.Strict, "strict", false, "fail the run when any core harden step fails, including optional tag/security items")
+	cmd.PersistentFlags().StringSliceVar(&globals.RequireChecks, "require-checks", nil, "required status-check contexts for protect-main (comma-separated; default: shipped CI jobs, not Codacy)")
 	cmd.AddCommand(apply.NewCmd())
 	cmd.AddCommand(repoinit.NewCmd())
 	return cmd

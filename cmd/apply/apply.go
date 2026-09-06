@@ -37,6 +37,7 @@ Examples:
   fundamentum --dry-run apply OWNER/REPO    # preview without changes
   fundamentum --pr apply OWNER/REPO         # apply via pull request
   fundamentum --strict apply OWNER/REPO     # fail if any core step fails
+  fundamentum --require-checks Lint,gosec apply OWNER/REPO
   fundamentum --token $GITHUB_TOKEN apply OWNER/REPO`,
 		Args: cobra.ExactArgs(1),
 		RunE: run,
@@ -287,7 +288,7 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			Name:   "Branch protection (upgrade classic → ruleset)",
 			Action: wizard.ActionUpgrade,
 			Apply: func() error {
-				if err := c.EnsureBranchRuleset(owner, repo, nil, *opts); err != nil {
+				if err := c.EnsureBranchRuleset(owner, repo, parseRequireChecks(globals.RequireChecks), *opts); err != nil {
 					return err
 				}
 				return c.RemoveClassicBranchProtection(owner, repo, branch)
@@ -298,7 +299,8 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			Name:   "Branch protection (protect-main)",
 			Action: wizard.ActionCreate,
 			Apply: func() error {
-				err := c.EnsureBranchRuleset(owner, repo, nil, *opts)
+				checks := parseRequireChecks(globals.RequireChecks)
+				err := c.EnsureBranchRuleset(owner, repo, checks, *opts)
 				if err == nil {
 					return nil
 				}
@@ -311,7 +313,7 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 				if !github.IsForbidden403(err) {
 					return err
 				}
-				return c.ApplyClassicBranchProtection(owner, repo, branch, github.DefaultStatusChecks, *opts)
+				return c.ApplyClassicBranchProtection(owner, repo, branch, checks, *opts)
 			},
 		}
 	}
@@ -470,4 +472,26 @@ func deferRequiredChecks(opts *github.BranchProtectionOptions) {
 // --strict treats optional core steps (tag ruleset, security) as required.
 func itemFailedRequired(item wizard.Item) bool {
 	return !item.Optional || globals.Strict
+}
+
+// parseRequireChecks normalizes --require-checks. nil means the shipped CI
+// defaults; an empty list requires no status checks.
+func parseRequireChecks(in []string) []string {
+	if in == nil {
+		return append([]string{}, github.DefaultStatusChecks...)
+	}
+	out := make([]string, 0, len(in))
+	seen := make(map[string]struct{}, len(in))
+	for _, name := range in {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
 }

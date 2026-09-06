@@ -14,7 +14,27 @@ func resetRootGlobals(t *testing.T) {
 		globals.Token = ""
 		globals.NoOverwrite = false
 		globals.Strict = false
+		globals.RequireChecks = nil
 	})
+}
+
+func TestRequireChecksFlag(t *testing.T) {
+	resetRootGlobals(t)
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"--require-checks", "Lint,Test (ubuntu-latest)", "--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"Lint", "Test (ubuntu-latest)"}
+	if len(globals.RequireChecks) != len(want) {
+		t.Fatalf("RequireChecks = %#v, want %#v", globals.RequireChecks, want)
+	}
+	for i, name := range want {
+		if globals.RequireChecks[i] != name {
+			t.Errorf("RequireChecks[%d] = %q, want %q", i, globals.RequireChecks[i], name)
+		}
+	}
 }
 
 func TestStrictFlag(t *testing.T) {
