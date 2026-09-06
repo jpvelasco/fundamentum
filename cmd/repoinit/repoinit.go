@@ -61,15 +61,15 @@ func run(ownerRepo string, private bool, stdout io.Writer) error {
 		if !private {
 			visibility = "public"
 		}
-		fmt.Fprintf(stdout, "would create repo %s (%s)\n\n", ownerRepo, visibility)
+		_, _ = fmt.Fprintf(stdout, "would create repo %s (%s)\n\n", ownerRepo, visibility)
 		return apply.PlanNewRepo(owner, repo, visibility, stdout)
 	}
 
 	client := newClient(globals.Token, globals.Verbose)
-	fmt.Fprintf(stdout, "Creating repo %s...\n", ownerRepo)
+	_, _ = fmt.Fprintf(stdout, "Creating repo %s...\n", ownerRepo)
 	if err := client.CreateRepo(owner, repo, private); err != nil {
 		return fmt.Errorf("create repo: %w", err)
 	}
-	fmt.Fprintf(stdout, "Repo created.\n\n")
+	_, _ = fmt.Fprintf(stdout, "Repo created.\n\n")
 	return runApply(ownerRepo)
 }
