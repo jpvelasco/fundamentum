@@ -670,6 +670,11 @@ func TestApplyViaPR(t *testing.T) {
 					}
 				case http.MethodPut:
 					w.WriteHeader(http.StatusCreated)
+				case http.MethodDelete:
+					if !strings.Contains(r.URL.Path, "/git/refs/heads/harden-") {
+						t.Errorf("unexpected DELETE %s", r.URL.Path)
+					}
+					w.WriteHeader(http.StatusNoContent)
 				}
 			},
 			changes: []FileChange{
@@ -708,6 +713,11 @@ func TestApplyViaPR(t *testing.T) {
 						t.Error("must not open a PR when every file is skipped")
 					}
 					w.WriteHeader(http.StatusCreated)
+				case http.MethodDelete:
+					if !strings.Contains(r.URL.Path, "/git/refs/heads/harden-") {
+						t.Errorf("unexpected DELETE %s", r.URL.Path)
+					}
+					w.WriteHeader(http.StatusNoContent)
 				}
 			},
 			changes:    []FileChange{{Path: "README.md", Content: []byte("hello")}},
@@ -753,6 +763,35 @@ func TestApplyViaPR(t *testing.T) {
 				{Path: "README.md", Content: []byte("hello")},
 				{Path: "LICENSE", Content: []byte("MIT")},
 			},
+		},
+		{
+			name: "upsert error deletes branch",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					if strings.Contains(r.URL.Path, "/branches/") {
+						w.WriteHeader(http.StatusOK)
+						_ = json.NewEncoder(w).Encode(map[string]any{
+							"commit": map[string]any{"sha": "aaaa1111"},
+						})
+						return
+					}
+					w.WriteHeader(http.StatusNotFound)
+				case http.MethodPost:
+					w.WriteHeader(http.StatusCreated)
+				case http.MethodPut:
+					w.WriteHeader(http.StatusUnprocessableEntity)
+					_, _ = w.Write([]byte(`{"message":"invalid"}`))
+				case http.MethodDelete:
+					if !strings.Contains(r.URL.Path, "/git/refs/heads/harden-") {
+						t.Errorf("unexpected DELETE %s", r.URL.Path)
+					}
+					w.WriteHeader(http.StatusNoContent)
+				}
+			},
+			changes: []FileChange{{Path: "README.md", Content: []byte("hello")}},
+			wantErr: true,
+			errMsg:  "upsert",
 		},
 	}
 

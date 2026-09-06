@@ -107,6 +107,7 @@ func (c *Client) ApplyViaPR(owner, repo, defaultBranch string, changes []FileCha
 				fmt.Printf("  %-45s  ⚠ workflow locked by GitHub Actions\n", ch.Path)
 				continue
 			}
+			_ = c.deleteBranch(owner, repo, branch)
 			return 0, fmt.Errorf("upsert %s: %w", ch.Path, err)
 		}
 		if action != "skipped" {
@@ -115,6 +116,7 @@ func (c *Client) ApplyViaPR(owner, repo, defaultBranch string, changes []FileCha
 		}
 	}
 	if wrote == 0 {
+		_ = c.deleteBranch(owner, repo, branch)
 		return 0, nil
 	}
 
@@ -123,9 +125,20 @@ func (c *Client) ApplyViaPR(owner, repo, defaultBranch string, changes []FileCha
 
 	prNum, err := c.CreatePullRequest(owner, repo, title, body, branch, defaultBranch)
 	if err != nil {
+		_ = c.deleteBranch(owner, repo, branch)
 		return 0, err
 	}
 	return prNum, nil
+}
+
+// deleteBranch removes refs/heads/{branch}. Best-effort cleanup for unused harden branches.
+func (c *Client) deleteBranch(owner, repo, branch string) error {
+	resp, err := c.do(http.MethodDelete, repoPath(owner, repo)+"/git/refs/heads/"+url.PathEscape(branch), nil)
+	if err != nil {
+		return fmt.Errorf("delete branch %s: %w", branch, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return expectStatus("delete branch "+branch, resp, http.StatusNoContent)
 }
 
 // IsConflict409 returns true if the error is a 409 from branch protection rules.
