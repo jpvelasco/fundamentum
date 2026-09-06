@@ -398,6 +398,26 @@ func TestNextLink(t *testing.T) {
 	}
 }
 
+func TestNextLink_MalformedAndPathOnly(t *testing.T) {
+	if nextLink(`rel="next"`) != "" {
+		t.Error("malformed next must be empty")
+	}
+	if got := nextLink(`</repos/o/r/rulesets>; rel="next"`); got != "/repos/o/r/rulesets" {
+		t.Errorf("path-only next = %q", got)
+	}
+}
+
+func TestRulesetID_List404(t *testing.T) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}), nil, func(c *Client) {
+		id, found, err := c.rulesetID("owner", "repo", "protect-main")
+		if err != nil || found || id != 0 {
+			t.Fatalf("rulesetID() = (%d, %v, %v), want missing", id, found, err)
+		}
+	}, nil)
+}
+
 func TestRulesetID_Paginates(t *testing.T) {
 	pages := 0
 	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
