@@ -136,6 +136,32 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	return nil
 }
 
+// PlanNewRepo prints a dry-run harden plan for a repository that does not
+// exist yet. Files, settings, and rulesets are modeled as absent — no GitHub
+// GET is issued, so init --dry-run can preview create+harden.
+func PlanNewRepo(owner, repo, visibility string, stdout io.Writer) error {
+	data := templates.RepoData{
+		Owner:         owner,
+		RepoName:      repo,
+		DefaultBranch: "main",
+		Visibility:    visibility,
+		CodeOwnerLine: codeOwnerLine(owner, false),
+	}
+	rendered, err := renderTemplates(data)
+	if err != nil {
+		return fmt.Errorf("render templates: %w", err)
+	}
+	paid := globals.AdvancedSecurity || github.IsPublicVisibility(visibility)
+	items, err := buildItems(nil, owner, repo, "main", visibility, rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, paid)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(stdout, "fundamentum apply %s/%s\n\n", owner, repo)
+	wizard.PrintSummaryTable(stdout, items, false)
+	_, _ = fmt.Fprintf(stdout, "\n  Dry run complete — %s — no changes made.\n", wizard.PlanSummary(items))
+	return nil
+}
+
 func buildItems(
 	c *github.Client,
 	owner, repo, branch, visibility string,
@@ -157,20 +183,22 @@ func buildItems(
 		// Non-canonical aliases (root CODEOWNERS, octopus-review.yml, …) count
 		// as already present so we do not write a second copy. The canonical
 		// path still goes through FileStatus so content drift can update.
-		if variants, ok := aliases[file.Path]; ok {
-			exists, err := c.AnyFileExists(owner, repo, otherAliases(file.Path, variants))
-			if err != nil {
-				return nil, fmt.Errorf("check aliases of %s: %w", file.Path, err)
+		if c != nil {
+			if variants, ok := aliases[file.Path]; ok {
+				exists, err := c.AnyFileExists(owner, repo, otherAliases(file.Path, variants))
+				if err != nil {
+					return nil, fmt.Errorf("check aliases of %s: %w", file.Path, err)
+				}
+				if exists {
+					action = wizard.ActionSkip
+				}
 			}
-			if exists {
-				action = wizard.ActionSkip
-			}
-		}
-		if action != wizard.ActionSkip {
-			var err error
-			action, err = fileItemAction(c, owner, repo, file.Path, file.Content)
-			if err != nil {
-				return nil, fmt.Errorf("check status of %s: %w", file.Path, err)
+			if action != wizard.ActionSkip {
+				var err error
+				action, err = fileItemAction(c, owner, repo, file.Path, file.Content)
+				if err != nil {
+					return nil, fmt.Errorf("check status of %s: %w", file.Path, err)
+				}
 			}
 		}
 		items = append(items, wizard.Item{

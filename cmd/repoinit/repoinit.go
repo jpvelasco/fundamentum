@@ -3,6 +3,8 @@ package repoinit
 
 import (
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -38,29 +40,36 @@ Examples:
   fundamentum --dry-run init OWNER/REPO   # preview only`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return run(args[0], private)
+			return run(args[0], private, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().BoolVar(&private, "private", true, "create as a private repo (default: true)")
 	return cmd
 }
 
-func run(ownerRepo string, private bool) error {
+func run(ownerRepo string, private bool, stdout io.Writer) error {
+	if stdout == nil {
+		stdout = os.Stdout
+	}
 	owner, repo, err := util.ParseOwnerRepo(ownerRepo)
 	if err != nil {
 		return err
 	}
 
-	if !globals.DryRun {
-		client := newClient(globals.Token, globals.Verbose)
-		fmt.Printf("Creating repo %s...\n", ownerRepo)
-		if err := client.CreateRepo(owner, repo, private); err != nil {
-			return fmt.Errorf("create repo: %w", err)
+	if globals.DryRun {
+		visibility := "private"
+		if !private {
+			visibility = "public"
 		}
-		fmt.Printf("Repo created.\n\n")
-	} else {
-		fmt.Printf("would create repo %s\n\n", ownerRepo)
+		_, _ = fmt.Fprintf(stdout, "would create repo %s (%s)\n\n", ownerRepo, visibility)
+		return apply.PlanNewRepo(owner, repo, visibility, stdout)
 	}
 
+	client := newClient(globals.Token, globals.Verbose)
+	_, _ = fmt.Fprintf(stdout, "Creating repo %s...\n", ownerRepo)
+	if err := client.CreateRepo(owner, repo, private); err != nil {
+		return fmt.Errorf("create repo: %w", err)
+	}
+	_, _ = fmt.Fprintf(stdout, "Repo created.\n\n")
 	return runApply(ownerRepo)
 }
