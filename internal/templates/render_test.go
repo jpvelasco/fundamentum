@@ -7,28 +7,30 @@ import (
 	"testing/fstest"
 )
 
-func TestValidIdentifier(t *testing.T) {
+func TestValidGitBranch(t *testing.T) {
 	tests := []struct {
-		name string
-		r    rune
-		want rune
+		name  string
+		value string
+		want  bool
 	}{
-		{"lowercase", 'a', 'a'},
-		{"uppercase", 'Z', 'Z'},
-		{"digit", '5', '5'},
-		{"hyphen", '-', '-'},
-		{"dot", '.', '.'},
-		{"space stripped", ' ', -1},
-		{"slash stripped", '/', -1},
-		{"underscore preserved", '_', '_'},
-		{"newline stripped", '\n', -1},
-		{"null stripped", 0, -1},
+		{"main", "main", true},
+		{"slash", "feature/my-branch_1", true},
+		{"dotted release", "release/1.2", true},
+		{"plus", "release+stable", true},
+		{"empty", "", false},
+		{"angle brackets", "feat/<test>", false},
+		{"leading slash", "/main", false},
+		{"trailing slash", "main/", false},
+		{"double slash", "feat//x", false},
+		{"leading dot", ".hidden", false},
+		{"trailing dot", "main.", false},
+		{"double dot", "feat/../x", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := validIdentifier(tt.r)
+			got := validGitBranch(tt.value)
 			if got != tt.want {
-				t.Errorf("validIdentifier(%q) = %v, want %v", tt.r, got, tt.want)
+				t.Errorf("validGitBranch(%q) = %v, want %v", tt.value, got, tt.want)
 			}
 		})
 	}
@@ -36,9 +38,10 @@ func TestValidIdentifier(t *testing.T) {
 
 func TestRepoDataSanitize(t *testing.T) {
 	tests := []struct {
-		name  string
-		input RepoData
-		want  RepoData
+		name    string
+		input   RepoData
+		want    RepoData
+		wantErr bool
 	}{
 		{
 			name:  "valid input unchanged",
@@ -46,24 +49,24 @@ func TestRepoDataSanitize(t *testing.T) {
 			want:  RepoData{Owner: "jpvelasco", RepoName: "fundamentum", DefaultBranch: "main", Visibility: "private"},
 		},
 		{
-			name:  "owner with special chars stripped",
-			input: RepoData{Owner: "jp<script>alert(1)</script>", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
-			want:  RepoData{Owner: "jpscriptalert1script", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+			name:    "owner with special chars rejected",
+			input:   RepoData{Owner: "jp<script>alert(1)</script>", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+			wantErr: true,
 		},
 		{
-			name:  "empty owner falls back",
-			input: RepoData{Owner: "", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
-			want:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+			name:    "empty owner rejected",
+			input:   RepoData{Owner: "", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+			wantErr: true,
 		},
 		{
-			name:  "empty repo falls back",
-			input: RepoData{Owner: "owner", RepoName: "", DefaultBranch: "main", Visibility: "public"},
-			want:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+			name:    "empty repo rejected",
+			input:   RepoData{Owner: "owner", RepoName: "", DefaultBranch: "main", Visibility: "public"},
+			wantErr: true,
 		},
 		{
-			name:  "empty branch falls back",
-			input: RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "", Visibility: "public"},
-			want:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+			name:    "empty branch rejected",
+			input:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "", Visibility: "public"},
+			wantErr: true,
 		},
 		{
 			name:  "invalid visibility falls back to private",
@@ -86,9 +89,9 @@ func TestRepoDataSanitize(t *testing.T) {
 			want:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "feature/my-branch_1", Visibility: "public"},
 		},
 		{
-			name:  "branch with special chars stripped",
-			input: RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "feat/<test>", Visibility: "public"},
-			want:  RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "feat/test", Visibility: "public"},
+			name:    "branch with angle brackets rejected",
+			input:   RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "feat/<test>", Visibility: "public"},
+			wantErr: true,
 		},
 		{
 			name:  "repo with dots preserved",
@@ -100,10 +103,31 @@ func TestRepoDataSanitize(t *testing.T) {
 			input: RepoData{Owner: "owner", RepoName: "my_repo_name", DefaultBranch: "main", Visibility: "public"},
 			want:  RepoData{Owner: "owner", RepoName: "my_repo_name", DefaultBranch: "main", Visibility: "public"},
 		},
+		{
+			name:  "dotted release branch preserved",
+			input: RepoData{Owner: "example", RepoName: "project", DefaultBranch: "release/1.2", Visibility: "public"},
+			want:  RepoData{Owner: "example", RepoName: "project", DefaultBranch: "release/1.2", Visibility: "public"},
+		},
+		{
+			name:  "plus-sign branch preserved",
+			input: RepoData{Owner: "example", RepoName: "project", DefaultBranch: "release+stable", Visibility: "public"},
+			want:  RepoData{Owner: "example", RepoName: "project", DefaultBranch: "release+stable", Visibility: "public"},
+		},
+		{
+			name:  "dot-github repo name preserved",
+			input: RepoData{Owner: "example", RepoName: ".github", DefaultBranch: "main", Visibility: "public"},
+			want:  RepoData{Owner: "example", RepoName: ".github", DefaultBranch: "main", Visibility: "public"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.input.sanitize()
+			got, err := tt.input.sanitize()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("sanitize() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
 			want := tt.want
 			if want.CodeOwnerLine == "" {
 				want.CodeOwnerLine = "* @" + want.Owner
@@ -144,9 +168,89 @@ func TestRepoDataSanitize_CodeOwnerLine(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.input.sanitize().CodeOwnerLine
-			if got != tt.want {
-				t.Errorf("CodeOwnerLine = %q, want %q", got, tt.want)
+			got, err := tt.input.sanitize()
+			if err != nil {
+				t.Fatalf("sanitize() unexpected error: %v", err)
+			}
+			if got.CodeOwnerLine != tt.want {
+				t.Errorf("CodeOwnerLine = %q, want %q", got.CodeOwnerLine, tt.want)
+			}
+		})
+	}
+}
+
+func TestRender_PreservesValidGitHubNames(t *testing.T) {
+	tests := []struct {
+		name string
+		data RepoData
+		want []string
+	}{
+		{
+			name: "dotted release branch",
+			data: RepoData{Owner: "example", RepoName: "project", DefaultBranch: "release/1.2", Visibility: "public"},
+			want: []string{"release/1.2"},
+		},
+		{
+			name: "plus-sign branch",
+			data: RepoData{Owner: "example", RepoName: "project", DefaultBranch: "release+stable", Visibility: "public"},
+			want: []string{"release+stable"},
+		},
+		{
+			name: "dot-github repo",
+			data: RepoData{Owner: "example", RepoName: ".github", DefaultBranch: "main", Visibility: "public"},
+			want: []string{"# Contributing to .github"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files, err := Render(tt.data)
+			if err != nil {
+				t.Fatalf("Render() unexpected error: %v", err)
+			}
+			joined := ""
+			for _, f := range files {
+				joined += f.Content
+			}
+			for _, needle := range tt.want {
+				if !strings.Contains(joined, needle) {
+					t.Errorf("rendered output missing %q", needle)
+				}
+			}
+		})
+	}
+}
+
+func TestRender_RejectsInvalidNames(t *testing.T) {
+	tests := []struct {
+		name string
+		data RepoData
+	}{
+		{
+			name: "script in owner",
+			data: RepoData{Owner: "jp<script>alert(1)</script>", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+		},
+		{
+			name: "empty owner",
+			data: RepoData{Owner: "", RepoName: "repo", DefaultBranch: "main", Visibility: "public"},
+		},
+		{
+			name: "empty repo",
+			data: RepoData{Owner: "owner", RepoName: "", DefaultBranch: "main", Visibility: "public"},
+		},
+		{
+			name: "empty branch",
+			data: RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "", Visibility: "public"},
+		},
+		{
+			name: "angle brackets in branch",
+			data: RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "feat/<test>", Visibility: "public"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Render(tt.data)
+			if err == nil {
+				t.Fatal("Render() error = nil, want validation error")
 			}
 		})
 	}
@@ -159,14 +263,8 @@ func TestRenderSanitizesInput(t *testing.T) {
 		DefaultBranch: "main; drop table",
 		Visibility:    "public",
 	}
-	files, err := Render(data)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	for _, f := range files {
-		if strings.Contains(f.Content, "<script>") {
-			t.Errorf("unescaped <script> tag found in %s", f.Path)
-		}
+	if _, err := Render(data); err == nil {
+		t.Fatal("Render() error = nil, want validation error for injection payload")
 	}
 }
 
@@ -377,29 +475,14 @@ func TestSubstitute(t *testing.T) {
 }
 
 func TestRender_SanitizesXSSPayloads(t *testing.T) {
-	// Verify that raw HTML tags and script content are stripped from rendered output.
 	data := RepoData{
 		Owner:         "<img onerror=alert(1) src=x>",
 		RepoName:      "\x22><script>alert('xss')</script>",
-		DefaultBranch: "main{{.Owner}}", // template injection attempt
+		DefaultBranch: "main{{.Owner}}",
 		Visibility:    "public",
 	}
-	files, err := Render(data)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Check for raw HTML tags that should not survive sanitization.
-	htmlTags := []string{
-		"<img", "<script>", "<script", "</script>",
-		"onerror=", "alert(", "javascript:",
-	}
-	for _, f := range files {
-		for _, tag := range htmlTags {
-			if strings.Contains(f.Content, tag) {
-				t.Errorf("HTML tag %q found in %s", tag, f.Path)
-			}
-		}
+	if _, err := Render(data); err == nil {
+		t.Fatal("Render() error = nil, want validation error for XSS payload")
 	}
 }
 

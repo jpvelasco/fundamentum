@@ -118,7 +118,7 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`, `--
 
 ### Templates
 
-`internal/templates/render.go` substitutes `{{.Owner}}`, `{{.RepoName}}`, `{{.DefaultBranch}}`, `{{.Visibility}}` with plain `strings.ReplaceAll` — no template engine. All `RepoData` fields are sanitized (regex-validated identifiers, whitelisted visibility) before substitution, and rendered output passes through `sanitizeOutput` (strips dangerous HTML tags) as defense-in-depth. This also avoids false-positive XSS flags from static analyzers on YAML/Markdown output.
+`internal/templates/render.go` substitutes `{{.Owner}}`, `{{.RepoName}}`, `{{.DefaultBranch}}`, `{{.Visibility}}` with plain `strings.ReplaceAll` — no template engine. Owner, repo, and branch must already be valid GitHub/git names (including `.github` and dotted/plus-sign branches); invalid values return an error instead of being silently rewritten. Visibility is whitelist-checked, and rendered output passes through `sanitizeOutput` (strips dangerous HTML tags) as defense-in-depth. This also avoids false-positive XSS flags from static analyzers on YAML/Markdown output.
 
 `resolveTarget` path mapping: `dotgithub/` → `.github/`, `dotcodacy.yml` → `.codacy.yml`; top-level template files map to repo root (`public_codecov.yml` → `codecov.yml`, `socket.yml` → `socket.yml`).
 
