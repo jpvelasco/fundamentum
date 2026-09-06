@@ -123,6 +123,65 @@ func TestRulesetExists_DecodeError(t *testing.T) {
 	}, nil)
 }
 
+func TestGetRuleset_NetworkAndDecodeErrors(t *testing.T) {
+	c := newErroringClient()
+	if _, err := c.GetRuleset("owner", "repo", "protect-main"); err == nil {
+		t.Fatal("expected network error")
+	}
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/owner/repo/rulesets" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":1,"name":"protect-main"}]`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`not json`))
+	}), nil, func(c *Client) {
+		if _, err := c.GetRuleset("owner", "repo", "protect-main"); err == nil {
+			t.Fatal("expected decode error")
+		}
+	}, nil)
+}
+
+func TestGetRuleset_DetailStatusError(t *testing.T) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/owner/repo/rulesets" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":1,"name":"protect-main"}]`))
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+	}), nil, func(c *Client) {
+		if _, err := c.GetRuleset("owner", "repo", "protect-main"); err == nil {
+			t.Fatal("expected forbidden on ruleset detail")
+		}
+	}, nil)
+}
+
+func TestEnsureRulesets_PlanError(t *testing.T) {
+	c := newErroringClient()
+	if err := c.EnsureBranchRuleset("owner", "repo", nil, BranchProtectionOptions{}); err == nil {
+		t.Fatal("expected EnsureBranchRuleset plan error")
+	}
+	if err := c.EnsureTagRuleset("owner", "repo"); err == nil {
+		t.Fatal("expected EnsureTagRuleset plan error")
+	}
+}
+
+func TestUpdateRuleset_Errors(t *testing.T) {
+	c := newErroringClient()
+	if err := c.updateRuleset("owner", "repo", 1, map[string]any{}, "update branch ruleset"); err == nil {
+		t.Fatal("expected network error")
+	}
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+	}), nil, func(c *Client) {
+		if err := c.updateRuleset("owner", "repo", 1, map[string]any{}, "update branch ruleset"); err == nil {
+			t.Fatal("expected status error")
+		}
+	}, nil)
+}
+
 func TestCreateBranchRuleset_NetworkError(t *testing.T) {
 	c := newErroringClient()
 	if err := c.CreateBranchRuleset("owner", "repo", nil, BranchProtectionOptions{}); err == nil {
