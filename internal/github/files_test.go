@@ -113,3 +113,29 @@ func TestUpsertFile(t *testing.T) {
 		})
 	}
 }
+
+func TestUpsertFileOnBranch_RefQueryRoundTrips(t *testing.T) {
+	branches := []string{"release+stable", "release&stable", "feature/my-branch"}
+	for _, branch := range branches {
+		t.Run(branch, func(t *testing.T) {
+			var gotRef string
+			testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					gotRef = r.URL.Query().Get("ref")
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{}`))
+			}), nil, func(c *Client) {
+				if _, err := c.UpsertFileOnBranch("owner", "repo", branch, "README.md", []byte("x")); err != nil {
+					t.Fatalf("UpsertFileOnBranch() error: %v", err)
+				}
+			}, func(t *testing.T) {
+				if gotRef != branch {
+					t.Errorf("ref query = %q, want %q", gotRef, branch)
+				}
+			})
+		})
+	}
+}
