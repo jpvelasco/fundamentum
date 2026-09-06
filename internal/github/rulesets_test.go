@@ -53,6 +53,127 @@ func TestCreateRulesets(t *testing.T) {
 	}
 }
 
+func TestBranchRulesetDrift(t *testing.T) {
+	desired := branchRulesetBody([]string{"Lint"}, BranchProtectionOptions{Solo: true})
+	tests := []struct {
+		name string
+		got  *Ruleset
+		want []string
+	}{
+		{
+			name: "match",
+			got: &Ruleset{
+				Name:        "protect-main",
+				Target:      "branch",
+				Enforcement: "active",
+				Conditions: map[string]any{
+					"ref_name": map[string]any{
+						"include": []any{"~DEFAULT_BRANCH"},
+						"exclude": []any{},
+					},
+				},
+				Rules: []map[string]any{
+					{"type": "deletion"},
+					{"type": "non_fast_forward"},
+					{"type": "pull_request", "parameters": map[string]any{
+						"required_approving_review_count":   0.0,
+						"dismiss_stale_reviews_on_push":     false,
+						"require_code_owner_review":         false,
+						"require_last_push_approval":        false,
+						"required_review_thread_resolution": true,
+					}},
+					{"type": "required_status_checks", "parameters": map[string]any{
+						"strict_required_status_checks_policy": true,
+						"do_not_enforce_on_create":             false,
+						"required_status_checks": []any{
+							map[string]any{"context": "Lint"},
+						},
+					}},
+				},
+			},
+		},
+		{
+			name: "disabled enforcement",
+			got: &Ruleset{
+				Name:        "protect-main",
+				Target:      "branch",
+				Enforcement: "disabled",
+				Conditions:  desired["conditions"].(map[string]any),
+				Rules:       rulesFromBody(desired),
+			},
+			want: []string{"enforcement"},
+		},
+		{
+			name: "missing required checks",
+			got: &Ruleset{
+				Name:        "protect-main",
+				Target:      "branch",
+				Enforcement: "active",
+				Conditions:  desired["conditions"].(map[string]any),
+				Rules: []map[string]any{
+					{"type": "deletion"},
+					{"type": "non_fast_forward"},
+					{"type": "pull_request", "parameters": map[string]any{
+						"required_approving_review_count":   0.0,
+						"dismiss_stale_reviews_on_push":     false,
+						"require_code_owner_review":         false,
+						"require_last_push_approval":        false,
+						"required_review_thread_resolution": true,
+					}},
+				},
+			},
+			want: []string{"required_status_checks"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := BranchRulesetDrift(tt.got, []string{"Lint"}, BranchProtectionOptions{Solo: true})
+			if !sameStrings(got, tt.want) {
+				t.Errorf("BranchRulesetDrift() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func rulesFromBody(body map[string]any) []map[string]any {
+	raw, _ := body["rules"].([]map[string]any)
+	return raw
+}
+
+func sameStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestTagRulesetDrift(t *testing.T) {
+	ok := &Ruleset{
+		Name:        "protect-version-tags",
+		Target:      "tag",
+		Enforcement: "active",
+		Conditions: map[string]any{
+			"ref_name": map[string]any{"include": []any{"refs/tags/v*"}, "exclude": []any{}},
+		},
+		Rules: []map[string]any{{"type": "deletion"}, {"type": "non_fast_forward"}},
+	}
+	if got := TagRulesetDrift(ok); len(got) != 0 {
+		t.Errorf("TagRulesetDrift(ok) = %v, want none", got)
+	}
+	ok.Enforcement = "disabled"
+	if got := TagRulesetDrift(ok); !sameStrings(got, []string{"enforcement"}) {
+		t.Errorf("TagRulesetDrift(disabled) = %v, want [enforcement]", got)
+	}
+	if got := TagRulesetDrift(nil); !sameStrings(got, []string{"missing"}) {
+		t.Errorf("TagRulesetDrift(nil) = %v, want [missing]", got)
+	}
+}
+
 func TestRequireCodeOwners(t *testing.T) {
 	tests := []struct {
 		opts BranchProtectionOptions

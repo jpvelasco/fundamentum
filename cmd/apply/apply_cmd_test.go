@@ -18,6 +18,10 @@ import (
 // newBuildItemsTest is a shared setup helper for TestBuildItems_* tests.
 // It creates a mock HTTP server with the given handler, renders templates with the specified visibility,
 // and calls buildItems, returning the resulting items for assertion in the test.
+func existsPlan(exists bool) github.RulesetPlan {
+	return github.RulesetPlan{Exists: exists}
+}
+
 func newBuildItemsTest(t *testing.T, handler http.HandlerFunc, visibility string) []wizard.Item {
 	t.Helper()
 	return newBuildItemsTestFull(t, handler, visibility, false, false, false)
@@ -35,7 +39,7 @@ func newBuildItemsTestFull(t *testing.T, handler http.HandlerFunc, visibility st
 		t.Fatalf("Render() error: %v", err)
 	}
 
-	items, err := buildItems(c, "owner", "repo", "main", visibility, rendered, rulesetExists, tagExists, classicExists, &github.BranchProtectionOptions{}, false)
+	items, err := buildItems(c, "owner", "repo", "main", visibility, rendered, existsPlan(rulesetExists), existsPlan(tagExists), classicExists, &github.BranchProtectionOptions{}, false)
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -71,9 +75,26 @@ func TestRun_NoArg(t *testing.T) {
 }
 
 func TestBranchProtectionItem_RulesetExists(t *testing.T) {
-	item := branchProtectionItem(nil, "owner", "repo", "main", "public", true, false, &github.BranchProtectionOptions{})
+	item := branchProtectionItem(nil, "owner", "repo", "main", "public", github.RulesetPlan{Exists: true}, false, &github.BranchProtectionOptions{})
 	if item.Action != wizard.ActionSkip {
-		t.Errorf("expected ActionSkip when ruleset exists, got %v", item.Action)
+		t.Errorf("expected ActionSkip when matching ruleset exists, got %v", item.Action)
+	}
+}
+
+func TestTagRulesetItem_Drift(t *testing.T) {
+	item := tagRulesetItem(nil, "owner", "repo", github.RulesetPlan{Exists: true, Drift: []string{"enforcement"}})
+	if item.Action != wizard.ActionUpdate {
+		t.Errorf("expected ActionUpdate on tag ruleset drift, got %v", item.Action)
+	}
+}
+
+func TestBranchProtectionItem_RulesetDrift(t *testing.T) {
+	item := branchProtectionItem(nil, "owner", "repo", "main", "public", github.RulesetPlan{Exists: true, Drift: []string{"enforcement"}}, false, &github.BranchProtectionOptions{})
+	if item.Action != wizard.ActionUpdate {
+		t.Errorf("expected ActionUpdate on ruleset drift, got %v", item.Action)
+	}
+	if item.Apply == nil {
+		t.Fatal("expected Apply on drifted ruleset")
 	}
 }
 
@@ -121,7 +142,7 @@ func TestBranchProtectionItem_Creation(t *testing.T) {
 				w.WriteHeader(http.StatusCreated)
 				_, _ = w.Write([]byte(`{"id":1}`))
 			}), func(c *github.Client) {
-				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, tt.rulesetExists, tt.classicExists, &github.BranchProtectionOptions{})
+				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, existsPlan(tt.rulesetExists), tt.classicExists, &github.BranchProtectionOptions{})
 				if item.Action != tt.wantAction {
 					t.Errorf("expected action %v, got %v", tt.wantAction, item.Action)
 				}
@@ -175,7 +196,7 @@ func TestBuildItems_Private(t *testing.T) {
 
 func TestBuildItems_PrivatePaidSecurity(t *testing.T) {
 	c := github.NewClient("", false)
-	items, err := buildItems(c, "owner", "repo", "main", "private", nil, false, false, false, &github.BranchProtectionOptions{}, true)
+	items, err := buildItems(c, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, true)
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -195,7 +216,7 @@ func TestBuildItems_PrivatePaidSecurity(t *testing.T) {
 
 func TestBuildItems_TagRulesetExists(t *testing.T) {
 	c := github.NewClient("", false)
-	items, err := buildItems(c, "owner", "repo", "main", "private", nil, false, true, false, &github.BranchProtectionOptions{}, false)
+	items, err := buildItems(c, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, existsPlan(true), false, &github.BranchProtectionOptions{}, false)
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}

@@ -81,11 +81,13 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	}
 
 	// Pre-flight: check branch protection state before asking solo/team.
-	rulesetExists, err := client.RulesetExists(owner, repo, "protect-main")
+	var opts github.BranchProtectionOptions
+	opts.SkipCodeOwners = orgOwner
+	branchPlan, err := client.PlanBranchRuleset(owner, repo, parseRequireChecks(globals.RequireChecks), opts)
 	if err != nil {
 		return fmt.Errorf("check branch ruleset: %w", err)
 	}
-	tagExists, err := client.RulesetExists(owner, repo, "protect-version-tags")
+	tagPlan, err := client.PlanTagRuleset(owner, repo)
 	if err != nil {
 		return fmt.Errorf("check tag ruleset: %w", err)
 	}
@@ -94,12 +96,12 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 		return fmt.Errorf("check classic protection: %w", err)
 	}
 
-	// Only ask solo/team if branch protection will actually be applied.
-	// If the ruleset already exists, the question has no effect.
-	var opts github.BranchProtectionOptions
-	opts.SkipCodeOwners = orgOwner
+	// Only ask solo/team if branch protection will actually be created.
+	// Existing rulesets keep their inferred solo/team settings on reconcile.
 	_, _ = fmt.Fprintf(stdout, "fundamentum apply %s/%s\n\n", owner, repo)
-	if !globals.DryRun && !rulesetExists {
+	if branchPlan.Exists && !opts.SkipCodeOwners {
+		opts.Solo = branchPlan.Solo
+	} else if !globals.DryRun && !branchPlan.Exists {
 		opts.Solo = wizard.PromptProjectType(stdin, stdout)
 		_, _ = fmt.Fprintln(stdout)
 	}
@@ -110,7 +112,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 		_, _ = fmt.Fprintln(stdout)
 	}
 
-	items, err := buildItems(client, owner, repo, branch, visibility, rendered, rulesetExists, tagExists, classicExists, &opts, paidSecurity)
+	items, err := buildItems(client, owner, repo, branch, visibility, rendered, branchPlan, tagPlan, classicExists, &opts, paidSecurity)
 	if err != nil {
 		return fmt.Errorf("plan %s/%s: %w (verify the token grants Contents read access and retry)", owner, repo, err)
 	}
@@ -138,7 +140,8 @@ func buildItems(
 	c *github.Client,
 	owner, repo, branch, visibility string,
 	rendered []templates.RenderedFile,
-	rulesetExists, tagExists, classicExists bool,
+	branchPlan, tagPlan github.RulesetPlan,
+	classicExists bool,
 	opts *github.BranchProtectionOptions,
 	paidSecurity bool,
 ) ([]wizard.Item, error) {
@@ -227,13 +230,8 @@ func buildItems(
 		Action: wizard.ActionCreate,
 		Apply:  func() error { return c.ApplyGeneralSettings(owner, repo) },
 	})
-	items = append(items, branchProtectionItem(c, owner, repo, branch, visibility, rulesetExists, classicExists, opts))
-	items = append(items, wizard.Item{
-		Name:     "Tag ruleset (protect-version-tags)",
-		Action:   actionFromExists(tagExists),
-		Optional: true,
-		Apply:    func() error { return c.EnsureTagRuleset(owner, repo) },
-	})
+	items = append(items, branchProtectionItem(c, owner, repo, branch, visibility, branchPlan, classicExists, opts))
+	items = append(items, tagRulesetItem(c, owner, repo, tagPlan))
 
 	// Security features: CodeQL only for public repos (free-tier private needs GHAS).
 	// Secret scanning and Dependabot work for all repos.
@@ -270,18 +268,27 @@ func buildItems(
 }
 
 // branchProtectionItem returns the correct Item for branch protection based on current state:
-//   - ruleset exists → skip
+//   - matching ruleset → skip
+//   - drifted ruleset → update in place
 //   - classic exists → upgrade (create ruleset + remove classic)
 //   - neither exists → ruleset for public repos; try ruleset then fall back to classic for private
-func branchProtectionItem(c *github.Client, owner, repo, branch, visibility string, rulesetExists, classicExists bool, opts *github.BranchProtectionOptions) wizard.Item {
+func branchProtectionItem(c *github.Client, owner, repo, branch, visibility string, plan github.RulesetPlan, classicExists bool, opts *github.BranchProtectionOptions) wizard.Item {
 	if opts == nil {
 		opts = &github.BranchProtectionOptions{}
 	}
 	switch {
-	case rulesetExists:
+	case plan.Exists && len(plan.Drift) == 0:
 		return wizard.Item{
 			Name:   "Branch protection (protect-main ruleset)",
 			Action: wizard.ActionSkip,
+		}
+	case plan.Exists:
+		return wizard.Item{
+			Name:   "Branch protection (reconcile protect-main)",
+			Action: wizard.ActionUpdate,
+			Apply: func() error {
+				return c.EnsureBranchRuleset(owner, repo, parseRequireChecks(globals.RequireChecks), *opts)
+			},
 		}
 	case classicExists:
 		return wizard.Item{
@@ -317,6 +324,23 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			},
 		}
 	}
+}
+
+func tagRulesetItem(c *github.Client, owner, repo string, plan github.RulesetPlan) wizard.Item {
+	item := wizard.Item{
+		Name:     "Tag ruleset (protect-version-tags)",
+		Optional: true,
+		Apply:    func() error { return c.EnsureTagRuleset(owner, repo) },
+	}
+	switch {
+	case !plan.Exists:
+		item.Action = wizard.ActionCreate
+	case len(plan.Drift) > 0:
+		item.Action = wizard.ActionUpdate
+	default:
+		item.Action = wizard.ActionSkip
+	}
+	return item
 }
 
 // otherAliases returns path variants that are not the canonical target.
@@ -356,13 +380,6 @@ func codeOwnerLine(owner string, org bool) string {
 		return "# Organizations need a team (@org/team), not @" + owner
 	}
 	return "* @" + owner
-}
-
-func actionFromExists(exists bool) wizard.Action {
-	if exists {
-		return wizard.ActionSkip
-	}
-	return wizard.ActionCreate
 }
 
 // applyItems runs the item list. When viaPR is true, file items are batched

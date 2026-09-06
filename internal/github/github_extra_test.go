@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -278,18 +279,86 @@ func TestRulesetExists_NonOKErrors(t *testing.T) {
 	}
 }
 
+func TestEnsureBranchRuleset_UpdatesOnDrift(t *testing.T) {
+	var putPath string
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/rulesets":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":42,"name":"protect-main","enforcement":"disabled"}]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/rulesets/42":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":42,"name":"protect-main","target":"branch","enforcement":"disabled","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"rules":[{"type":"deletion"}]}`))
+		case r.Method == http.MethodPut && r.URL.Path == "/repos/owner/repo/rulesets/42":
+			putPath = r.URL.Path
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":42}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}), nil, func(c *Client) {
+		if err := c.EnsureBranchRuleset("owner", "repo", []string{"Lint"}, BranchProtectionOptions{Solo: true}); err != nil {
+			t.Fatalf("EnsureBranchRuleset() error: %v", err)
+		}
+	}, func(t *testing.T) {
+		if putPath != "/repos/owner/repo/rulesets/42" {
+			t.Errorf("expected PUT /rulesets/42 on drift, got %q", putPath)
+		}
+	})
+}
+
+func TestEnsureBranchRuleset_PreservesSoloOnDrift(t *testing.T) {
+	var putBody map[string]any
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/rulesets":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":42,"name":"protect-main"}]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/rulesets/42":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":42,"name":"protect-main","target":"branch","enforcement":"disabled","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"rules":[{"type":"deletion"},{"type":"non_fast_forward"},{"type":"pull_request","parameters":{"required_approving_review_count":0,"dismiss_stale_reviews_on_push":false,"require_code_owner_review":false,"require_last_push_approval":false,"required_review_thread_resolution":true}}]}`))
+		case r.Method == http.MethodPut && r.URL.Path == "/repos/owner/repo/rulesets/42":
+			_ = json.NewDecoder(r.Body).Decode(&putBody)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":42}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}), nil, func(c *Client) {
+		if err := c.EnsureBranchRuleset("owner", "repo", []string{"Lint"}, BranchProtectionOptions{}); err != nil {
+			t.Fatalf("EnsureBranchRuleset() error: %v", err)
+		}
+	}, func(t *testing.T) {
+		rules, _ := putBody["rules"].([]any)
+		for _, rule := range rules {
+			rm, _ := rule.(map[string]any)
+			if rm["type"] != "pull_request" {
+				continue
+			}
+			params, _ := rm["parameters"].(map[string]any)
+			if mapBool(params, "require_code_owner_review") || mapBool(params, "dismiss_stale_reviews_on_push") {
+				t.Errorf("reconcile rewrote solo protect-main to team PR rules: %#v", params)
+			}
+			return
+		}
+		t.Fatal("expected pull_request rule in update body")
+	})
+}
+
 func TestEnsureRulesets(t *testing.T) {
 	tests := []struct {
 		name     string
 		ruleType string
 		response string
+		detail   string
 		wantPost bool
 		fn       func(*Client) error
 	}{
 		{
 			name:     "branch - already exists",
 			ruleType: "branch",
-			response: `[{"name":"protect-main"}]`,
+			response: `[{"id":1,"name":"protect-main"}]`,
+			detail:   `{"id":1,"name":"protect-main","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"rules":[{"type":"deletion"},{"type":"non_fast_forward"},{"type":"pull_request","parameters":{"required_approving_review_count":0,"dismiss_stale_reviews_on_push":true,"require_code_owner_review":true,"require_last_push_approval":false,"required_review_thread_resolution":true}}]}`,
 			wantPost: false,
 			fn: func(c *Client) error {
 				return c.EnsureBranchRuleset("owner", "repo", []string{}, BranchProtectionOptions{})
@@ -307,7 +376,8 @@ func TestEnsureRulesets(t *testing.T) {
 		{
 			name:     "tag - already exists",
 			ruleType: "tag",
-			response: `[{"name":"protect-version-tags"}]`,
+			response: `[{"id":2,"name":"protect-version-tags"}]`,
+			detail:   `{"id":2,"name":"protect-version-tags","target":"tag","enforcement":"active","conditions":{"ref_name":{"include":["refs/tags/v*"],"exclude":[]}},"rules":[{"type":"deletion"},{"type":"non_fast_forward"}]}`,
 			wantPost: false,
 			fn: func(c *Client) error {
 				return c.EnsureTagRuleset("owner", "repo")
@@ -329,8 +399,12 @@ func TestEnsureRulesets(t *testing.T) {
 			testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
 					w.WriteHeader(http.StatusOK)
+					body := tt.response
+					if strings.Contains(r.URL.Path, "/rulesets/") && tt.detail != "" {
+						body = tt.detail
+					}
 					var out any
-					_ = json.Unmarshal([]byte(tt.response), &out)
+					_ = json.Unmarshal([]byte(body), &out)
 					_ = json.NewEncoder(w).Encode(out)
 					return
 				}
