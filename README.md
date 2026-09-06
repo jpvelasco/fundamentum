@@ -48,10 +48,13 @@ $env:GITHUB_TOKEN = "ghp_xxxxx"      # PowerShell
 ## What it does
 
 - **Community health files**: `CONTRIBUTING.md`, `CODEOWNERS`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, pull request + issue templates, `dependabot.yml`, and more.
-- **Branch protection**: Modern ruleset on `main` (PRs, CODEOWNERS review, status checks, no force-push/delete) + optional tag protection. Falls back gracefully on free-tier private repos.
-- **Security**: Dependabot alerts + updates everywhere; secret scanning + push protection on public repos, opt-in on private/internal repos via `--advanced-security` (requires paid GitHub Advanced Security); CodeQL (public repos).
+- **Branch protection**: Modern `protect-main` ruleset (PRs, optional CODEOWNERS review, shipped CI status checks, no force-push/delete) + optional tag protection. Existing rulesets are reconciled on drift. Classic fallback only when GitHub says rulesets are unavailable on the plan.
+- **Security**: Dependabot alerts + updates everywhere; secret scanning + push protection on public repos, opt-in on private/internal repos via `--advanced-security` (paid GHAS); CodeQL default setup on public repos unless the advanced workflow ships.
 - **Settings**: Auto-delete merged branches.
-- **Opinionated starters**: Basic CI workflow + visibility-aware coverage/CodeQL workflows + `.codacy.yml`.
+- **Opinionated starters**: Go CI (Lint, Vulnerability scan, Build/Test, gosec, Trivy) + visibility-aware coverage/CodeQL + `.codacy.yml`.
+- **Audit**: `fundamentum audit OWNER/REPO` prints a PASS/FAIL report against that baseline.
+
+`--pr` batches **file** changes into a pull request. Settings, security, and branch protection still apply immediately via the API. Tag ruleset and security steps are optional unless you pass `--strict`. Required checks default to the shipped CI jobs, not Codacy (`--require-checks` overrides).
 
 Everything is **idempotent** — re-running is safe and fast.
 
