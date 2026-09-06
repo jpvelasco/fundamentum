@@ -146,7 +146,7 @@ Shipped CI follows the **fabrica standard**: `public_ci.yml` (full Go CI — Lin
 - **Paid GHAS gating** (`cmd/apply/apply.go` `buildItems`): private/internal repos get Dependabot only unless `--advanced-security` is passed or the wizard prompt is answered yes (prompt only when not dry-run). Public repos always get secret scanning + push protection. Internal visibility uses private templates.
 - **Dry-run "would create" labels**: `General settings (auto-delete branches)` and `Security (…)` are hardcoded `ActionCreate` in `cmd/apply/apply.go` `buildItems` — they always show "would create" even when already enabled. The applies are idempotent PUTs; verify live state via `gh api repos/O/R --jq '{delete_branch_on_merge, security_and_analysis}'` instead of trusting the label.
 - **Windows CRLF embed trap**: template files under `internal/templatefs/templates/` that get rewritten externally with CRLF (editor, scripting) become invisible to git — the clean filter normalizes CRLF→LF, matching the LF blob, so `git status` stays clean and checkout/restore never rewrite the bytes. `//go:embed` then embeds the CRLF bytes and dry-run falsely reports `would update` for content-identical files (live blobs are LF). Fix: delete the file and `git checkout HEAD -- <file>` (or clone fresh). Verify with `git hash-object --no-filters <file>` — it must equal `git rev-parse HEAD:<file>`.
-- Auth: `--token` flag or `GITHUB_TOKEN` env var, used as Bearer token
+- Auth: `--token` flag or `GITHUB_TOKEN` env var, used as Bearer token. `apply`, `audit`, and live `init` fail locally when neither is set. `init --dry-run` does not require a token.
 
 ### Testing
 
