@@ -81,6 +81,17 @@ func TestBranchProtectionItem_RulesetExists(t *testing.T) {
 	}
 }
 
+func TestTagRulesetItem_CreateAndSkip(t *testing.T) {
+	create := tagRulesetItem(nil, "owner", "repo", github.RulesetPlan{})
+	if create.Action != wizard.ActionCreate {
+		t.Errorf("missing tag ruleset Action = %v, want create", create.Action)
+	}
+	skip := tagRulesetItem(nil, "owner", "repo", existsPlan(true))
+	if skip.Action != wizard.ActionSkip {
+		t.Errorf("matching tag ruleset Action = %v, want skip", skip.Action)
+	}
+}
+
 func TestTagRulesetItem_Drift(t *testing.T) {
 	item := tagRulesetItem(nil, "owner", "repo", github.RulesetPlan{Exists: true, Drift: []string{"enforcement"}})
 	if item.Action != wizard.ActionUpdate {
@@ -427,6 +438,47 @@ func newRunFlowServer() *httptest.Server {
 // TestRunWithClient_FullFlow drives the complete apply flow against a mock
 // server: visibility detection, pre-flight checks, solo prompt, defaults
 // confirmation, and direct application of all items.
+func TestRunWithClient_ExistingRulesetInfersSolo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
+			_, _ = w.Write([]byte(`{"visibility":"public"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/rulesets":
+			_, _ = w.Write([]byte(`[{"id":1,"name":"protect-main"},{"id":2,"name":"protect-version-tags"}]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/rulesets/1":
+			_, _ = w.Write([]byte(`{"id":1,"name":"protect-main","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"]}},"rules":[{"type":"deletion"},{"type":"non_fast_forward"},{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"require_code_owner_review":false,"dismiss_stale_reviews_on_push":false}},{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"Lint"},{"context":"Vulnerability scan"},{"context":"Build (ubuntu-latest)"},{"context":"Build (windows-latest)"},{"context":"Test (ubuntu-latest)"},{"context":"Test (windows-latest)"},{"context":"gosec"},{"context":"Trivy"}]}}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/rulesets/2":
+			_, _ = w.Write([]byte(`{"id":2,"name":"protect-version-tags","target":"tag","enforcement":"active","conditions":{"ref_name":{"include":["refs/tags/v*"]}},"rules":[{"type":"deletion"},{"type":"non_fast_forward"}]}`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main/protection"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"content":{}}`))
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/vulnerability-alerts"):
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/automated-security-fixes"):
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/owner/repo":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	var out strings.Builder
+	err := runWithClient(newTestClient(srv), "owner", "repo", newLineReader("y\n"), &out)
+	if err != nil {
+		t.Fatalf("runWithClient() error: %v", err)
+	}
+	if strings.Contains(out.String(), "Project type?") {
+		t.Error("existing ruleset must not prompt for solo/team")
+	}
+}
+
 func TestRunWithClient_FullFlow(t *testing.T) {
 	srv := newRunFlowServer()
 	defer srv.Close()
