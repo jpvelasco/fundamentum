@@ -169,6 +169,19 @@ func TestResolveCIPack_DetectError(t *testing.T) {
 	}, nil)
 }
 
+func TestResolveCIPack_InvalidFlagWithClient(t *testing.T) {
+	t.Cleanup(func() { globals.CIPack = "" })
+	globals.CIPack = "rust"
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}), func(c *github.Client) {
+		_, err := resolveCIPack(c, "owner", "repo")
+		if err == nil || !strings.Contains(err.Error(), "invalid --ci") {
+			t.Fatalf("error = %v, want invalid --ci", err)
+		}
+	}, nil)
+}
+
 func TestBuildItems(t *testing.T) {
 	// Mock server that returns file not found for all files
 	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

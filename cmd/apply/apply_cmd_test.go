@@ -690,6 +690,35 @@ func TestRunWithClient_DryRunPrivateShowsAdvancedSecurity(t *testing.T) {
 	}
 }
 
+func TestRunWithClient_InvalidCIPack(t *testing.T) {
+	t.Cleanup(func() { globals.CIPack = "" })
+	globals.CIPack = "rust"
+	srv := newRunFlowServer()
+	defer srv.Close()
+	err := runWithClient(newTestClient(srv), "owner", "repo", newLineReader("solo\ny\n"), &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "invalid --ci") {
+		t.Fatalf("error = %v, want invalid --ci", err)
+	}
+}
+
+func TestRunWithClient_GoModDetectError(t *testing.T) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
+			_, _ = w.Write([]byte(`{"visibility":"public","default_branch":"main"}`))
+		case strings.HasSuffix(r.URL.Path, "/contents/go.mod"):
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "detect go.mod") {
+		t.Fatalf("error = %v, want detect go.mod", err)
+	}
+}
+
 // TestRunWithClient_VisibilityError verifies visibility detection failures
 // surface a wrapped error.
 func TestRunWithClient_VisibilityError(t *testing.T) {
