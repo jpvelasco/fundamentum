@@ -60,6 +60,9 @@ func TestNewCmd(t *testing.T) {
 	if !strings.Contains(cmd.Long, "settings still apply live") {
 		t.Error("expected --pr help to say settings still apply live")
 	}
+	if !strings.Contains(cmd.Long, "--preset oss") {
+		t.Error("expected --preset example in Long help")
+	}
 }
 
 func TestRun_MissingToken(t *testing.T) {
@@ -661,6 +664,68 @@ func TestRunWithClient_DryRunPRModeNotice(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "still apply live via the API") {
 		t.Errorf("expected live-API wording, got:\n%s", out.String())
+	}
+}
+
+func TestRunWithClient_PresetSkipsPrompts(t *testing.T) {
+	t.Cleanup(func() { globals.Preset = "" })
+	globals.Preset = "oss"
+
+	srv := newRunFlowServer()
+	defer srv.Close()
+	var out strings.Builder
+	// Empty stdin: a leftover prompt would hang or take a default after EOF.
+	if err := runWithClient(newTestClient(srv), "owner", "repo", strings.NewReader(""), &out); err != nil {
+		t.Fatalf("runWithClient() error: %v", err)
+	}
+	got := out.String()
+	if strings.Contains(got, "Project type?") || strings.Contains(got, "Apply all defaults?") {
+		t.Errorf("--preset must skip wizard prompts, got:\n%s", got)
+	}
+	if !strings.Contains(got, "✓ Done") {
+		t.Errorf("expected done after --preset apply, got:\n%s", got)
+	}
+}
+
+func TestRunWithClient_InvalidPreset(t *testing.T) {
+	t.Cleanup(func() { globals.Preset = "" })
+	globals.Preset = "enterprise"
+	srv := newRunFlowServer()
+	defer srv.Close()
+	err := runWithClient(newTestClient(srv), "owner", "repo", strings.NewReader(""), &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "invalid --preset") {
+		t.Fatalf("error = %v, want invalid --preset", err)
+	}
+}
+
+func TestRunWithClient_PresetPrivateSkipsGHAS(t *testing.T) {
+	t.Cleanup(func() {
+		globals.Preset = ""
+		globals.AdvancedSecurity = false
+	})
+	globals.Preset = "private"
+
+	inner := newRunFlowServer()
+	defer inner.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo" {
+			_, _ = w.Write([]byte(`{"visibility":"private","default_branch":"main","owner":{"type":"User"}}`))
+			return
+		}
+		inner.Config.Handler.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	var out strings.Builder
+	if err := runWithClient(newTestClient(srv), "owner", "repo", strings.NewReader(""), &out); err != nil {
+		t.Fatalf("runWithClient() error: %v", err)
+	}
+	got := out.String()
+	if strings.Contains(got, "Enable GitHub Advanced Security") {
+		t.Errorf("--preset private must not prompt for GHAS, got:\n%s", got)
+	}
+	if strings.Contains(got, "Security (secret scanning") {
+		t.Errorf("--preset private must not enable secret scanning, got:\n%s", got)
 	}
 }
 

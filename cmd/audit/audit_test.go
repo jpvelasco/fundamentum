@@ -104,6 +104,17 @@ func TestAudit_AliasFileCountsAsPresent(t *testing.T) {
 	}
 }
 
+func TestAudit_InvalidPreset(t *testing.T) {
+	t.Cleanup(func() { globals.Preset = "" })
+	globals.Preset = "enterprise"
+	srv := newAuditServer(true)
+	defer srv.Close()
+	err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "invalid --preset") {
+		t.Fatalf("error = %v, want invalid --preset", err)
+	}
+}
+
 func TestAudit_InvalidCIPack(t *testing.T) {
 	t.Cleanup(func() { globals.CIPack = "" })
 	globals.CIPack = "rust"

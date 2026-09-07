@@ -17,6 +17,8 @@ func resetRootGlobals(t *testing.T) {
 		globals.RequireChecks = nil
 		globals.CIPack = ""
 		globals.ViaPR = false
+		globals.Preset = ""
+		globals.AdvancedSecurity = false
 	})
 }
 
@@ -36,6 +38,19 @@ func TestRequireChecksFlag(t *testing.T) {
 		if globals.RequireChecks[i] != name {
 			t.Errorf("RequireChecks[%d] = %q, want %q", i, globals.RequireChecks[i], name)
 		}
+	}
+}
+
+func TestPresetFlag(t *testing.T) {
+	resetRootGlobals(t)
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"--preset", "oss", "--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if globals.Preset != "oss" {
+		t.Errorf("Preset = %q, want oss", globals.Preset)
 	}
 }
 

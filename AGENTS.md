@@ -102,9 +102,9 @@ Three subcommands:
 - **init OWNER/REPO** — create a new repo then apply hardening
 - **audit OWNER/REPO** — compare the repo to the intended baseline and print a compact PASS/FAIL report; `--strict` fails on optional drift (tag ruleset, secret scanning)
 
-Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`, `--pr`, `--advanced-security`, `--strict`, `--require-checks`.
+Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`, `--pr`, `--advanced-security`, `--strict`, `--require-checks`, `--ci`, `--preset`.
 `init` also takes `--private` (default `true`; pass `--private=false` for public).
-Shared flag `--ci auto|go|generic|none` selects the starter CI pack (`auto` = Go when `go.mod` exists, otherwise generic).
+Shared flag `--ci auto|go|generic|none` selects the starter CI pack (`auto` = Go when `go.mod` exists, otherwise generic). Shared flag `--preset oss|private|strict` skips wizard prompts (`strict` also sets `--strict` and `--advanced-security`).
 
 ### Packages
 
@@ -112,7 +112,7 @@ Shared flag `--ci auto|go|generic|none` selects the starter CI pack (`auto` = Go
 - `cmd/apply` — apply logic: renders templates, checks existing state, builds item list, runs wizard
 - `cmd/audit` — post-apply compliance check using the same ruleset compare as apply
 - `cmd/repoinit` — creates repo via API, then delegates to apply
-- `cmd/globals` — shared mutable flag state (DryRun, Token, Verbose, NoOverwrite, ViaPR, AdvancedSecurity, Strict, RequireChecks)
+- `cmd/globals` — shared mutable flag state (DryRun, Token, Verbose, NoOverwrite, ViaPR, AdvancedSecurity, Strict, RequireChecks, CIPack, Preset)
 - `cmd/util` — shared utilities (ParseOwnerRepo)
 - `internal/github` — thin HTTP client for GitHub API (net/http, no SDK)
 - `internal/wizard` — interactive summary table + Y/N apply flow
