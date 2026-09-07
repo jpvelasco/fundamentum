@@ -69,7 +69,7 @@ match, or PRs deadlock on contexts that never report.
 ## Release (tag `v*`)
 
 `.github/workflows/release.yml` runs GoReleaser on version tags, then publishes the npm shim
-(`fundamentum-cli`): `scripts/embed-checksums.js` embeds GoReleaser's `dist/checksums.txt` into
+(`fundamentum-cli`): a `0.0.0` checkout skips the release download and tells you to `go build -o npm/bin/…`. `scripts/embed-checksums.js` embeds GoReleaser's `dist/checksums.txt` into
 `npm/package.json` (`binaryChecksums`), then `npm publish` runs from `npm/` via OIDC trusted
 publishing (`id-token: write`). `.goreleaser.yml` pins version ldflags to
 `cmd/root.Version` (`{{.Version}}`), archives tar.gz (zip on Windows) as

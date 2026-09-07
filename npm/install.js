@@ -197,7 +197,15 @@ async function main() {
   );
   const version = getPackageVersion(pkg);
   if (version === "0.0.0") {
-    console.error("fundamentum: skipping binary download for development version");
+    console.error(
+      "fundamentum: package version is 0.0.0 (git checkout / unpublished).\n" +
+        "The release installer will not download a binary from here.\n" +
+        "Build locally instead:\n" +
+        "  go build -o npm/bin/" +
+        binaryName +
+        " .\n" +
+        "Or install a published release: npm install -g fundamentum-cli"
+    );
     return;
   }
 
