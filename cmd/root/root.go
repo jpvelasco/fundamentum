@@ -6,6 +6,7 @@ import (
 
 	"github.com/jpvelasco/fundamentum/cmd/apply"
 	"github.com/jpvelasco/fundamentum/cmd/audit"
+	"github.com/jpvelasco/fundamentum/cmd/exportcmd"
 	"github.com/jpvelasco/fundamentum/cmd/globals"
 	"github.com/jpvelasco/fundamentum/cmd/repoinit"
 )
@@ -25,6 +26,8 @@ Examples:
   fundamentum init OWNER/REPO               # create and harden new repo
   fundamentum audit OWNER/REPO              # verify the harden baseline
   fundamentum --preset oss apply OWNER/REPO # non-interactive public baseline
+  fundamentum --preset oss export -o baseline.json
+  fundamentum --from baseline.json apply OWNER/REPO
   fundamentum --dry-run apply OWNER/REPO    # preview without changes
   fundamentum --version                     # show version`,
 		Version: Version,
@@ -39,9 +42,11 @@ Examples:
 	cmd.PersistentFlags().StringSliceVar(&globals.RequireChecks, "require-checks", nil, "required status-check contexts for protect-main (comma-separated; default: jobs for the resolved --ci pack)")
 	cmd.PersistentFlags().StringVar(&globals.CIPack, "ci", "", "CI pack: auto (default; go if go.mod exists, else generic), go, generic, or none")
 	cmd.PersistentFlags().StringVar(&globals.Preset, "preset", "", "named baseline: oss (public defaults, no prompts), private (solo, no GHAS prompt), strict (fail optional steps + enable GHAS)")
+	cmd.PersistentFlags().StringVar(&globals.FromFile, "from", "", "load a portable JSON baseline (export writes this; explicit flags still win)")
 	cmd.AddCommand(apply.NewCmd())
 	cmd.AddCommand(repoinit.NewCmd())
 	cmd.AddCommand(audit.NewCmd())
+	cmd.AddCommand(exportcmd.NewCmd())
 	return cmd
 }
 

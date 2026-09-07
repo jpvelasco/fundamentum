@@ -27,6 +27,10 @@ fundamentum init OWNER/REPO
 # Verify the harden baseline
 fundamentum audit OWNER/REPO
 
+# Export / reapply a portable baseline
+fundamentum --preset oss export -o baseline.json
+fundamentum --from baseline.json apply OWNER/REPO
+
 # Preview without changes
 fundamentum --dry-run apply OWNER/REPO
 
@@ -74,6 +78,7 @@ Everything is **idempotent** — re-running is safe and fast.
 | `--require-checks`  | Required status-check contexts for `protect-main` (comma-separated; default: jobs for the resolved `--ci` pack) |
 | `--ci`              | CI pack: `auto` (default; Go if `go.mod` exists, else generic), `go`, `generic`, or `none` |
 | `--preset`          | Named baseline: `oss` (no prompts), `private` (solo, no GHAS prompt), `strict` (`--strict` + GHAS) |
+| `--from`            | Load a portable JSON baseline from `export` (explicit flags still win) |
 | `--version`         | Print version and exit                           |
 
 `init` also supports `--private` (default: `true`).

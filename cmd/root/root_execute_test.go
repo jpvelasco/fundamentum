@@ -41,6 +41,7 @@ func TestExecute_SubcommandHelp(t *testing.T) {
 		{"apply help", []string{"apply", "--help"}},
 		{"init help", []string{"init", "--help"}},
 		{"audit help", []string{"audit", "--help"}},
+		{"export help", []string{"export", "--help"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -95,8 +96,8 @@ func TestExecute_Root(t *testing.T) {
 // Test that Execute() calls os.Exit on error by checking the command structure.
 func TestExecute_CommandStructure(t *testing.T) {
 	cmd := newRootCmd()
-	if len(cmd.Commands()) != 3 {
-		t.Errorf("expected 3 subcommands, got %d", len(cmd.Commands()))
+	if len(cmd.Commands()) != 4 {
+		t.Errorf("expected 4 subcommands, got %d", len(cmd.Commands()))
 	}
 
 	names := []string{}
@@ -107,6 +108,7 @@ func TestExecute_CommandStructure(t *testing.T) {
 	foundApply := false
 	foundInit := false
 	foundAudit := false
+	foundExport := false
 	for _, n := range names {
 		if strings.HasPrefix(n, "apply") {
 			foundApply = true
@@ -117,6 +119,9 @@ func TestExecute_CommandStructure(t *testing.T) {
 		if strings.HasPrefix(n, "audit") {
 			foundAudit = true
 		}
+		if strings.HasPrefix(n, "export") {
+			foundExport = true
+		}
 	}
 	if !foundApply {
 		t.Error("expected apply subcommand")
@@ -126,5 +131,8 @@ func TestExecute_CommandStructure(t *testing.T) {
 	}
 	if !foundInit {
 		t.Error("expected init subcommand")
+	}
+	if !foundExport {
+		t.Error("expected export subcommand")
 	}
 }

@@ -104,6 +104,17 @@ func TestAudit_AliasFileCountsAsPresent(t *testing.T) {
 	}
 }
 
+func TestAudit_FromMissingBaseline(t *testing.T) {
+	t.Cleanup(func() { globals.FromFile = "" })
+	globals.FromFile = t.TempDir() + "/missing.json"
+	srv := newAuditServer(true)
+	defer srv.Close()
+	err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "read baseline") {
+		t.Fatalf("error = %v, want read baseline", err)
+	}
+}
+
 func TestAudit_InvalidPreset(t *testing.T) {
 	t.Cleanup(func() { globals.Preset = "" })
 	globals.Preset = "enterprise"

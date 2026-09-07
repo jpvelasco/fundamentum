@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -684,6 +685,43 @@ func TestRunWithClient_PresetSkipsPrompts(t *testing.T) {
 	}
 	if !strings.Contains(got, "✓ Done") {
 		t.Errorf("expected done after --preset apply, got:\n%s", got)
+	}
+}
+
+func TestRunWithClient_FromBaseline(t *testing.T) {
+	t.Cleanup(func() {
+		globals.FromFile = ""
+		globals.Preset = ""
+	})
+	path := t.TempDir() + "/baseline.json"
+	if err := os.WriteFile(path, []byte(`{"version":1,"preset":"oss"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	globals.FromFile = path
+
+	srv := newRunFlowServer()
+	defer srv.Close()
+	var out strings.Builder
+	if err := runWithClient(newTestClient(srv), "owner", "repo", strings.NewReader(""), &out); err != nil {
+		t.Fatalf("runWithClient() error: %v", err)
+	}
+	got := out.String()
+	if strings.Contains(got, "Project type?") || strings.Contains(got, "Apply all defaults?") {
+		t.Errorf("--from oss baseline must skip wizard prompts, got:\n%s", got)
+	}
+	if !strings.Contains(got, "✓ Done") {
+		t.Errorf("expected done after --from apply, got:\n%s", got)
+	}
+}
+
+func TestRunWithClient_FromMissingBaseline(t *testing.T) {
+	t.Cleanup(func() { globals.FromFile = "" })
+	globals.FromFile = t.TempDir() + "/missing.json"
+	srv := newRunFlowServer()
+	defer srv.Close()
+	err := runWithClient(newTestClient(srv), "owner", "repo", strings.NewReader(""), &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "read baseline") {
+		t.Fatalf("error = %v, want read baseline", err)
 	}
 }
 
