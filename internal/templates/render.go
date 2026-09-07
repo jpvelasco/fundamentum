@@ -194,6 +194,12 @@ func stripVisibilityPrefix(base string) string {
 		return strings.TrimPrefix(base, "private_")
 	case strings.HasPrefix(base, "generic_"):
 		return strings.TrimPrefix(base, "generic_")
+	case strings.HasPrefix(base, "node_"):
+		return strings.TrimPrefix(base, "node_")
+	case strings.HasPrefix(base, "python_"):
+		return strings.TrimPrefix(base, "python_")
+	case strings.HasPrefix(base, "rust_"):
+		return strings.TrimPrefix(base, "rust_")
 	default:
 		return base
 	}

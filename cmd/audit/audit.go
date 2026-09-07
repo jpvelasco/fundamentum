@@ -78,11 +78,13 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 	}
 
 	opts := github.BranchProtectionOptions{SkipCodeOwners: strings.EqualFold(info.OwnerType, "Organization")}
-	goMod, err := client.AnyFileExists(owner, repo, []string{"go.mod"})
+	m, err := templates.DetectManifests(func(path string) (bool, error) {
+		return client.AnyFileExists(owner, repo, []string{path})
+	})
 	if err != nil {
-		return fmt.Errorf("detect go.mod: %w", err)
+		return err
 	}
-	pack, err := templates.ResolveCIPack(globals.CIPack, goMod)
+	pack, err := templates.ResolveCIPackFrom(globals.CIPack, m)
 	if err != nil {
 		return err
 	}

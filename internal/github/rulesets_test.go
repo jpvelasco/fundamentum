@@ -254,6 +254,9 @@ func TestResolveRequiredChecksForPack(t *testing.T) {
 	if got := ResolveRequiredChecksForPack(nil, "go"); len(got) != len(DefaultStatusChecks) {
 		t.Fatalf("go defaults = %#v", got)
 	}
+	if got := ResolveRequiredChecksForPack(nil, "node"); len(got) != 3 || got[0] != "Lint" || got[2] != "Trivy" {
+		t.Fatalf("node defaults = %#v", got)
+	}
 	got := ResolveRequiredChecksForPack([]string{"Lint"}, "generic")
 	if len(got) != 1 || got[0] != "Lint" {
 		t.Fatalf("explicit overrides pack = %#v", got)

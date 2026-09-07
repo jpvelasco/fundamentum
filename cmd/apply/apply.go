@@ -37,7 +37,8 @@ Examples:
   fundamentum --pr apply OWNER/REPO         # files via PR; settings still apply live
   fundamentum --preset oss apply OWNER/REPO # non-interactive public baseline
   fundamentum --from baseline.json apply OWNER/REPO
-  fundamentum --ci generic apply OWNER/REPO # non-Go starter CI (no go.mod)
+  fundamentum --ci node apply OWNER/REPO    # Node starter CI
+  fundamentum --ci generic apply OWNER/REPO # generic starter CI (no language)
   fundamentum --strict apply OWNER/REPO     # fail if any core step fails
   fundamentum --require-checks Lint,gosec apply OWNER/REPO
   fundamentum --token $GITHUB_TOKEN apply OWNER/REPO`,
@@ -374,19 +375,17 @@ func printPRModeNotice(stdout io.Writer) {
 }
 
 func resolveCIPack(c *github.Client, owner, repo string) (string, error) {
-	goMod := false
+	m := templates.Manifests{}
 	if c != nil {
-		exists, err := c.AnyFileExists(owner, repo, []string{"go.mod"})
+		var err error
+		m, err = templates.DetectManifests(func(path string) (bool, error) {
+			return c.AnyFileExists(owner, repo, []string{path})
+		})
 		if err != nil {
-			return "", fmt.Errorf("detect go.mod: %w", err)
+			return "", err
 		}
-		goMod = exists
 	}
-	pack, err := templates.ResolveCIPack(globals.CIPack, goMod)
-	if err != nil {
-		return "", err
-	}
-	return pack, nil
+	return templates.ResolveCIPackFrom(globals.CIPack, m)
 }
 
 func requiredChecks(pack string) []string {

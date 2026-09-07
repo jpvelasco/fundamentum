@@ -55,7 +55,7 @@ $env:GITHUB_TOKEN = "ghp_xxxxx"      # PowerShell
 - **Branch protection**: Modern `protect-main` ruleset (PRs, optional CODEOWNERS review, shipped CI status checks, no force-push/delete) + optional tag protection. Existing rulesets are reconciled on drift. Classic fallback only when GitHub says rulesets are unavailable on the plan.
 - **Security**: Dependabot alerts + updates everywhere; secret scanning + push protection on public repos, opt-in on private/internal repos via `--advanced-security` (paid GHAS); CodeQL default setup on public repos unless the advanced workflow ships.
 - **Settings**: Auto-delete merged branches.
-- **Opinionated starters**: CI pack is `auto` — Go CI when `go.mod` exists, otherwise a generic `CI` + Trivy workflow that does not assume Go. Override with `--ci go|generic|none`. Visibility-aware coverage/CodeQL + `.codacy.yml` still ship with the Go pack.
+- **Opinionated starters**: CI pack is `auto` — Go / Node / Python / Rust from `go.mod`, `package.json`, `pyproject.toml`/`requirements.txt`, or `Cargo.toml`; otherwise a generic `CI` + Trivy workflow. Override with `--ci go|node|python|rust|generic|none`. Visibility-aware coverage/CodeQL + `.codacy.yml` still ship with the Go pack.
 - **Audit**: `fundamentum audit OWNER/REPO` prints a PASS/FAIL report against that baseline.
 
 `--preset oss|private|strict` skips the wizard so a scripted apply reproduces the same harden. `oss` and `private` take the solo default and do not enable paid GHAS; `strict` turns on `--strict` and `--advanced-security`. Visibility still picks the public vs private file set.
@@ -76,7 +76,7 @@ Everything is **idempotent** — re-running is safe and fast.
 | `--advanced-security` | Enable GitHub Advanced Security (secret scanning, push protection) on private/internal repos (paid) |
 | `--strict`          | Fail the run when any core harden step fails, including optional tag/security items |
 | `--require-checks`  | Required status-check contexts for `protect-main` (comma-separated; default: jobs for the resolved `--ci` pack) |
-| `--ci`              | CI pack: `auto` (default; Go if `go.mod` exists, else generic), `go`, `generic`, or `none` |
+| `--ci`              | CI pack: `auto` (detect go/node/python/rust, else generic), `go`, `node`, `python`, `rust`, `generic`, or `none` |
 | `--preset`          | Named baseline: `oss` (no prompts), `private` (solo, no GHAS prompt), `strict` (`--strict` + GHAS) |
 | `--from`            | Load a portable JSON baseline from `export` (explicit flags still win) |
 | `--version`         | Print version and exit                           |
