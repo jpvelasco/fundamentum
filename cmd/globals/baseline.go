@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 // BaselineVersion is the portable baseline schema version.
@@ -53,9 +55,9 @@ func WriteBaseline(w io.Writer, b Baseline) error {
 // LoadBaselineFile reads a JSON baseline and applies it to flag state.
 // Explicit non-empty flags already set by the operator win over the file.
 func LoadBaselineFile(path string) error {
-	raw, err := os.ReadFile(path)
+	raw, err := readBaselineBytes(path)
 	if err != nil {
-		return fmt.Errorf("read baseline %s: %w", path, err)
+		return err
 	}
 	var b Baseline
 	if err := json.Unmarshal(raw, &b); err != nil {
@@ -95,3 +97,46 @@ func ApplyBaseline(b Baseline) error {
 
 // FromFile is the --from path for apply/audit.
 var FromFile string
+
+func readBaselineBytes(path string) ([]byte, error) {
+	clean, err := regularFile(path)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(clean) // #nosec G304 -- path is a regular file the operator named
+	if err != nil {
+		return nil, fmt.Errorf("read baseline %s: %w", path, err)
+	}
+	return raw, nil
+}
+
+// CreateBaselineFile creates path with 0600 so the baseline is not world-readable.
+func CreateBaselineFile(path string) (*os.File, error) {
+	clean, err := cleanPath(path)
+	if err != nil {
+		return nil, err
+	}
+	return os.OpenFile(clean, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // #nosec G304 -- operator-named output
+}
+
+func regularFile(path string) (string, error) {
+	clean, err := cleanPath(path)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(clean)
+	if err != nil {
+		return "", fmt.Errorf("read baseline %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("read baseline %s: not a regular file", path)
+	}
+	return clean, nil
+}
+
+func cleanPath(path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("baseline path is empty")
+	}
+	return filepath.Clean(path), nil
+}

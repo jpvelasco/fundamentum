@@ -4,7 +4,6 @@ package exportcmd
 import (
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -42,7 +41,7 @@ func run(outPath string, stdout io.Writer) error {
 	if outPath == "" {
 		return globals.WriteBaseline(stdout, b)
 	}
-	f, err := os.Create(outPath)
+	f, err := globals.CreateBaselineFile(outPath)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", outPath, err)
 	}

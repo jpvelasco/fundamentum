@@ -109,4 +109,29 @@ func TestLoadBaselineFile_Errors(t *testing.T) {
 	if err := LoadBaselineFile(path); err == nil || !strings.Contains(err.Error(), "parse baseline") {
 		t.Fatalf("parse = %v", err)
 	}
+	if err := LoadBaselineFile(""); err == nil || !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("empty = %v", err)
+	}
+	if err := LoadBaselineFile(t.TempDir()); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("dir = %v", err)
+	}
+}
+
+func TestCreateBaselineFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "out.json")
+	f, err := CreateBaselineFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("perm = %o, want 0600", info.Mode().Perm())
+	}
+	if _, err := CreateBaselineFile(""); err == nil {
+		t.Fatal("empty path must fail")
+	}
 }
