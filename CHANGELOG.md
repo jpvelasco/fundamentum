@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`--preset oss|private|strict`.** Named baselines skip the wizard so `apply`/`audit`/`init --dry-run` are fully non-interactive. `oss`/`private` keep the solo default and do not enable paid GHAS; `strict` turns on `--strict` plus `--advanced-security`. Visibility still selects the public vs private file set.
+- **`export` / `--from`.** `fundamentum export` writes a portable JSON baseline (preset, CI pack, required checks, GHAS, strict). `apply --from baseline.json` and `audit --from` reapply it; explicit flags still win.
 
 ### Changed
 

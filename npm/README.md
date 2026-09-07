@@ -87,6 +87,7 @@ Built for solo devs and small teams who want their repos to feel like they were 
 | `apply OWNER/REPO` | Harden an existing repo |
 | `init OWNER/REPO` | Create a new repo, then harden it |
 | `audit OWNER/REPO` | Verify the repo matches the harden baseline |
+| `export` | Write a portable JSON baseline (`-o` for a file) |
 | `--dry-run` | Preview the full plan without applying |
 | `--pr` | Batch file changes into a PR; settings/security/protection still apply live |
 | `--no-overwrite` | Only add missing files, never touch existing ones |
@@ -95,6 +96,7 @@ Built for solo devs and small teams who want their repos to feel like they were 
 | `--require-checks` | Required status-check contexts for protect-main (comma-separated; default: jobs for the resolved `--ci` pack) |
 | `--ci` | CI pack: `auto` (default; Go if `go.mod` exists, else generic), `go`, `generic`, or `none` |
 | `--preset` | Named baseline: `oss` (no prompts), `private` (solo, no GHAS prompt), `strict` (`--strict` + GHAS) |
+| `--from` | Load a portable JSON baseline from `export` |
 
 ## Prerequisites
 

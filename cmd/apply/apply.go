@@ -36,6 +36,7 @@ Examples:
   fundamentum --dry-run apply OWNER/REPO    # preview without changes
   fundamentum --pr apply OWNER/REPO         # files via PR; settings still apply live
   fundamentum --preset oss apply OWNER/REPO # non-interactive public baseline
+  fundamentum --from baseline.json apply OWNER/REPO
   fundamentum --ci generic apply OWNER/REPO # non-Go starter CI (no go.mod)
   fundamentum --strict apply OWNER/REPO     # fail if any core step fails
   fundamentum --require-checks Lint,gosec apply OWNER/REPO
@@ -63,7 +64,7 @@ func run(cmd *cobra.Command, args []string) error {
 // and writing output to stdout. Extracted from run so tests can inject a
 // mock-server client and buffers.
 func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, stdout io.Writer) error {
-	if err := globals.ApplyPreset(globals.Preset); err != nil {
+	if err := loadFlags(); err != nil {
 		return err
 	}
 	info, err := client.GetRepo(owner, repo)
@@ -170,7 +171,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 // exist yet. Files, settings, and rulesets are modeled as absent — no GitHub
 // GET is issued, so init --dry-run can preview create+harden.
 func PlanNewRepo(owner, repo, visibility string, stdout io.Writer) error {
-	if err := globals.ApplyPreset(globals.Preset); err != nil {
+	if err := loadFlags(); err != nil {
 		return err
 	}
 	pack, err := resolveCIPack(nil, owner, repo)
@@ -353,6 +354,15 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			},
 		}
 	}
+}
+
+func loadFlags() error {
+	if globals.FromFile != "" {
+		if err := globals.LoadBaselineFile(globals.FromFile); err != nil {
+			return err
+		}
+	}
+	return globals.ApplyPreset(globals.Preset)
 }
 
 const prModeNotice = "--pr: file changes go in a pull request. Settings, security, and branch protection still apply live via the API. Required status checks are deferred until you re-apply after that PR merges.\n\n"

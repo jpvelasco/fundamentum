@@ -46,6 +46,7 @@ func resetGlobals(t *testing.T) {
 		globals.CIPack = ""
 		globals.Preset = ""
 		globals.AdvancedSecurity = false
+		globals.FromFile = ""
 	})
 }
 

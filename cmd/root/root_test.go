@@ -19,6 +19,7 @@ func resetRootGlobals(t *testing.T) {
 		globals.ViaPR = false
 		globals.Preset = ""
 		globals.AdvancedSecurity = false
+		globals.FromFile = ""
 	})
 }
 
