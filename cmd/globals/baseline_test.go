@@ -3,6 +3,7 @@ package globals
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -66,8 +67,9 @@ func TestApplyBaseline_ExplicitFlagsWin(t *testing.T) {
 	if err := ApplyBaseline(Baseline{Preset: "strict", CI: "none", RequireChecks: []string{"CI"}}); err != nil {
 		t.Fatal(err)
 	}
-	if Preset != "oss" || CIPack != "go" || RequireChecks[0] != "Lint" {
-		t.Fatalf("explicit flags must win: Preset=%q CI=%q checks=%v", Preset, CIPack, RequireChecks)
+	gotPreset, gotCI := Preset, CIPack
+	if gotPreset != "oss" || gotCI != "go" || RequireChecks[0] != "Lint" {
+		t.Fatalf("explicit flags must win: Preset=%q CI=%q checks=%v", gotPreset, gotCI, RequireChecks)
 	}
 }
 
@@ -128,7 +130,7 @@ func TestCreateBaselineFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("perm = %o, want 0600", info.Mode().Perm())
 	}
 	if _, err := CreateBaselineFile(""); err == nil {
