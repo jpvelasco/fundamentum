@@ -104,6 +104,7 @@ Three subcommands:
 
 Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`, `--pr`, `--advanced-security`, `--strict`, `--require-checks`.
 `init` also takes `--private` (default `true`; pass `--private=false` for public).
+Shared flag `--ci auto|go|generic|none` selects the starter CI pack (`auto` = Go when `go.mod` exists, otherwise generic).
 
 ### Packages
 
@@ -116,7 +117,7 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`, `--
 - `internal/github` — thin HTTP client for GitHub API (net/http, no SDK)
 - `internal/wizard` — interactive summary table + Y/N apply flow
 - `internal/templates` — renders embedded templates via plain string substitution (not `text/template`; see `render.go`)
-- `internal/templatefs` — `//go:embed` of template files; `dotgithub/` maps to `.github/`, `dotcodacy.yml` to `.codacy.yml`; `public_`/`private_` filename prefixes gate by visibility and are stripped from the target
+- `internal/templatefs` — `//go:embed` of template files; `dotgithub/` maps to `.github/`, `dotcodacy.yml` to `.codacy.yml`; `public_`/`private_` filename prefixes gate by visibility and are stripped from the target; `generic_ci.yml` is the non-Go CI pack (`generic_` prefix stripped like visibility prefixes)
 
 ### Templates
 
@@ -124,7 +125,7 @@ Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`, `--
 
 `resolveTarget` path mapping: `dotgithub/` → `.github/`, `dotcodacy.yml` → `.codacy.yml`; top-level template files map to repo root (`public_codecov.yml` → `codecov.yml`, `socket.yml` → `socket.yml`).
 
-Shipped CI follows the **fabrica standard**: `public_ci.yml` (full Go CI — Lint, Lint (Windows), Vulnerability scan, 3-OS Build/Test matrices, gosec, Trivy — with Codecov coverage + Test Analytics folded into the Test job's Linux leg), `private_ci.yml` (same minus Codecov — private repos keep `private_octocov.yml`), root `public_codeql.yml` plus `codeql/public_codeql-config.yml` (`security-extended` queries; add a commented-out `javascript-typescript` leg if the target repo ships JS/TS), root `socket.yml` (Socket Security supply-chain scan via GitHub App — no visibility prefix, ships for every repo; requires the app installed), root `public_octopus.yml` (Octopus Review PR-triaging bot via `pull_request_target`, public only), `instructions/codacy.instructions.md` (Copilot rules for Codacy MCP), and `dependabot.yml` watching only the `github-actions` ecosystem (no `gomod` entry).
+Shipped CI follows the **fabrica standard** when the resolved pack is `go` (`--ci go`, or `--ci auto` when the target has `go.mod`): `public_ci.yml` (full Go CI — Lint, Lint (Windows), Vulnerability scan, 3-OS Build/Test matrices, gosec, Trivy — with Codecov coverage + Test Analytics folded into the Test job's Linux leg), `private_ci.yml` (same minus Codecov — private repos keep `private_octocov.yml`), root `public_codeql.yml` plus `codeql/public_codeql-config.yml` (`security-extended` queries; add a commented-out `javascript-typescript` leg if the target repo ships JS/TS). Non-Go targets (`--ci auto` without `go.mod`, or `--ci generic`) ship `generic_ci.yml` (`CI` + `Trivy` only — no `go.mod`). `--ci none` ships no starter CI. `socket.yml` (Socket Security supply-chain scan via GitHub App — no visibility prefix, ships for every repo; requires the app installed), root `public_octopus.yml` (Octopus Review PR-triaging bot via `pull_request_target`, public only), `instructions/codacy.instructions.md` (Copilot rules for Codacy MCP), and `dependabot.yml` watching only the `github-actions` ecosystem (no `gomod` entry) still ship regardless of pack. Required status-check defaults follow the resolved pack (`CI`+`Trivy` for generic; none for `--ci none`).
 
 ### Key behavior
 

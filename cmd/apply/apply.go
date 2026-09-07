@@ -35,6 +35,7 @@ Examples:
   fundamentum apply OWNER/REPO              # interactive harden
   fundamentum --dry-run apply OWNER/REPO    # preview without changes
   fundamentum --pr apply OWNER/REPO         # apply via pull request
+  fundamentum --ci generic apply OWNER/REPO # non-Go starter CI (no go.mod)
   fundamentum --strict apply OWNER/REPO     # fail if any core step fails
   fundamentum --require-checks Lint,gosec apply OWNER/REPO
   fundamentum --token $GITHUB_TOKEN apply OWNER/REPO`,
@@ -70,12 +71,18 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 
 	orgOwner := strings.EqualFold(info.OwnerType, "Organization")
 
+	pack, err := resolveCIPack(client, owner, repo)
+	if err != nil {
+		return err
+	}
+
 	data := templates.RepoData{
 		Owner:         owner,
 		RepoName:      repo,
 		DefaultBranch: branch,
 		Visibility:    visibility,
 		CodeOwnerLine: codeOwnerLine(owner, orgOwner),
+		CIPack:        pack,
 	}
 
 	rendered, err := renderTemplates(data)
@@ -86,7 +93,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	// Pre-flight: check branch protection state before asking solo/team.
 	var opts github.BranchProtectionOptions
 	opts.SkipCodeOwners = orgOwner
-	branchPlan, err := client.PlanBranchRuleset(owner, repo, github.ResolveRequiredChecks(globals.RequireChecks), opts)
+	branchPlan, err := client.PlanBranchRuleset(owner, repo, requiredChecks(pack), opts)
 	if err != nil {
 		return fmt.Errorf("check branch ruleset: %w", err)
 	}
@@ -121,7 +128,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 		}
 	}
 
-	items, err := buildItems(client, owner, repo, branch, visibility, rendered, branchPlan, tagPlan, classicExists, &opts, paidSecurity)
+	items, err := buildItems(client, owner, repo, branch, visibility, rendered, branchPlan, tagPlan, classicExists, &opts, paidSecurity, pack)
 	if err != nil {
 		return fmt.Errorf("plan %s/%s: %w (verify the token grants Contents read access and retry)", owner, repo, err)
 	}
@@ -149,19 +156,24 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 // exist yet. Files, settings, and rulesets are modeled as absent — no GitHub
 // GET is issued, so init --dry-run can preview create+harden.
 func PlanNewRepo(owner, repo, visibility string, stdout io.Writer) error {
+	pack, err := resolveCIPack(nil, owner, repo)
+	if err != nil {
+		return err
+	}
 	data := templates.RepoData{
 		Owner:         owner,
 		RepoName:      repo,
 		DefaultBranch: "main",
 		Visibility:    visibility,
 		CodeOwnerLine: codeOwnerLine(owner, false),
+		CIPack:        pack,
 	}
 	rendered, err := renderTemplates(data)
 	if err != nil {
 		return fmt.Errorf("render templates: %w", err)
 	}
 	paid := globals.AdvancedSecurity || github.IsPublicVisibility(visibility) || globals.DryRun
-	items, err := buildItems(nil, owner, repo, "main", visibility, rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, paid)
+	items, err := buildItems(nil, owner, repo, "main", visibility, rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, paid, pack)
 	if err != nil {
 		return err
 	}
@@ -179,6 +191,7 @@ func buildItems(
 	classicExists bool,
 	opts *github.BranchProtectionOptions,
 	paidSecurity bool,
+	pack string,
 ) ([]wizard.Item, error) {
 	var items []wizard.Item
 
@@ -226,7 +239,7 @@ func buildItems(
 		Action: wizard.ActionCreate,
 		Apply:  func() error { return c.ApplyGeneralSettings(owner, repo) },
 	})
-	items = append(items, branchProtectionItem(c, owner, repo, branch, visibility, branchPlan, classicExists, opts))
+	items = append(items, branchProtectionItem(c, owner, repo, branch, visibility, branchPlan, classicExists, opts, pack))
 	items = append(items, tagRulesetItem(c, owner, repo, tagPlan))
 
 	// Security features: CodeQL only for public repos (free-tier private needs GHAS).
@@ -268,7 +281,7 @@ func buildItems(
 //   - drifted ruleset → update in place
 //   - classic exists → upgrade (create ruleset + remove classic)
 //   - neither exists → ruleset for public repos; try ruleset then fall back to classic for private
-func branchProtectionItem(c *github.Client, owner, repo, branch, visibility string, plan github.RulesetPlan, classicExists bool, opts *github.BranchProtectionOptions) wizard.Item {
+func branchProtectionItem(c *github.Client, owner, repo, branch, visibility string, plan github.RulesetPlan, classicExists bool, opts *github.BranchProtectionOptions, pack string) wizard.Item {
 	if opts == nil {
 		opts = &github.BranchProtectionOptions{}
 	}
@@ -283,7 +296,7 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			Name:   "Branch protection (reconcile protect-main)",
 			Action: wizard.ActionUpdate,
 			Apply: func() error {
-				return c.EnsureBranchRuleset(owner, repo, github.ResolveRequiredChecks(globals.RequireChecks), *opts)
+				return c.EnsureBranchRuleset(owner, repo, requiredChecks(pack), *opts)
 			},
 		}
 	case classicExists:
@@ -291,7 +304,7 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			Name:   "Branch protection (upgrade classic → ruleset)",
 			Action: wizard.ActionUpgrade,
 			Apply: func() error {
-				if err := c.EnsureBranchRuleset(owner, repo, github.ResolveRequiredChecks(globals.RequireChecks), *opts); err != nil {
+				if err := c.EnsureBranchRuleset(owner, repo, requiredChecks(pack), *opts); err != nil {
 					return err
 				}
 				return c.RemoveClassicBranchProtection(owner, repo, branch)
@@ -302,7 +315,7 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			Name:   "Branch protection (protect-main)",
 			Action: wizard.ActionCreate,
 			Apply: func() error {
-				checks := github.ResolveRequiredChecks(globals.RequireChecks)
+				checks := requiredChecks(pack)
 				err := c.EnsureBranchRuleset(owner, repo, checks, *opts)
 				if err == nil {
 					return nil
@@ -320,6 +333,26 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			},
 		}
 	}
+}
+
+func resolveCIPack(c *github.Client, owner, repo string) (string, error) {
+	goMod := false
+	if c != nil {
+		exists, err := c.AnyFileExists(owner, repo, []string{"go.mod"})
+		if err != nil {
+			return "", fmt.Errorf("detect go.mod: %w", err)
+		}
+		goMod = exists
+	}
+	pack, err := templates.ResolveCIPack(globals.CIPack, goMod)
+	if err != nil {
+		return "", err
+	}
+	return pack, nil
+}
+
+func requiredChecks(pack string) []string {
+	return github.ResolveRequiredChecksForPack(globals.RequireChecks, pack)
 }
 
 func tagRulesetItem(c *github.Client, owner, repo string, plan github.RulesetPlan) wizard.Item {
@@ -486,5 +519,3 @@ func deferRequiredChecks(opts *github.BranchProtectionOptions) {
 func itemFailedRequired(item wizard.Item) bool {
 	return !item.Optional || globals.Strict
 }
-
-

@@ -35,6 +35,7 @@ Optional checks (fail only with --strict):
 
 Examples:
   fundamentum audit OWNER/REPO
+  fundamentum --ci generic audit OWNER/REPO
   fundamentum --strict audit OWNER/REPO`,
 		Args: cobra.ExactArgs(1),
 		RunE: run,
@@ -68,7 +69,15 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 	}
 
 	opts := github.BranchProtectionOptions{SkipCodeOwners: strings.EqualFold(info.OwnerType, "Organization")}
-	checksWanted := github.ResolveRequiredChecks(globals.RequireChecks)
+	goMod, err := client.AnyFileExists(owner, repo, []string{"go.mod"})
+	if err != nil {
+		return fmt.Errorf("detect go.mod: %w", err)
+	}
+	pack, err := templates.ResolveCIPack(globals.CIPack, goMod)
+	if err != nil {
+		return err
+	}
+	checksWanted := github.ResolveRequiredChecksForPack(globals.RequireChecks, pack)
 	branchPlan, err := client.PlanBranchRuleset(owner, repo, checksWanted, opts)
 	if err != nil {
 		return fmt.Errorf("check branch ruleset: %w", err)
@@ -91,6 +100,7 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 		RepoName:      repo,
 		DefaultBranch: info.DefaultBranch,
 		Visibility:    info.Visibility,
+		CIPack:        pack,
 	}
 	files, err := templates.Render(data)
 	if err != nil {

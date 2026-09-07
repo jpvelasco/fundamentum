@@ -43,6 +43,7 @@ func resetGlobals(t *testing.T) {
 		globals.Verbose = false
 		globals.Strict = false
 		globals.RequireChecks = nil
+		globals.CIPack = ""
 	})
 }
 
@@ -131,11 +132,13 @@ func TestRun_CreateRepoSuccess(t *testing.T) {
 	resetGlobals(t)
 	globals.Token = "t"
 	t.Cleanup(func() { newClient = github.NewClient })
-	t.Cleanup(func() { runApply = func(ownerRepo string) error {
-		applyCmd := apply.NewCmd()
-		applyCmd.SetArgs([]string{ownerRepo})
-		return applyCmd.Execute()
-	} })
+	t.Cleanup(func() {
+		runApply = func(ownerRepo string) error {
+			applyCmd := apply.NewCmd()
+			applyCmd.SetArgs([]string{ownerRepo})
+			return applyCmd.Execute()
+		}
+	})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/user" {
@@ -166,11 +169,13 @@ func TestExecute_RunE(t *testing.T) {
 	resetGlobals(t)
 	globals.Token = "t"
 	t.Cleanup(func() { newClient = github.NewClient })
-	t.Cleanup(func() { runApply = func(ownerRepo string) error {
-		applyCmd := apply.NewCmd()
-		applyCmd.SetArgs([]string{ownerRepo})
-		return applyCmd.Execute()
-	} })
+	t.Cleanup(func() {
+		runApply = func(ownerRepo string) error {
+			applyCmd := apply.NewCmd()
+			applyCmd.SetArgs([]string{ownerRepo})
+			return applyCmd.Execute()
+		}
+	})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/user" {

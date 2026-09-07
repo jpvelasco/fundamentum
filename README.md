@@ -51,7 +51,7 @@ $env:GITHUB_TOKEN = "ghp_xxxxx"      # PowerShell
 - **Branch protection**: Modern `protect-main` ruleset (PRs, optional CODEOWNERS review, shipped CI status checks, no force-push/delete) + optional tag protection. Existing rulesets are reconciled on drift. Classic fallback only when GitHub says rulesets are unavailable on the plan.
 - **Security**: Dependabot alerts + updates everywhere; secret scanning + push protection on public repos, opt-in on private/internal repos via `--advanced-security` (paid GHAS); CodeQL default setup on public repos unless the advanced workflow ships.
 - **Settings**: Auto-delete merged branches.
-- **Opinionated starters**: Go CI (Lint, Vulnerability scan, Build/Test, gosec, Trivy) + visibility-aware coverage/CodeQL + `.codacy.yml`.
+- **Opinionated starters**: CI pack is `auto` — Go CI when `go.mod` exists, otherwise a generic `CI` + Trivy workflow that does not assume Go. Override with `--ci go|generic|none`. Visibility-aware coverage/CodeQL + `.codacy.yml` still ship with the Go pack.
 - **Audit**: `fundamentum audit OWNER/REPO` prints a PASS/FAIL report against that baseline.
 
 `--pr` batches **file** changes into a pull request. Settings, security, and branch protection still apply immediately via the API. Tag ruleset and security steps are optional unless you pass `--strict`. Required checks default to the shipped CI jobs, not Codacy (`--require-checks` overrides).
@@ -69,7 +69,8 @@ Everything is **idempotent** — re-running is safe and fast.
 | `--pr`              | Batch file changes into a PR; settings/security/protection still apply live |
 | `--advanced-security` | Enable GitHub Advanced Security (secret scanning, push protection) on private/internal repos (paid) |
 | `--strict`          | Fail the run when any core harden step fails, including optional tag/security items |
-| `--require-checks`  | Required status-check contexts for `protect-main` (comma-separated; default: shipped CI jobs, not Codacy) |
+| `--require-checks`  | Required status-check contexts for `protect-main` (comma-separated; default: jobs for the resolved `--ci` pack) |
+| `--ci`              | CI pack: `auto` (default; Go if `go.mod` exists, else generic), `go`, `generic`, or `none` |
 | `--version`         | Print version and exit                           |
 
 `init` also supports `--private` (default: `true`).

@@ -91,6 +91,97 @@ func TestPlanNewRepo(t *testing.T) {
 	}
 }
 
+func TestPlanNewRepo_AutoUsesGenericCI(t *testing.T) {
+	t.Cleanup(func() { globals.CIPack = "" })
+	var out strings.Builder
+	if err := PlanNewRepo("owner", "new-repo", "public", &out); err != nil {
+		t.Fatalf("PlanNewRepo() error: %v", err)
+	}
+	// A repo that does not exist yet has no go.mod, so auto must not
+	// ship Go-only files (Codecov / advanced CodeQL) that assume go.mod.
+	got := out.String()
+	if strings.Contains(got, "codecov.yml") || strings.Contains(got, "codeql.yml") {
+		t.Errorf("new-repo auto pack must not ship Go-only files, got:\n%s", got)
+	}
+	if !strings.Contains(got, ".github/workflows/ci.yml") {
+		t.Errorf("expected generic ci.yml in auto plan, got:\n%s", got)
+	}
+}
+
+func TestPlanNewRepo_CIGo(t *testing.T) {
+	t.Cleanup(func() { globals.CIPack = "" })
+	globals.CIPack = "go"
+	var out strings.Builder
+	if err := PlanNewRepo("owner", "new-repo", "public", &out); err != nil {
+		t.Fatalf("PlanNewRepo() error: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, ".github/workflows/ci.yml") || !strings.Contains(got, "codecov.yml") {
+		t.Errorf("expected Go CI + codecov in --ci go plan, got:\n%s", got)
+	}
+}
+
+func TestPlanNewRepo_InvalidCI(t *testing.T) {
+	t.Cleanup(func() { globals.CIPack = "" })
+	globals.CIPack = "rust"
+	if err := PlanNewRepo("owner", "new-repo", "public", &strings.Builder{}); err == nil || !strings.Contains(err.Error(), "invalid --ci") {
+		t.Fatalf("expected invalid --ci error, got %v", err)
+	}
+}
+
+func TestResolveCIPack_DetectsGoMod(t *testing.T) {
+	t.Cleanup(func() { globals.CIPack = "" })
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/contents/go.mod") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"sha":"x"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}), func(c *github.Client) {
+		got, err := resolveCIPack(c, "owner", "repo")
+		if err != nil || got != templates.CIPackGo {
+			t.Fatalf("resolveCIPack() = (%q, %v), want go", got, err)
+		}
+	}, nil)
+}
+
+func TestResolveCIPack_MissingGoModIsGeneric(t *testing.T) {
+	t.Cleanup(func() { globals.CIPack = "" })
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}), func(c *github.Client) {
+		got, err := resolveCIPack(c, "owner", "repo")
+		if err != nil || got != templates.CIPackGeneric {
+			t.Fatalf("resolveCIPack() = (%q, %v), want generic", got, err)
+		}
+	}, nil)
+}
+
+func TestResolveCIPack_DetectError(t *testing.T) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}), func(c *github.Client) {
+		_, err := resolveCIPack(c, "owner", "repo")
+		if err == nil || !strings.Contains(err.Error(), "detect go.mod") {
+			t.Fatalf("error = %v, want detect go.mod", err)
+		}
+	}, nil)
+}
+
+func TestResolveCIPack_InvalidFlagWithClient(t *testing.T) {
+	t.Cleanup(func() { globals.CIPack = "" })
+	globals.CIPack = "rust"
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}), func(c *github.Client) {
+		_, err := resolveCIPack(c, "owner", "repo")
+		if err == nil || !strings.Contains(err.Error(), "invalid --ci") {
+			t.Fatalf("error = %v, want invalid --ci", err)
+		}
+	}, nil)
+}
+
 func TestBuildItems(t *testing.T) {
 	// Mock server that returns file not found for all files
 	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +220,7 @@ func TestBuildItems(t *testing.T) {
 
 func TestBuildItems_WithExistingRuleset(t *testing.T) {
 	c := &github.Client{}
-	items, err := buildItems(c, "owner", "repo", "main", "public", nil, existsPlan(true), existsPlan(true), false, &github.BranchProtectionOptions{}, false)
+	items, err := buildItems(c, "owner", "repo", "main", "public", nil, existsPlan(true), existsPlan(true), false, &github.BranchProtectionOptions{}, false, "")
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -361,7 +452,7 @@ func TestApplyItems_BranchProtectionFailureFailsRun(t *testing.T) {
 }
 
 func TestBranchProtectionItem_NilOpts(t *testing.T) {
-	item := branchProtectionItem(nil, "owner", "repo", "main", "public", existsPlan(true), false, nil)
+	item := branchProtectionItem(nil, "owner", "repo", "main", "public", existsPlan(true), false, nil, "")
 	if item.Action != wizard.ActionSkip {
 		t.Errorf("Action = %v, want skip", item.Action)
 	}
@@ -418,7 +509,7 @@ func assertDeferredRequiredChecks(t *testing.T, viaPR bool, fileApply func() err
 				Content: []byte("me"),
 				Apply:   fileApply,
 			},
-			branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, false, opts),
+			branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, false, opts, ""),
 		}
 		if err := applyItems(c, "owner", "repo", "main", items, viaPR, opts, io.Discard); err != nil {
 			t.Fatalf("applyItems() error: %v", err)
@@ -558,7 +649,7 @@ func TestBranchProtectionItem_FallbackOnlyOn403(t *testing.T) {
 					w.WriteHeader(http.StatusNoContent)
 				}
 			}), func(c *github.Client) {
-				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, github.RulesetPlan{}, false, &github.BranchProtectionOptions{})
+				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, "")
 				err := item.Apply()
 				if tt.wantErr && err == nil {
 					t.Error("expected error, got nil")
@@ -709,7 +800,7 @@ func TestBuildItems_AdvancedCodeQLSkipsDefaultSetup(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Render() error: %v", err)
 		}
-		items, err := buildItems(c, "owner", "repo", "main", "public", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, false)
+		items, err := buildItems(c, "owner", "repo", "main", "public", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, false, "")
 		if err != nil {
 			t.Fatalf("buildItems() error: %v", err)
 		}
@@ -765,7 +856,7 @@ func TestBuildItems_FileStatusSkip(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNotFound)
 	}), func(c *github.Client) {
-		items, err := buildItems(c, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, false)
+		items, err := buildItems(c, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, false, "")
 		if err != nil {
 			t.Fatalf("buildItems() error: %v", err)
 		}
@@ -796,7 +887,7 @@ func TestBranchProtectionItem_ClassicUpgradeApply(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}), func(c *github.Client) {
-		item := branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, true, &github.BranchProtectionOptions{})
+		item := branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, true, &github.BranchProtectionOptions{}, "")
 		if item.Action != wizard.ActionUpgrade {
 			t.Fatalf("expected ActionUpgrade, got %v", item.Action)
 		}
@@ -823,7 +914,7 @@ func TestBranchProtectionItem_ClassicUpgradeError(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}), func(c *github.Client) {
-		item := branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, true, &github.BranchProtectionOptions{})
+		item := branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, true, &github.BranchProtectionOptions{}, "")
 		if err := item.Apply(); err == nil {
 			t.Fatal("expected error when ruleset creation fails")
 		}
@@ -927,7 +1018,6 @@ func TestApplyItems_ViaPRFailure(t *testing.T) {
 	}, nil)
 }
 
-
 // TestBuildItems_FileStatusErrorFailsPlan verifies that a failed canonical
 // status check surfaces as an error instead of silently defaulting the plan
 // to "create" (which misreports dry-runs and fails later with confusing PUTs).
@@ -947,7 +1037,7 @@ func TestBuildItems_FileStatusErrorFailsPlan(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNotFound)
 	}), func(c *github.Client) {
-		items, err := buildItems(c, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, false)
+		items, err := buildItems(c, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, false, "")
 		if err == nil {
 			t.Fatal("expected buildItems to fail when FileStatus errors, got nil")
 		}
@@ -977,7 +1067,7 @@ func TestBuildItems_AliasCheckErrorFailsPlan(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}), func(c *github.Client) {
-		items, err := buildItems(c, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, false)
+		items, err := buildItems(c, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, false, "")
 		if err == nil {
 			t.Fatal("expected buildItems to fail when the alias check errors, got nil")
 		}

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Non-Go repos no longer get a permanently red Go CI starter.** `--ci auto` (default) ships the full Go workflow only when the target has `go.mod`; otherwise it writes a generic `CI` + Trivy pack. `--ci go|generic|none` overrides detection. Required checks follow the resolved pack so `protect-main` does not demand `gosec` on a Node repo.
+
 ## [0.1.6] - 2026-08-24
 
 **Patch release.** Fixes the private-repo CI workflow template, pre-flight file-status error handling, wizard prompt input handling, and a vacuous coverage-gate check; OWNER/REPO arguments are now validated strictly, and Dependabot groups action bumps into one PR.
@@ -25,7 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Other
 
 - `github/codeql-action` bumped to 4.37.7 across init/analyze/autobuild (live workflow + shipped template); Dependabot now groups github-actions bumps into one PR.
-## [Unreleased]
 
 ## [0.1.5] - 2026-08-15
 

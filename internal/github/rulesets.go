@@ -23,9 +23,9 @@ func dedup(s []string) []string {
 }
 
 // DefaultStatusChecks are the status checks added to branch protection by
-// default. They match job names shipped in the public and private CI
-// templates that report on pull requests — not third-party apps (Codacy,
-// Socket) that may be missing and deadlock merges.
+// default for the Go CI pack. They match job names shipped in public_ci.yml
+// / private_ci.yml that report on pull requests — not third-party apps
+// (Codacy, Socket) that may be missing and deadlock merges.
 var DefaultStatusChecks = []string{
 	"Lint",
 	"Vulnerability scan",
@@ -34,6 +34,13 @@ var DefaultStatusChecks = []string{
 	"Test (ubuntu-latest)",
 	"Test (windows-latest)",
 	"gosec",
+	"Trivy",
+}
+
+// GenericStatusChecks are the required contexts for the generic CI pack
+// (generic_ci.yml). Keep this in sync with that workflow's job names.
+var GenericStatusChecks = []string{
+	"CI",
 	"Trivy",
 }
 
@@ -364,12 +371,31 @@ func TagRulesetDrift(got *Ruleset) []string {
 }
 
 // ResolveRequiredChecks normalizes --require-checks. nil means the shipped
-// CI defaults; an empty list requires no status checks.
+// Go CI defaults; an empty list requires no status checks.
 func ResolveRequiredChecks(in []string) []string {
+	return ResolveRequiredChecksForPack(in, "go")
+}
+
+// ResolveRequiredChecksForPack is ResolveRequiredChecks with pack-aware
+// defaults. "generic" requires the generic_ci.yml jobs; "none" requires
+// nothing. Explicit --require-checks still wins for every pack.
+func ResolveRequiredChecksForPack(in []string, pack string) []string {
 	if in == nil {
-		return append([]string{}, DefaultStatusChecks...)
+		return DefaultChecksForPack(pack)
 	}
 	return dedup(trimNonEmpty(in))
+}
+
+// DefaultChecksForPack returns the shipped required-check list for pack.
+func DefaultChecksForPack(pack string) []string {
+	switch pack {
+	case "generic":
+		return append([]string{}, GenericStatusChecks...)
+	case "none":
+		return nil
+	default:
+		return append([]string{}, DefaultStatusChecks...)
+	}
 }
 
 func trimNonEmpty(in []string) []string {

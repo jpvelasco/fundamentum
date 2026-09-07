@@ -15,6 +15,7 @@ func resetRootGlobals(t *testing.T) {
 		globals.NoOverwrite = false
 		globals.Strict = false
 		globals.RequireChecks = nil
+		globals.CIPack = ""
 	})
 }
 
@@ -34,6 +35,19 @@ func TestRequireChecksFlag(t *testing.T) {
 		if globals.RequireChecks[i] != name {
 			t.Errorf("RequireChecks[%d] = %q, want %q", i, globals.RequireChecks[i], name)
 		}
+	}
+}
+
+func TestCIPackFlag(t *testing.T) {
+	resetRootGlobals(t)
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"--ci", "generic", "--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if globals.CIPack != "generic" {
+		t.Errorf("CIPack = %q, want generic", globals.CIPack)
 	}
 }
 

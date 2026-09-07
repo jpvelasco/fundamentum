@@ -39,7 +39,7 @@ func newBuildItemsTestFull(t *testing.T, handler http.HandlerFunc, visibility st
 		t.Fatalf("Render() error: %v", err)
 	}
 
-	items, err := buildItems(c, "owner", "repo", "main", visibility, rendered, existsPlan(rulesetExists), existsPlan(tagExists), classicExists, &github.BranchProtectionOptions{}, false)
+	items, err := buildItems(c, "owner", "repo", "main", visibility, rendered, existsPlan(rulesetExists), existsPlan(tagExists), classicExists, &github.BranchProtectionOptions{}, false, "")
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -53,6 +53,9 @@ func TestNewCmd(t *testing.T) {
 	}
 	if cmd.Short == "" {
 		t.Error("expected non-empty Short")
+	}
+	if !strings.Contains(cmd.Long, "--ci generic") {
+		t.Error("expected --ci example in Long help")
 	}
 }
 
@@ -87,7 +90,7 @@ func TestRun_NoArg(t *testing.T) {
 }
 
 func TestBranchProtectionItem_RulesetExists(t *testing.T) {
-	item := branchProtectionItem(nil, "owner", "repo", "main", "public", github.RulesetPlan{Exists: true}, false, &github.BranchProtectionOptions{})
+	item := branchProtectionItem(nil, "owner", "repo", "main", "public", github.RulesetPlan{Exists: true}, false, &github.BranchProtectionOptions{}, "")
 	if item.Action != wizard.ActionSkip {
 		t.Errorf("expected ActionSkip when matching ruleset exists, got %v", item.Action)
 	}
@@ -112,7 +115,7 @@ func TestTagRulesetItem_Drift(t *testing.T) {
 }
 
 func TestBranchProtectionItem_RulesetDrift(t *testing.T) {
-	item := branchProtectionItem(nil, "owner", "repo", "main", "public", github.RulesetPlan{Exists: true, Drift: []string{"enforcement"}}, false, &github.BranchProtectionOptions{})
+	item := branchProtectionItem(nil, "owner", "repo", "main", "public", github.RulesetPlan{Exists: true, Drift: []string{"enforcement"}}, false, &github.BranchProtectionOptions{}, "")
 	if item.Action != wizard.ActionUpdate {
 		t.Errorf("expected ActionUpdate on ruleset drift, got %v", item.Action)
 	}
@@ -165,7 +168,7 @@ func TestBranchProtectionItem_Creation(t *testing.T) {
 				w.WriteHeader(http.StatusCreated)
 				_, _ = w.Write([]byte(`{"id":1}`))
 			}), func(c *github.Client) {
-				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, existsPlan(tt.rulesetExists), tt.classicExists, &github.BranchProtectionOptions{})
+				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, existsPlan(tt.rulesetExists), tt.classicExists, &github.BranchProtectionOptions{}, "")
 				if item.Action != tt.wantAction {
 					t.Errorf("expected action %v, got %v", tt.wantAction, item.Action)
 				}
@@ -219,7 +222,7 @@ func TestBuildItems_Private(t *testing.T) {
 
 func TestBuildItems_PrivatePaidSecurity(t *testing.T) {
 	c := github.NewClient("", false)
-	items, err := buildItems(c, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, true)
+	items, err := buildItems(c, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, true, "")
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -239,7 +242,7 @@ func TestBuildItems_PrivatePaidSecurity(t *testing.T) {
 
 func TestBuildItems_TagRulesetExists(t *testing.T) {
 	c := github.NewClient("", false)
-	items, err := buildItems(c, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, existsPlan(true), false, &github.BranchProtectionOptions{}, false)
+	items, err := buildItems(c, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, existsPlan(true), false, &github.BranchProtectionOptions{}, false, "")
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -414,11 +417,23 @@ func (r *lineReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
+func writeGoModPresent(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/contents/go.mod") {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"sha":"gomod"}`))
+		return true
+	}
+	return false
+}
+
 // newRunFlowServer returns a test server that mocks the full run() flow for a
 // public repo with no existing protection or files: visibility check, ruleset
 // checks, classic protection, file status/upsert, settings, and security.
 func newRunFlowServer() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeGoModPresent(w, r) {
+			return
+		}
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
 			_, _ = w.Write([]byte(`{"visibility":"public"}`))
@@ -452,6 +467,9 @@ func newRunFlowServer() *httptest.Server {
 // confirmation, and direct application of all items.
 func TestRunWithClient_ExistingRulesetInfersSolo(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeGoModPresent(w, r) {
+			return
+		}
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
 			_, _ = w.Write([]byte(`{"visibility":"public"}`))
@@ -536,6 +554,9 @@ func TestRunWithClient_InteractiveViaPR(t *testing.T) {
 
 	var createdPR bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeGoModPresent(w, r) {
+			return
+		}
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
 			_, _ = w.Write([]byte(`{"visibility":"public","default_branch":"main"}`))
@@ -642,6 +663,9 @@ func TestRunWithClient_DryRunPrivateShowsAdvancedSecurity(t *testing.T) {
 	globals.DryRun = true
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeGoModPresent(w, r) {
+			return
+		}
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
 			_, _ = w.Write([]byte(`{"visibility":"private","default_branch":"main","owner":{"type":"User"}}`))
@@ -663,6 +687,35 @@ func TestRunWithClient_DryRunPrivateShowsAdvancedSecurity(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "Enable GitHub Advanced Security") {
 		t.Errorf("dry-run must not prompt for GHAS, got:\n%s", out.String())
+	}
+}
+
+func TestRunWithClient_InvalidCIPack(t *testing.T) {
+	t.Cleanup(func() { globals.CIPack = "" })
+	globals.CIPack = "rust"
+	srv := newRunFlowServer()
+	defer srv.Close()
+	err := runWithClient(newTestClient(srv), "owner", "repo", newLineReader("solo\ny\n"), &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "invalid --ci") {
+		t.Fatalf("error = %v, want invalid --ci", err)
+	}
+}
+
+func TestRunWithClient_GoModDetectError(t *testing.T) {
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
+			_, _ = w.Write([]byte(`{"visibility":"public","default_branch":"main"}`))
+		case strings.HasSuffix(r.URL.Path, "/contents/go.mod"):
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	err := runWithClient(c, "owner", "repo", newLineReader("solo\ny\n"), &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "detect go.mod") {
+		t.Fatalf("error = %v, want detect go.mod", err)
 	}
 }
 
@@ -767,6 +820,9 @@ func TestRunWithClient_UsesDefaultBranch(t *testing.T) {
 
 	var sawDevelop, sawMain bool
 	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeGoModPresent(w, r) {
+			return
+		}
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
 			_, _ = w.Write([]byte(`{"visibility":"public","default_branch":"develop"}`))
@@ -803,6 +859,9 @@ func TestRunWithClient_ViaPRFailure(t *testing.T) {
 	globals.ViaPR = true
 
 	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeGoModPresent(w, r) {
+			return
+		}
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
 			_, _ = w.Write([]byte(`{"visibility":"public"}`))
@@ -900,6 +959,9 @@ func TestRunWithClient_OrgOwnerSkipsCodeOwners(t *testing.T) {
 
 	var requireReview *bool
 	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeGoModPresent(w, r) {
+			return
+		}
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/repo":
 			_, _ = w.Write([]byte(`{"visibility":"public","default_branch":"main","owner":{"type":"Organization"}}`))
@@ -962,7 +1024,6 @@ func TestRunWithClient_OrgOwnerSkipsCodeOwners(t *testing.T) {
 	}
 }
 
-
 // TestRunWithClient_FileStatusErrorFailsPlan verifies the run-level wrap: a
 // failed pre-flight status check aborts with a "plan owner/repo" error that
 // carries the actionable hint, instead of proceeding with a wrong plan.
@@ -971,6 +1032,9 @@ func TestRunWithClient_FileStatusErrorFailsPlan(t *testing.T) {
 	globals.DryRun = false
 
 	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeGoModPresent(w, r) {
+			return
+		}
 		switch {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/repos/owner/repo"):
 			w.WriteHeader(http.StatusOK)

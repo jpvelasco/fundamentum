@@ -92,7 +92,8 @@ Built for solo devs and small teams who want their repos to feel like they were 
 | `--no-overwrite` | Only add missing files, never touch existing ones |
 | `--advanced-security` | Enable GHAS (secret scanning, push protection) on private/internal repos (paid) |
 | `--strict` | Fail the run when any core harden step fails, including optional tag/security items |
-| `--require-checks` | Required status-check contexts for protect-main (comma-separated; default: shipped CI jobs, not Codacy) |
+| `--require-checks` | Required status-check contexts for protect-main (comma-separated; default: jobs for the resolved `--ci` pack) |
+| `--ci` | CI pack: `auto` (default; Go if `go.mod` exists, else generic), `go`, `generic`, or `none` |
 
 ## Prerequisites
 

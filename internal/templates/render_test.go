@@ -432,6 +432,65 @@ func TestRenderVisibilityFiltering(t *testing.T) {
 	}
 }
 
+func TestRenderCIPackFiltering(t *testing.T) {
+	tests := []struct {
+		pack    string
+		want    []string
+		exclude []string
+	}{
+		{
+			pack:    CIPackGo,
+			want:    []string{".github/workflows/ci.yml", "codecov.yml", ".github/workflows/codeql.yml"},
+			exclude: []string{
+				// generic_ci.yml also resolves to ci.yml; content must stay Go.
+			},
+		},
+		{
+			pack:    CIPackGeneric,
+			want:    []string{".github/workflows/ci.yml", "socket.yml", ".github/CODEOWNERS"},
+			exclude: []string{"codecov.yml", ".github/workflows/codeql.yml", ".github/workflows/codacy-coverage.yml"},
+		},
+		{
+			pack:    CIPackNone,
+			want:    []string{"socket.yml", ".github/CODEOWNERS"},
+			exclude: []string{".github/workflows/ci.yml", "codecov.yml", ".github/workflows/codeql.yml"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.pack, func(t *testing.T) {
+			files, err := Render(RepoData{Owner: "o", RepoName: "r", DefaultBranch: "main", Visibility: "public", CIPack: tt.pack})
+			if err != nil {
+				t.Fatalf("Render() error: %v", err)
+			}
+			pathSet := make(map[string]string, len(files))
+			for _, f := range files {
+				pathSet[f.Path] = f.Content
+			}
+			for _, want := range tt.want {
+				if _, ok := pathSet[want]; !ok {
+					t.Errorf("missing %q", want)
+				}
+			}
+			for _, exclude := range tt.exclude {
+				if _, ok := pathSet[exclude]; ok {
+					t.Errorf("unexpected %q for pack %s", exclude, tt.pack)
+				}
+			}
+			if tt.pack == CIPackGeneric {
+				if !strings.Contains(pathSet[".github/workflows/ci.yml"], "Minimal pack for repos that are not Go") {
+					t.Error("generic pack must ship generic_ci.yml, not the Go workflow")
+				}
+				if strings.Contains(pathSet[".github/workflows/ci.yml"], "go-version-file") {
+					t.Error("generic CI must not assume go.mod")
+				}
+			}
+			if tt.pack == CIPackGo && !strings.Contains(pathSet[".github/workflows/ci.yml"], "go-version-file") {
+				t.Error("go pack must keep go-version-file")
+			}
+		})
+	}
+}
+
 func TestSubstitute(t *testing.T) {
 	tests := []struct {
 		name string
