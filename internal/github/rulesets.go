@@ -44,6 +44,13 @@ var GenericStatusChecks = []string{
 	"Trivy",
 }
 
+// LanguageStatusChecks are the required contexts for node/python/rust packs.
+var LanguageStatusChecks = []string{
+	"Lint",
+	"Test",
+	"Trivy",
+}
+
 // BranchProtectionOptions controls how strictly the branch ruleset is configured.
 type BranchProtectionOptions struct {
 	// Solo disables CODEOWNERS review requirement and stale review dismissal,
@@ -391,6 +398,8 @@ func DefaultChecksForPack(pack string) []string {
 	switch pack {
 	case "generic":
 		return append([]string{}, GenericStatusChecks...)
+	case "node", "python", "rust":
+		return append([]string{}, LanguageStatusChecks...)
 	case "none":
 		return nil
 	default:

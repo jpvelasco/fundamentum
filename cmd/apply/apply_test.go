@@ -159,7 +159,7 @@ func TestPlanNewRepo_InvalidPreset(t *testing.T) {
 
 func TestPlanNewRepo_InvalidCI(t *testing.T) {
 	t.Cleanup(func() { globals.CIPack = "" })
-	globals.CIPack = "rust"
+	globals.CIPack = "java"
 	if err := PlanNewRepo("owner", "new-repo", "public", &strings.Builder{}); err == nil || !strings.Contains(err.Error(), "invalid --ci") {
 		t.Fatalf("expected invalid --ci error, got %v", err)
 	}
@@ -178,6 +178,23 @@ func TestResolveCIPack_DetectsGoMod(t *testing.T) {
 		got, err := resolveCIPack(c, "owner", "repo")
 		if err != nil || got != templates.CIPackGo {
 			t.Fatalf("resolveCIPack() = (%q, %v), want go", got, err)
+		}
+	}, nil)
+}
+
+func TestResolveCIPack_DetectsPackageJSON(t *testing.T) {
+	t.Cleanup(func() { globals.CIPack = "" })
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/contents/package.json") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"sha":"x"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}), func(c *github.Client) {
+		got, err := resolveCIPack(c, "owner", "repo")
+		if err != nil || got != templates.CIPackNode {
+			t.Fatalf("resolveCIPack() = (%q, %v), want node", got, err)
 		}
 	}, nil)
 }
@@ -207,7 +224,7 @@ func TestResolveCIPack_DetectError(t *testing.T) {
 
 func TestResolveCIPack_InvalidFlagWithClient(t *testing.T) {
 	t.Cleanup(func() { globals.CIPack = "" })
-	globals.CIPack = "rust"
+	globals.CIPack = "java"
 	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}), func(c *github.Client) {

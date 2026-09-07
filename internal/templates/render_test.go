@@ -455,6 +455,21 @@ func TestRenderCIPackFiltering(t *testing.T) {
 			want:    []string{"socket.yml", ".github/CODEOWNERS"},
 			exclude: []string{".github/workflows/ci.yml", "codecov.yml", ".github/workflows/codeql.yml"},
 		},
+		{
+			pack:    CIPackNode,
+			want:    []string{".github/workflows/ci.yml"},
+			exclude: []string{"codecov.yml", ".github/workflows/codeql.yml"},
+		},
+		{
+			pack:    CIPackPython,
+			want:    []string{".github/workflows/ci.yml"},
+			exclude: []string{"codecov.yml"},
+		},
+		{
+			pack:    CIPackRust,
+			want:    []string{".github/workflows/ci.yml"},
+			exclude: []string{"codecov.yml"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.pack, func(t *testing.T) {
@@ -486,6 +501,15 @@ func TestRenderCIPackFiltering(t *testing.T) {
 			}
 			if tt.pack == CIPackGo && !strings.Contains(pathSet[".github/workflows/ci.yml"], "go-version-file") {
 				t.Error("go pack must keep go-version-file")
+			}
+			if tt.pack == CIPackNode && !strings.Contains(pathSet[".github/workflows/ci.yml"], "setup-node") {
+				t.Error("node pack must ship setup-node")
+			}
+			if tt.pack == CIPackPython && !strings.Contains(pathSet[".github/workflows/ci.yml"], "setup-python") {
+				t.Error("python pack must ship setup-python")
+			}
+			if tt.pack == CIPackRust && !strings.Contains(pathSet[".github/workflows/ci.yml"], "rust-toolchain") {
+				t.Error("rust pack must ship rust-toolchain")
 			}
 		})
 	}

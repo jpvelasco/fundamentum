@@ -827,7 +827,7 @@ func TestRunWithClient_DryRunPrivateShowsAdvancedSecurity(t *testing.T) {
 
 func TestRunWithClient_InvalidCIPack(t *testing.T) {
 	t.Cleanup(func() { globals.CIPack = "" })
-	globals.CIPack = "rust"
+	globals.CIPack = "java"
 	srv := newRunFlowServer()
 	defer srv.Close()
 	err := runWithClient(newTestClient(srv), "owner", "repo", newLineReader("solo\ny\n"), &strings.Builder{})
@@ -1177,6 +1177,11 @@ func TestRunWithClient_FileStatusErrorFailsPlan(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/rulesets"):
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`[]`))
+		case strings.HasSuffix(r.URL.Path, "/contents/package.json"),
+			strings.HasSuffix(r.URL.Path, "/contents/pyproject.toml"),
+			strings.HasSuffix(r.URL.Path, "/contents/requirements.txt"),
+			strings.HasSuffix(r.URL.Path, "/contents/Cargo.toml"):
+			w.WriteHeader(http.StatusNotFound)
 		case strings.Contains(r.URL.Path, "/contents/"):
 			w.WriteHeader(http.StatusForbidden)
 		default:

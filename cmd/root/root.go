@@ -40,7 +40,7 @@ Examples:
 	cmd.PersistentFlags().BoolVar(&globals.AdvancedSecurity, "advanced-security", false, "enable GitHub Advanced Security (secret scanning, push protection) on private/internal repos")
 	cmd.PersistentFlags().BoolVar(&globals.Strict, "strict", false, "fail the run when any core harden step fails, including optional tag/security items")
 	cmd.PersistentFlags().StringSliceVar(&globals.RequireChecks, "require-checks", nil, "required status-check contexts for protect-main (comma-separated; default: jobs for the resolved --ci pack)")
-	cmd.PersistentFlags().StringVar(&globals.CIPack, "ci", "", "CI pack: auto (default; go if go.mod exists, else generic), go, generic, or none")
+	cmd.PersistentFlags().StringVar(&globals.CIPack, "ci", "", "CI pack: auto (default; detect go/node/python/rust, else generic), go, node, python, rust, generic, or none")
 	cmd.PersistentFlags().StringVar(&globals.Preset, "preset", "", "named baseline: oss (public defaults, no prompts), private (solo, no GHAS prompt), strict (fail optional steps + enable GHAS)")
 	cmd.PersistentFlags().StringVar(&globals.FromFile, "from", "", "load a portable JSON baseline (export writes this; explicit flags still win)")
 	cmd.AddCommand(apply.NewCmd())

@@ -128,7 +128,7 @@ func TestAudit_InvalidPreset(t *testing.T) {
 
 func TestAudit_InvalidCIPack(t *testing.T) {
 	t.Cleanup(func() { globals.CIPack = "" })
-	globals.CIPack = "rust"
+	globals.CIPack = "java"
 	srv := newAuditServer(true)
 	defer srv.Close()
 	err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &strings.Builder{})
