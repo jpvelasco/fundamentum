@@ -57,6 +57,9 @@ func TestNewCmd(t *testing.T) {
 	if !strings.Contains(cmd.Long, "--ci generic") {
 		t.Error("expected --ci example in Long help")
 	}
+	if !strings.Contains(cmd.Long, "settings still apply live") {
+		t.Error("expected --pr help to say settings still apply live")
+	}
 }
 
 func TestRun_MissingToken(t *testing.T) {
@@ -592,12 +595,16 @@ func TestRunWithClient_InteractiveViaPR(t *testing.T) {
 	c := newTestClient(srv)
 
 	input := "solo\nn\n" + strings.Repeat("y\n", 40)
-	err := runWithClient(c, "owner", "repo", newLineReader(input), &strings.Builder{})
+	var out strings.Builder
+	err := runWithClient(c, "owner", "repo", newLineReader(input), &out)
 	if err != nil {
 		t.Fatalf("runWithClient() error: %v", err)
 	}
 	if !createdPR {
 		t.Error("expected --pr to open a pull request after interactive selection")
+	}
+	if !strings.Contains(out.String(), "--pr: file changes go in a pull request") {
+		t.Errorf("live --pr apply must print the live-settings notice, got:\n%s", out.String())
 	}
 }
 
@@ -629,6 +636,31 @@ func TestRunWithClient_DryRun(t *testing.T) {
 	}
 	if !strings.Contains(outStr, "would create") {
 		t.Errorf("expected dry-run labels in plan, got:\n%s", outStr)
+	}
+	if strings.Contains(outStr, "--pr: file changes go in a pull request") {
+		t.Errorf("dry-run without --pr must not print the PR-mode notice, got:\n%s", outStr)
+	}
+}
+
+func TestRunWithClient_DryRunPRModeNotice(t *testing.T) {
+	t.Cleanup(func() {
+		globals.DryRun = false
+		globals.ViaPR = false
+	})
+	globals.DryRun = true
+	globals.ViaPR = true
+
+	srv := newRunFlowServer()
+	defer srv.Close()
+	var out strings.Builder
+	if err := runWithClient(newTestClient(srv), "owner", "repo", strings.NewReader(""), &out); err != nil {
+		t.Fatalf("runWithClient() error: %v", err)
+	}
+	if !strings.Contains(out.String(), "--pr: file changes go in a pull request") {
+		t.Errorf("expected --pr live-settings notice, got:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "still apply live via the API") {
+		t.Errorf("expected live-API wording, got:\n%s", out.String())
 	}
 }
 

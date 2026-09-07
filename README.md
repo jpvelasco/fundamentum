@@ -54,7 +54,7 @@ $env:GITHUB_TOKEN = "ghp_xxxxx"      # PowerShell
 - **Opinionated starters**: CI pack is `auto` — Go CI when `go.mod` exists, otherwise a generic `CI` + Trivy workflow that does not assume Go. Override with `--ci go|generic|none`. Visibility-aware coverage/CodeQL + `.codacy.yml` still ship with the Go pack.
 - **Audit**: `fundamentum audit OWNER/REPO` prints a PASS/FAIL report against that baseline.
 
-`--pr` batches **file** changes into a pull request. Settings, security, and branch protection still apply immediately via the API. Tag ruleset and security steps are optional unless you pass `--strict`. Required checks default to the shipped CI jobs, not Codacy (`--require-checks` overrides).
+`--pr` batches **file** changes into a pull request. Settings, security, and branch protection still apply immediately via the API — they are not deferred until the PR merges. Required status checks are deferred so the open harden PR cannot deadlock on jobs that only exist after merge; re-apply after it lands to require them. Tag ruleset and security steps are optional unless you pass `--strict`. Required checks default to the jobs for the resolved `--ci` pack, not Codacy (`--require-checks` overrides).
 
 Everything is **idempotent** — re-running is safe and fast.
 
@@ -80,7 +80,7 @@ Everything is **idempotent** — re-running is safe and fast.
 1. fundamentum detects your repo's current state (existing files, branch protection, visibility).
 2. It renders opinionated templates and shows a summary table of what will change.
 3. You confirm all defaults or step through items interactively.
-4. Files are created or updated directly (or via PR with `--pr`). Settings, security, and branch protection are applied via the GitHub API even in `--pr` mode.
+4. Files are created or updated directly (or via PR with `--pr`). Settings, security, and branch protection are applied via the GitHub API even in `--pr` mode — `--pr` is not a dry-run for those steps.
 
 ## Install
 

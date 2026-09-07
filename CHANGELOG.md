@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`--pr` now states the live-vs-PR split at runtime.** File changes still go in a pull request; settings, security, and branch protection still apply live. Help, README, and a banner on `--pr` apply / `init --dry-run --pr` say so explicitly.
+
 ### Fixed
 
 - **Non-Go repos no longer get a permanently red Go CI starter.** `--ci auto` (default) ships the full Go workflow only when the target has `go.mod`; otherwise it writes a generic `CI` + Trivy pack. `--ci go|generic|none` overrides detection. Required checks follow the resolved pack so `protect-main` does not demand `gosec` on a Node repo.

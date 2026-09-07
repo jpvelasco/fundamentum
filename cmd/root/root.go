@@ -32,7 +32,7 @@ Examples:
 	cmd.PersistentFlags().BoolVar(&globals.Verbose, "verbose", false, "print API calls")
 	cmd.PersistentFlags().StringVar(&globals.Token, "token", "", "GitHub token (default: GITHUB_TOKEN env var)")
 	cmd.PersistentFlags().BoolVar(&globals.NoOverwrite, "no-overwrite", false, "skip files that already exist, never update")
-	cmd.PersistentFlags().BoolVar(&globals.ViaPR, "pr", false, "push file changes through a PR instead of direct commits")
+	cmd.PersistentFlags().BoolVar(&globals.ViaPR, "pr", false, "batch file changes into a PR; settings, security, and branch protection still apply live")
 	cmd.PersistentFlags().BoolVar(&globals.AdvancedSecurity, "advanced-security", false, "enable GitHub Advanced Security (secret scanning, push protection) on private/internal repos")
 	cmd.PersistentFlags().BoolVar(&globals.Strict, "strict", false, "fail the run when any core harden step fails, including optional tag/security items")
 	cmd.PersistentFlags().StringSliceVar(&globals.RequireChecks, "require-checks", nil, "required status-check contexts for protect-main (comma-separated; default: jobs for the resolved --ci pack)")
