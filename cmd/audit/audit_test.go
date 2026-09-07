@@ -104,6 +104,32 @@ func TestAudit_AliasFileCountsAsPresent(t *testing.T) {
 	}
 }
 
+func TestAudit_InvalidCIPack(t *testing.T) {
+	t.Cleanup(func() { globals.CIPack = "" })
+	globals.CIPack = "rust"
+	srv := newAuditServer(true)
+	defer srv.Close()
+	err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "invalid --ci") {
+		t.Fatalf("error = %v, want invalid --ci", err)
+	}
+}
+
+func TestAudit_GoModDetectError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/contents/go.mod") {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		writePassingAudit(w, r, true, true)
+	}))
+	defer srv.Close()
+	err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "detect go.mod") {
+		t.Fatalf("error = %v, want detect go.mod", err)
+	}
+}
+
 func TestAudit_PreflightErrors(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -54,6 +54,7 @@ type RepoData struct {
 	DefaultBranch string
 	Visibility    string // "public" or "private"
 	CodeOwnerLine string // CODEOWNERS body line; user: "* @owner", org: comment
+	CIPack        string // go, generic, or none; empty means go (legacy Render callers)
 }
 
 // sanitize validates owner/repo/branch without rewriting valid names and
@@ -93,6 +94,7 @@ func (d RepoData) sanitize() (RepoData, error) {
 		DefaultBranch: d.DefaultBranch,
 		Visibility:    visibility,
 		CodeOwnerLine: codeOwnerLine,
+		CIPack:        d.CIPack,
 	}, nil
 }
 
@@ -133,7 +135,7 @@ func renderFromFS(fsys fs.FS, data RepoData) ([]RenderedFile, error) {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		if !shouldInclude(path, data.Visibility) {
+		if !shouldInclude(path, data.Visibility) || !packMatches(path, data.CIPack) {
 			return nil
 		}
 		raw, err := fs.ReadFile(fsys, path)
@@ -175,7 +177,7 @@ func shouldInclude(path, visibility string) bool {
 }
 
 // resolveTarget converts embedded template paths to target paths.
-// "public_" and "private_" prefixes are stripped from the filename.
+// "public_", "private_", and "generic_" prefixes are stripped from the filename.
 func resolveTarget(path string) string {
 	target := strings.Replace(path, "dotgithub/", ".github/", 1)
 	target = strings.Replace(target, "dotcodacy.yml", ".codacy.yml", 1)
@@ -190,6 +192,8 @@ func stripVisibilityPrefix(base string) string {
 		return strings.TrimPrefix(base, "public_")
 	case strings.HasPrefix(base, "private_"):
 		return strings.TrimPrefix(base, "private_")
+	case strings.HasPrefix(base, "generic_"):
+		return strings.TrimPrefix(base, "generic_")
 	default:
 		return base
 	}

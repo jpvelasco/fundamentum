@@ -26,6 +26,9 @@ var AdvancedSecurity bool
 var Strict bool
 
 // RequireChecks is the explicit required-status-check list from
-// --require-checks. nil means use github.DefaultStatusChecks (shipped CI
-// jobs). An empty slice requires no status checks.
+// --require-checks. nil means use the shipped checks for the resolved
+// --ci pack. An empty slice requires no status checks.
 var RequireChecks []string
+
+// CIPack is the --ci value: auto, go, generic, or none. Empty means auto.
+var CIPack string

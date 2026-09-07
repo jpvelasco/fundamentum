@@ -244,6 +244,22 @@ func TestResolveRequiredChecks(t *testing.T) {
 	}
 }
 
+func TestResolveRequiredChecksForPack(t *testing.T) {
+	if got := ResolveRequiredChecksForPack(nil, "generic"); len(got) != 2 || got[0] != "CI" || got[1] != "Trivy" {
+		t.Fatalf("generic defaults = %#v", got)
+	}
+	if got := ResolveRequiredChecksForPack(nil, "none"); got != nil {
+		t.Fatalf("none defaults = %#v, want nil", got)
+	}
+	if got := ResolveRequiredChecksForPack(nil, "go"); len(got) != len(DefaultStatusChecks) {
+		t.Fatalf("go defaults = %#v", got)
+	}
+	got := ResolveRequiredChecksForPack([]string{"Lint"}, "generic")
+	if len(got) != 1 || got[0] != "Lint" {
+		t.Fatalf("explicit overrides pack = %#v", got)
+	}
+}
+
 func TestIntendedChecksAndHelpers(t *testing.T) {
 	if got := intendedChecks(nil, BranchProtectionOptions{SkipStatusChecks: true}); got != nil {
 		t.Errorf("SkipStatusChecks = %v, want nil", got)
