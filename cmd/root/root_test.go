@@ -16,6 +16,7 @@ func resetRootGlobals(t *testing.T) {
 		globals.Strict = false
 		globals.RequireChecks = nil
 		globals.CIPack = ""
+		globals.ViaPR = false
 	})
 }
 
@@ -35,6 +36,19 @@ func TestRequireChecksFlag(t *testing.T) {
 		if globals.RequireChecks[i] != name {
 			t.Errorf("RequireChecks[%d] = %q, want %q", i, globals.RequireChecks[i], name)
 		}
+	}
+}
+
+func TestPRFlag(t *testing.T) {
+	resetRootGlobals(t)
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"--pr", "--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !globals.ViaPR {
+		t.Error("expected ViaPR=true after --pr flag")
 	}
 }
 

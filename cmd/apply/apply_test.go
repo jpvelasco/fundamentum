@@ -78,6 +78,7 @@ func runApplyItemsExpectNoError(t *testing.T, handler http.HandlerFunc, items []
 }
 
 func TestPlanNewRepo(t *testing.T) {
+	t.Cleanup(func() { globals.ViaPR = false })
 	var out strings.Builder
 	if err := PlanNewRepo("owner", "new-repo", "public", &out); err != nil {
 		t.Fatalf("PlanNewRepo() error: %v", err)
@@ -88,6 +89,21 @@ func TestPlanNewRepo(t *testing.T) {
 	}
 	if !strings.Contains(got, "Branch protection") {
 		t.Errorf("expected branch protection, got:\n%s", got)
+	}
+	if strings.Contains(got, "--pr: file changes go in a pull request") {
+		t.Error("PlanNewRepo without --pr must not print the PR-mode notice")
+	}
+}
+
+func TestPlanNewRepo_PRModeNotice(t *testing.T) {
+	t.Cleanup(func() { globals.ViaPR = false })
+	globals.ViaPR = true
+	var out strings.Builder
+	if err := PlanNewRepo("owner", "new-repo", "public", &out); err != nil {
+		t.Fatalf("PlanNewRepo() error: %v", err)
+	}
+	if !strings.Contains(out.String(), "--pr: file changes go in a pull request") {
+		t.Errorf("expected --pr notice, got:\n%s", out.String())
 	}
 }
 

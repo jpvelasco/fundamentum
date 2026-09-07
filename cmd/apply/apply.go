@@ -34,7 +34,7 @@ branch protection, security features, and starter workflows.
 Examples:
   fundamentum apply OWNER/REPO              # interactive harden
   fundamentum --dry-run apply OWNER/REPO    # preview without changes
-  fundamentum --pr apply OWNER/REPO         # apply via pull request
+  fundamentum --pr apply OWNER/REPO         # files via PR; settings still apply live
   fundamentum --ci generic apply OWNER/REPO # non-Go starter CI (no go.mod)
   fundamentum --strict apply OWNER/REPO     # fail if any core step fails
   fundamentum --require-checks Lint,gosec apply OWNER/REPO
@@ -109,6 +109,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	// Only ask solo/team if branch protection will actually be created.
 	// Existing rulesets keep their inferred solo/team settings on reconcile.
 	_, _ = fmt.Fprintf(stdout, "fundamentum apply %s/%s\n\n", owner, repo)
+	printPRModeNotice(stdout)
 	if branchPlan.Exists && !opts.SkipCodeOwners {
 		opts.Solo = branchPlan.Solo
 	} else if !globals.DryRun && !branchPlan.Exists {
@@ -178,6 +179,7 @@ func PlanNewRepo(owner, repo, visibility string, stdout io.Writer) error {
 		return err
 	}
 	_, _ = fmt.Fprintf(stdout, "fundamentum apply %s/%s\n\n", owner, repo)
+	printPRModeNotice(stdout)
 	wizard.PrintSummaryTable(stdout, items, false)
 	_, _ = fmt.Fprintf(stdout, "\n  Dry run complete — %s — no changes made.\n", wizard.PlanSummary(items))
 	return nil
@@ -332,6 +334,14 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 				return c.ApplyClassicBranchProtection(owner, repo, branch, checks, *opts)
 			},
 		}
+	}
+}
+
+const prModeNotice = "--pr: file changes go in a pull request. Settings, security, and branch protection still apply live via the API. Required status checks are deferred until you re-apply after that PR merges.\n\n"
+
+func printPRModeNotice(stdout io.Writer) {
+	if globals.ViaPR {
+		_, _ = fmt.Fprint(stdout, prModeNotice)
 	}
 }
 
