@@ -114,12 +114,13 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	// Existing rulesets keep their inferred solo/team settings on reconcile.
 	_, _ = fmt.Fprintf(stdout, "fundamentum apply %s/%s\n\n", owner, repo)
 	printPRModeNotice(stdout)
-	if branchPlan.Exists && !opts.SkipCodeOwners {
+	switch {
+	case branchPlan.Exists && !opts.SkipCodeOwners:
 		opts.Solo = branchPlan.Solo
-	} else if !globals.DryRun && !branchPlan.Exists && globals.Preset == "" {
+	case !globals.DryRun && !branchPlan.Exists && globals.Preset == "":
 		opts.Solo = wizard.PromptProjectType(stdin, stdout)
 		_, _ = fmt.Fprintln(stdout)
-	} else if !branchPlan.Exists {
+	case !branchPlan.Exists:
 		// Named presets and dry-run take the advertised solo default so
 		// a scripted run cannot enable CODEOWNERS review by accident.
 		opts.Solo = true
