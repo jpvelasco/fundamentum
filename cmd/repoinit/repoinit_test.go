@@ -44,6 +44,8 @@ func resetGlobals(t *testing.T) {
 		globals.Strict = false
 		globals.RequireChecks = nil
 		globals.CIPack = ""
+		globals.Preset = ""
+		globals.AdvancedSecurity = false
 	})
 }
 

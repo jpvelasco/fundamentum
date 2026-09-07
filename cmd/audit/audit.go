@@ -35,6 +35,7 @@ Optional checks (fail only with --strict):
 
 Examples:
   fundamentum audit OWNER/REPO
+  fundamentum --preset oss audit OWNER/REPO
   fundamentum --ci generic audit OWNER/REPO
   fundamentum --strict audit OWNER/REPO`,
 		Args: cobra.ExactArgs(1),
@@ -63,6 +64,9 @@ type check struct {
 }
 
 func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) error {
+	if err := globals.ApplyPreset(globals.Preset); err != nil {
+		return err
+	}
 	info, err := client.GetRepo(owner, repo)
 	if err != nil {
 		return fmt.Errorf("get repo: %w", err)

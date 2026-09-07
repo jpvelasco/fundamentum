@@ -54,6 +54,8 @@ $env:GITHUB_TOKEN = "ghp_xxxxx"      # PowerShell
 - **Opinionated starters**: CI pack is `auto` — Go CI when `go.mod` exists, otherwise a generic `CI` + Trivy workflow that does not assume Go. Override with `--ci go|generic|none`. Visibility-aware coverage/CodeQL + `.codacy.yml` still ship with the Go pack.
 - **Audit**: `fundamentum audit OWNER/REPO` prints a PASS/FAIL report against that baseline.
 
+`--preset oss|private|strict` skips the wizard so a scripted apply reproduces the same harden. `oss` and `private` take the solo default and do not enable paid GHAS; `strict` turns on `--strict` and `--advanced-security`. Visibility still picks the public vs private file set.
+
 `--pr` batches **file** changes into a pull request. Settings, security, and branch protection still apply immediately via the API — they are not deferred until the PR merges. Required status checks are deferred so the open harden PR cannot deadlock on jobs that only exist after merge; re-apply after it lands to require them. Tag ruleset and security steps are optional unless you pass `--strict`. Required checks default to the jobs for the resolved `--ci` pack, not Codacy (`--require-checks` overrides).
 
 Everything is **idempotent** — re-running is safe and fast.
@@ -71,6 +73,7 @@ Everything is **idempotent** — re-running is safe and fast.
 | `--strict`          | Fail the run when any core harden step fails, including optional tag/security items |
 | `--require-checks`  | Required status-check contexts for `protect-main` (comma-separated; default: jobs for the resolved `--ci` pack) |
 | `--ci`              | CI pack: `auto` (default; Go if `go.mod` exists, else generic), `go`, `generic`, or `none` |
+| `--preset`          | Named baseline: `oss` (no prompts), `private` (solo, no GHAS prompt), `strict` (`--strict` + GHAS) |
 | `--version`         | Print version and exit                           |
 
 `init` also supports `--private` (default: `true`).

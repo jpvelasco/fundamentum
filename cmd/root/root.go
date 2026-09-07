@@ -24,6 +24,7 @@ Examples:
   fundamentum apply OWNER/REPO              # harden existing repo
   fundamentum init OWNER/REPO               # create and harden new repo
   fundamentum audit OWNER/REPO              # verify the harden baseline
+  fundamentum --preset oss apply OWNER/REPO # non-interactive public baseline
   fundamentum --dry-run apply OWNER/REPO    # preview without changes
   fundamentum --version                     # show version`,
 		Version: Version,
@@ -37,6 +38,7 @@ Examples:
 	cmd.PersistentFlags().BoolVar(&globals.Strict, "strict", false, "fail the run when any core harden step fails, including optional tag/security items")
 	cmd.PersistentFlags().StringSliceVar(&globals.RequireChecks, "require-checks", nil, "required status-check contexts for protect-main (comma-separated; default: jobs for the resolved --ci pack)")
 	cmd.PersistentFlags().StringVar(&globals.CIPack, "ci", "", "CI pack: auto (default; go if go.mod exists, else generic), go, generic, or none")
+	cmd.PersistentFlags().StringVar(&globals.Preset, "preset", "", "named baseline: oss (public defaults, no prompts), private (solo, no GHAS prompt), strict (fail optional steps + enable GHAS)")
 	cmd.AddCommand(apply.NewCmd())
 	cmd.AddCommand(repoinit.NewCmd())
 	cmd.AddCommand(audit.NewCmd())

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`--preset oss|private|strict`.** Named baselines skip the wizard so `apply`/`audit`/`init --dry-run` are fully non-interactive. `oss`/`private` keep the solo default and do not enable paid GHAS; `strict` turns on `--strict` plus `--advanced-security`. Visibility still selects the public vs private file set.
+
 ### Changed
 
 - **`--pr` now states the live-vs-PR split at runtime.** File changes still go in a pull request; settings, security, and branch protection still apply live. Help, README, and a banner on `--pr` apply / `init --dry-run --pr` say so explicitly.

@@ -137,6 +137,26 @@ func TestPlanNewRepo_CIGo(t *testing.T) {
 	}
 }
 
+func TestPlanNewRepo_PresetPrivateHidesGHAS(t *testing.T) {
+	t.Cleanup(func() { globals.Preset = "" })
+	globals.Preset = "private"
+	var out strings.Builder
+	if err := PlanNewRepo("owner", "new-repo", "private", &out); err != nil {
+		t.Fatalf("PlanNewRepo() error: %v", err)
+	}
+	if strings.Contains(out.String(), "secret scanning") {
+		t.Errorf("--preset private dry-run must not offer GHAS, got:\n%s", out.String())
+	}
+}
+
+func TestPlanNewRepo_InvalidPreset(t *testing.T) {
+	t.Cleanup(func() { globals.Preset = "" })
+	globals.Preset = "enterprise"
+	if err := PlanNewRepo("owner", "new-repo", "public", &strings.Builder{}); err == nil || !strings.Contains(err.Error(), "invalid --preset") {
+		t.Fatalf("expected invalid --preset error, got %v", err)
+	}
+}
+
 func TestPlanNewRepo_InvalidCI(t *testing.T) {
 	t.Cleanup(func() { globals.CIPack = "" })
 	globals.CIPack = "rust"

@@ -35,6 +35,7 @@ Examples:
   fundamentum apply OWNER/REPO              # interactive harden
   fundamentum --dry-run apply OWNER/REPO    # preview without changes
   fundamentum --pr apply OWNER/REPO         # files via PR; settings still apply live
+  fundamentum --preset oss apply OWNER/REPO # non-interactive public baseline
   fundamentum --ci generic apply OWNER/REPO # non-Go starter CI (no go.mod)
   fundamentum --strict apply OWNER/REPO     # fail if any core step fails
   fundamentum --require-checks Lint,gosec apply OWNER/REPO
@@ -62,6 +63,9 @@ func run(cmd *cobra.Command, args []string) error {
 // and writing output to stdout. Extracted from run so tests can inject a
 // mock-server client and buffers.
 func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, stdout io.Writer) error {
+	if err := globals.ApplyPreset(globals.Preset); err != nil {
+		return err
+	}
 	info, err := client.GetRepo(owner, repo)
 	if err != nil {
 		return fmt.Errorf("detect repo visibility: %w", err)
@@ -110,20 +114,29 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	// Existing rulesets keep their inferred solo/team settings on reconcile.
 	_, _ = fmt.Fprintf(stdout, "fundamentum apply %s/%s\n\n", owner, repo)
 	printPRModeNotice(stdout)
-	if branchPlan.Exists && !opts.SkipCodeOwners {
+	switch {
+	case branchPlan.Exists && !opts.SkipCodeOwners:
 		opts.Solo = branchPlan.Solo
-	} else if !globals.DryRun && !branchPlan.Exists {
+	case !globals.DryRun && !branchPlan.Exists && globals.Preset == "":
 		opts.Solo = wizard.PromptProjectType(stdin, stdout)
 		_, _ = fmt.Fprintln(stdout)
+	case !branchPlan.Exists:
+		// Named presets and dry-run take the advertised solo default so
+		// a scripted run cannot enable CODEOWNERS review by accident.
+		opts.Solo = true
 	}
 
 	paidSecurity := globals.AdvancedSecurity
 	if !github.IsPublicVisibility(visibility) && !paidSecurity {
-		if globals.DryRun {
-			// Show the GHAS plan lines a live run would offer for this
-			// visibility; live still prompts before applying them.
+		switch {
+		case globals.Preset != "":
+			// Named presets skip the prompt. Only --preset strict
+			// (or an explicit --advanced-security) enables GHAS.
+			paidSecurity = globals.Preset == globals.PresetStrict
+		case globals.DryRun:
+			// Show the GHAS plan lines a live run would offer.
 			paidSecurity = true
-		} else {
+		default:
 			paidSecurity = wizard.PromptAdvancedSecurity(stdin, stdout)
 			_, _ = fmt.Fprintln(stdout)
 		}
@@ -143,7 +156,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 
 	wizard.PrintSummaryTable(stdout, items, true)
 
-	if !wizard.ConfirmDefaults(stdin, stdout) {
+	if globals.Preset == "" && !wizard.ConfirmDefaults(stdin, stdout) {
 		wizard.SelectInteractive(items, stdin, stdout)
 	}
 	if err := applyItems(client, owner, repo, branch, items, globals.ViaPR, &opts, stdout); err != nil {
@@ -157,6 +170,9 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 // exist yet. Files, settings, and rulesets are modeled as absent — no GitHub
 // GET is issued, so init --dry-run can preview create+harden.
 func PlanNewRepo(owner, repo, visibility string, stdout io.Writer) error {
+	if err := globals.ApplyPreset(globals.Preset); err != nil {
+		return err
+	}
 	pack, err := resolveCIPack(nil, owner, repo)
 	if err != nil {
 		return err
@@ -173,7 +189,9 @@ func PlanNewRepo(owner, repo, visibility string, stdout io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("render templates: %w", err)
 	}
-	paid := globals.AdvancedSecurity || github.IsPublicVisibility(visibility) || globals.DryRun
+	// Named presets must match a live apply: only strict / --advanced-security
+	// enable GHAS. Interactive dry-run still shows the offered plan line.
+	paid := globals.AdvancedSecurity || github.IsPublicVisibility(visibility) || (globals.DryRun && globals.Preset == "")
 	items, err := buildItems(nil, owner, repo, "main", visibility, rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, paid, pack)
 	if err != nil {
 		return err
