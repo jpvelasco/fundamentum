@@ -27,6 +27,13 @@ npx fundamentum-cli apply OWNER/REPO
 
 Works on **macOS** and **Linux** (`x64` and `arm64`) and **Windows** (`x64`). Postinstall downloads the matching prebuilt binary from GitHub Releases with embedded SHA-256 verification.
 
+A git checkout keeps `package.json` at `0.0.0` and will not download a binary. Build it locally instead:
+
+```bash
+go build -o npm/bin/fundamentum .
+# Windows: go build -o npm/bin/fundamentum.exe .
+```
+
 > **npm 9+ / Ubuntu 26+ note:** npm's `allow-scripts` security policy may block the postinstall
 > script, so the binary won't be downloaded at install time. No worries — if `fundamentum` is invoked
 > without a binary present it detects this and downloads automatically. You can also trigger it

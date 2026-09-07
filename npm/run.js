@@ -37,10 +37,34 @@ function runBinary() {
   });
 }
 
+function isDevCheckout() {
+  try {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(__dirname, "package.json"), "utf8")
+    );
+    return pkg.version === "0.0.0";
+  } catch (_) {
+    return false;
+  }
+}
+
 // If the binary is missing, postinstall was likely blocked by npm's allow-scripts
 // security policy. Attempt a lazy download, but the package dir may be root-owned
 // (e.g. sudo npm install -g). In that case, surface a clear recovery message.
 if (!fs.existsSync(binaryPath)) {
+  if (isDevCheckout()) {
+    console.error(
+      "fundamentum: binary not found and package version is 0.0.0 (git checkout).\n" +
+        "install.js will not download a release binary in this state.\n" +
+        "Build locally:\n" +
+        "  go build -o npm/bin/" +
+        binaryName +
+        " .\n" +
+        "Or install a published release: npm install -g fundamentum-cli"
+    );
+    process.exit(1);
+  }
+
   const installScript = path.join(__dirname, "install.js");
 
   // Check if we can write to the package dir before attempting the download.
