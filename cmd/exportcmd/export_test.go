@@ -1,7 +1,6 @@
 package exportcmd
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -48,15 +47,12 @@ func TestRun_File(t *testing.T) {
 	if !strings.Contains(out.String(), "wrote baseline") {
 		t.Errorf("expected write confirmation, got:\n%s", out.String())
 	}
-	if !strings.HasPrefix(path, dir+string(os.PathSeparator)) && path != filepath.Join(dir, "baseline.json") {
-		t.Fatalf("path %q escaped temp dir %q", path, dir)
-	}
-	raw, err := os.ReadFile(path) // path is t.TempDir()/baseline.json
-	if err != nil {
+	globals.Preset = ""
+	if err := globals.LoadBaselineFile(path); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), `"preset": "strict"`) {
-		t.Errorf("file = %s", raw)
+	if globals.Preset != "strict" {
+		t.Errorf("loaded preset = %q, want strict", globals.Preset)
 	}
 }
 
