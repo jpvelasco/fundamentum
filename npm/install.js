@@ -18,6 +18,8 @@ const RELEASE_HOSTS = new Set([
   "github-releases.githubusercontent.com",
 ]);
 
+const binaryName = process.platform === "win32" ? "fundamentum.exe" : "fundamentum";
+
 const PLATFORM_MAP = {
   linux: "linux",
   darwin: "darwin",
@@ -171,8 +173,6 @@ function extract(buffer, archiveName, binDir) {
       spawnOrFail("tar", ["-xzf", archivePath, "-C", tmpDir], "tar");
     }
 
-    // Find the binary in the extracted files
-    const binaryName = process.platform === "win32" ? "fundamentum.exe" : "fundamentum";
     const extractedBinary = path.join(tmpDir, binaryName);
 
     if (!fs.existsSync(extractedBinary)) {

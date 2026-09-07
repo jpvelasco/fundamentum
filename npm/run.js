@@ -37,9 +37,6 @@ function runBinary() {
   });
 }
 
-// If the binary is missing, postinstall was likely blocked by npm's allow-scripts
-// security policy. Attempt a lazy download, but the package dir may be root-owned
-// (e.g. sudo npm install -g). In that case, surface a clear recovery message.
 function isDevCheckout() {
   try {
     const pkg = JSON.parse(
@@ -51,6 +48,9 @@ function isDevCheckout() {
   }
 }
 
+// If the binary is missing, postinstall was likely blocked by npm's allow-scripts
+// security policy. Attempt a lazy download, but the package dir may be root-owned
+// (e.g. sudo npm install -g). In that case, surface a clear recovery message.
 if (!fs.existsSync(binaryPath)) {
   if (isDevCheckout()) {
     console.error(
