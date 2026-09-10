@@ -77,6 +77,7 @@ func TestDefaultCodeQLSetupEnabled(t *testing.T) {
 		{"configured", http.StatusOK, `{"state":"configured"}`, true, false},
 		{"not configured", http.StatusOK, `{"state":"not-configured"}`, false, false},
 		{"missing", http.StatusNotFound, "", false, false},
+		{"invalid response", http.StatusOK, `not json`, false, true},
 		{"forbidden", http.StatusForbidden, "", false, true},
 	}
 	for _, tt := range tests {
@@ -97,6 +98,12 @@ func TestDefaultCodeQLSetupEnabled(t *testing.T) {
 				}
 			}, nil)
 		})
+	}
+}
+
+func TestDefaultCodeQLSetupEnabled_NetworkError(t *testing.T) {
+	if _, err := newErroringClient().DefaultCodeQLSetupEnabled("owner", "repo"); err == nil {
+		t.Fatal("expected network error")
 	}
 }
 
