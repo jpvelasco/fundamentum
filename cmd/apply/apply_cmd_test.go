@@ -407,13 +407,13 @@ func TestSecurityConfigured(t *testing.T) {
 	}
 }
 
-func TestSecurityItem_StatusError(t *testing.T) {
+func TestSecurityItem_StatusErrorPlansUpdate(t *testing.T) {
 	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}), func(c *github.Client) {
-		_, err := securityItem(c, &github.Repo{}, "owner", "repo", "public", nil, false)
-		if err == nil {
-			t.Fatal("expected security status error")
+		item := securityItem(c, &github.Repo{}, "owner", "repo", "public", nil, false)
+		if item.Action != wizard.ActionUpdate {
+			t.Errorf("security action = %v, want update", item.Action)
 		}
 	}, nil)
 }

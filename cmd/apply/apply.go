@@ -261,11 +261,7 @@ func buildItems(
 	items = append(items, branchProtectionItem(c, owner, repo, branch, visibility, branchPlan, classicExists, opts, pack))
 	items = append(items, tagRulesetItem(c, owner, repo, tagPlan))
 
-	security, err := securityItem(c, info, owner, repo, visibility, rendered, paidSecurity)
-	if err != nil {
-		return nil, err
-	}
-	items = append(items, security)
+	items = append(items, securityItem(c, info, owner, repo, visibility, rendered, paidSecurity))
 
 	return items, nil
 }
@@ -285,7 +281,7 @@ func generalSettingsItem(c *github.Client, info *github.Repo, owner, repo string
 	}
 }
 
-func securityItem(c *github.Client, info *github.Repo, owner, repo, visibility string, rendered []templates.RenderedFile, paidSecurity bool) (wizard.Item, error) {
+func securityItem(c *github.Client, info *github.Repo, owner, repo, visibility string, rendered []templates.RenderedFile, paidSecurity bool) wizard.Item {
 	securityName := "Security (Dependabot)"
 	advancedCodeQL := false
 	for _, f := range rendered {
@@ -310,10 +306,7 @@ func securityItem(c *github.Client, info *github.Repo, owner, repo, visibility s
 	if info != nil {
 		action = wizard.ActionUpdate
 		configured, err := securityConfigured(c, *info, owner, repo, secOpts)
-		if err != nil {
-			return wizard.Item{}, err
-		}
-		if configured {
+		if err == nil && configured {
 			action = wizard.ActionSkip
 		}
 	}
@@ -322,7 +315,7 @@ func securityItem(c *github.Client, info *github.Repo, owner, repo, visibility s
 		Action:   action,
 		Optional: true,
 		Apply:    func() error { return c.EnableSecurity(owner, repo, secOpts) },
-	}, nil
+	}
 }
 
 func securityConfigured(c *github.Client, info github.Repo, owner, repo string, opts github.SecurityOptions) (bool, error) {
