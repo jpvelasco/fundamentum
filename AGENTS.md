@@ -43,6 +43,35 @@ go run . init OWNER/REPO
 
 Pre-commit order: template drift → build → lint → test.
 
+## Contributor workflow
+
+1. Start by reading this file and checking `git status --short --branch`. Enable the
+   repository hooks if they are not already configured.
+2. Work from a focused feature branch (`feat/`, `fix/`, `docs/`, and so on), never
+   directly on `main`. Preserve unrelated working-tree changes.
+3. Keep documentation, embedded templates, and their live counterparts in sync. In
+   particular, changing a shipped workflow may require updating both
+   `.github/workflows/` and `internal/templatefs/templates/`.
+4. For any source, template, workflow, or configuration change, run the full local
+   gate in its defined order before requesting review:
+
+   ```bash
+   go test ./internal/templatefs/ -run TestCodecovTemplateDrift -count=1
+   go build ./...
+   golangci-lint run ./...
+   go test ./...
+   ```
+
+   If `golangci-lint` is unavailable or blocked, run `go vet ./...`, matching the
+   hook fallback. For a template-only change, also run:
+
+   ```bash
+   go test ./internal/templatefs/ -run TestEmbeddedYAMLParses -count=1
+   ```
+
+5. Documentation-only changes still require `git diff --check`. Do not claim a PR
+   is ready until its applicable local checks and required CI checks are green.
+
 **Codecov template drift gates:** `internal/templatefs/codecov_drift_test.go` compares live `.github/workflows/ci.yml` against the embed template `dotgithub/workflows/public_ci.yml`. Two gates:
 - `TestCodecovTemplateDrift` — Codecov upload settings must match functionally (Codecov is folded into the CI Test job, fabrica standard): `id-token: write`, `use_oidc` (literal `true` or the XOR `${{ secrets.CODECOV_TOKEN == '' }}` expression), `use_pypi`, `fail_ci_if_error`, `-covermode=atomic`, coverage `files`/`-coverprofile`, `override_commit`/`override_branch`/`override_pr`, `slug`, `report_type: test_results`, SHA-pinned `codecov/codecov-action`. Value regexes tolerate trailing YAML comments (`TestCodecovGateFieldsDetectedWithComments` asserts both files parse as actively enabled — without this the gate was vacuous: both sides carried `id-token: write  # …` and neither registered).
 - `TestLintWindowsParity` — both live workflow and embed template must define the `lint-windows` job (`Lint (Windows)` on windows-latest).
