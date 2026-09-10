@@ -2,6 +2,7 @@ package github
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -68,16 +69,15 @@ func TestSecurityFeaturesEnabled(t *testing.T) {
 
 func TestDefaultCodeQLSetupEnabled(t *testing.T) {
 	tests := []struct {
-		name     string
-		status   int
-		response string
-		want     bool
-		err      bool
+		name   string
+		status int
+		state  string // CodeQL setup state in the JSON body; empty means no body
+		want   bool
+		err    bool
 	}{
-		{"configured", http.StatusOK, `{"state":"configured"}`, true, false},
-		{"not configured", http.StatusOK, `{"state":"not-configured"}`, false, false},
+		{"configured", http.StatusOK, "configured", true, false},
+		{"not configured", http.StatusOK, "not-configured", false, false},
 		{"missing", http.StatusNotFound, "", false, false},
-		{"invalid response", http.StatusOK, `not json`, false, true},
 		{"forbidden", http.StatusForbidden, "", false, true},
 	}
 	for _, tt := range tests {
@@ -86,8 +86,11 @@ func TestDefaultCodeQLSetupEnabled(t *testing.T) {
 				if r.URL.Path != "/repos/owner/repo/code-scanning/default-setup" {
 					t.Errorf("unexpected path %s", r.URL.Path)
 				}
+				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tt.status)
-				_, _ = w.Write([]byte(tt.response))
+				if tt.state != "" {
+					_ = json.NewEncoder(w).Encode(map[string]string{"state": tt.state})
+				}
 			}), nil, func(c *Client) {
 				got, err := c.DefaultCodeQLSetupEnabled("owner", "repo")
 				if (err != nil) != tt.err {
@@ -99,6 +102,17 @@ func TestDefaultCodeQLSetupEnabled(t *testing.T) {
 			}, nil)
 		})
 	}
+}
+
+func TestDefaultCodeQLSetupEnabled_InvalidBody(t *testing.T) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "not json")
+	}), nil, func(c *Client) {
+		if _, err := c.DefaultCodeQLSetupEnabled("owner", "repo"); err == nil {
+			t.Fatal("expected decode error")
+		}
+	}, nil)
 }
 
 func TestDefaultCodeQLSetupEnabled_NetworkError(t *testing.T) {

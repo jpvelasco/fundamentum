@@ -287,7 +287,8 @@ func TestBuildItems_SettingsAndSecurityActions(t *testing.T) {
 				case "/repos/owner/repo/vulnerability-alerts", "/repos/owner/repo/automated-security-fixes":
 					w.WriteHeader(http.StatusNoContent)
 				case "/repos/owner/repo/code-scanning/default-setup":
-					_, _ = w.Write([]byte(`{"state":"` + tt.defaultCodeQL + `"}`))
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]string{"state": tt.defaultCodeQL})
 				default:
 					w.WriteHeader(http.StatusNotFound)
 				}
