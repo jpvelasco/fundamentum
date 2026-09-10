@@ -7,8 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-10
+
+**Feature release.** Adds the `audit` command, `--strict`, named `--preset` baselines, portable `export`/`--from` baselines, non-Go CI packs, and ruleset reconciliation, makes required status checks configurable, and makes dry-run planning report existing settings accurately.
+
 ### Added
 
+- **`audit` command.** `fundamentum audit OWNER/REPO` verifies a hardened repo against its baseline — comparing managed rulesets, classic protection, security toggles, and community files — so drift is caught before it bites.
+- **`--strict`.** Optional core harden steps (previously best-effort) now fail the run when they cannot be applied, so a partial harden is never reported as success.
+- **Configurable required status checks.** `--require-checks` overrides the checks `protect-main` requires; the default now requires the shipped CI jobs that report on PRs instead of Codacy Static Code Analysis (whose cloud check can lag).
+- **Ruleset reconciliation.** `protect-main` and `protect-version-tags` are fetched and their Fundamentum-owned fields compared on drift, so re-applying an already-hardened repo reconciles changed rules instead of skipping on name match.
 - **`--preset oss|private|strict`.** Named baselines skip the wizard so `apply`/`audit`/`init --dry-run` are fully non-interactive. `oss`/`private` keep the solo default and do not enable paid GHAS; `strict` turns on `--strict` plus `--advanced-security`. Visibility still selects the public vs private file set.
 - **`export` / `--from`.** `fundamentum export` writes a portable JSON baseline (preset, CI pack, required checks, GHAS, strict). `apply --from baseline.json` and `audit --from` reapply it; explicit flags still win.
 - **Language CI packs.** `--ci node|python|rust` (and `auto` detection from `package.json` / `pyproject.toml` / `requirements.txt` / `Cargo.toml`) ship Lint + Test + Trivy workflows that do not assume Go.
@@ -20,6 +28,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Non-Go repos no longer get a permanently red Go CI starter.** `--ci auto` (default) ships the full Go workflow only when the target has `go.mod`; otherwise it writes a generic `CI` + Trivy pack. `--ci go|generic|none` overrides detection. Required checks follow the resolved pack so `protect-main` does not demand `gosec` on a Node repo.
+- **Dry-run reports existing settings accurately.** `apply` now threads the fetched repo state into planning so existing general settings and fully configured security baselines are reported as skip/update instead of always "would create". Optional security state probes that error (e.g. a token without `security_events` scope) no longer abort the plan.
+- **npm shim no longer loops on the `0.0.0` in-repo version.** `install.js`/`run.js` stop the redundant re-download loop, and the `0.0.0` skip message no longer references a build path that does not exist in module scope.
+- **Private dry-run lists the offered GHAS plan lines.** A private `apply --dry-run` now shows secret scanning as a would-create item, and the live private GHAS prompt path is covered by tests.
+- **Progress and skip lines go to the injected `io.Writer`.** PR-mode and skip progress is written to the writer passed in rather than a package-level default, so it is testable and captured.
+- **`WithBaseURL` accepts only true loopback hosts.** Non-loopback overrides are rejected so tests cannot be pointed at an arbitrary remote.
+- **Ruleset lists are paginated.** A single unpaged `GET` missed `protect-main` on later pages and could falsely report it as absent; list responses are now paged (with `404` and `Link` edge cases covered).
+- **Classic-protection fallback only when rulesets are unavailable.** A generic `403` (token scope, SSO, IP allow list) no longer triggers the classic path; fallback requires a plan-upgrade / not-available message.
+- **Non-idempotent POSTs are not retried.** Transient-failure retry/backoff applies to idempotent requests only; `POST` (create) requests are not replayed.
+- **Fails fast when no GitHub token is configured.** `apply`, `audit`, and live `init` now error locally if neither `--token` nor `GITHUB_TOKEN` is set. `init --dry-run` still works without a token.
+- **Unused harden branches are deleted when PR mode writes nothing.** A `--pr` run with no file changes no longer leaves an empty branch behind.
+- **PR branch names are query-escaped in Contents ref lookups.** Branch names with special characters no longer 404 during ref lookups.
+- **`init --dry-run` plans without inspecting the missing repo.** Previewing a new repository no longer 404s; no `GET` is issued for a repo that does not exist yet.
+- **Required checks are deferred in PR mode so harden PRs can merge.** `--pr` and the 409 fallback no longer create `protect-main` with checks that gate the PR they are part of; required status checks stay on for direct apply.
+- **The run fails when `protect-main` cannot be applied.** Core branch-protection create is marked required so a ruleset or classic failure is not silently reported as skipped.
+- **Existence helpers treat only `404` as missing.** `RulesetExists` / `ClassicProtectionExists` no longer map every non-200 to "does not exist", so a `403` or `500` fails the run instead of skipping creation.
+- **Valid repo and branch names are not rewritten in templates.** Sanitization no longer mangles legitimate identifiers.
+
+### Documentation
+
+- **README and contributor workflow aligned with tip behavior.** The feature list, shipped CI required checks, live settings under `--pr`, and the contributor workflow are documented to match current behavior.
 
 ## [0.1.6] - 2026-08-24
 
@@ -146,7 +174,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.2.0
 [0.1.6]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.6
 [0.1.5]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.5
 [0.1.4]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.4
