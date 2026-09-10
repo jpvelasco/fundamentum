@@ -13,8 +13,28 @@ func TestDependabotAlertsEnabled_NetworkError(t *testing.T) {
 	}
 }
 
-func TestDependabotAlertsEnabled(t *testing.T) {
-	tests := []struct {
+func TestSecurityFeaturesEnabled(t *testing.T) {
+	features := []struct {
+		name  string
+		path  string
+		check func(*Client) (bool, error)
+	}{
+		{
+			name: "Dependabot alerts",
+			path: "/repos/owner/repo/vulnerability-alerts",
+			check: func(c *Client) (bool, error) {
+				return c.DependabotAlertsEnabled("owner", "repo")
+			},
+		},
+		{
+			name: "automated security fixes",
+			path: "/repos/owner/repo/automated-security-fixes",
+			check: func(c *Client) (bool, error) {
+				return c.AutomatedSecurityFixesEnabled("owner", "repo")
+			},
+		},
+	}
+	statuses := []struct {
 		name   string
 		status int
 		want   bool
@@ -24,54 +44,25 @@ func TestDependabotAlertsEnabled(t *testing.T) {
 		{"disabled", http.StatusNotFound, false, false},
 		{"forbidden", http.StatusForbidden, false, true},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/repos/owner/repo/vulnerability-alerts" {
-					t.Errorf("unexpected path %s", r.URL.Path)
-				}
-				w.WriteHeader(tt.status)
-			}), nil, func(c *Client) {
-				got, err := c.DependabotAlertsEnabled("owner", "repo")
-				if (err != nil) != tt.err {
-					t.Fatalf("error = %v, wantErr %v", err, tt.err)
-				}
-				if got != tt.want {
-					t.Errorf("got %v, want %v", got, tt.want)
-				}
-			}, nil)
-		})
-	}
-}
-
-func TestAutomatedSecurityFixesEnabled(t *testing.T) {
-	tests := []struct {
-		name   string
-		status int
-		want   bool
-		err    bool
-	}{
-		{"enabled", http.StatusNoContent, true, false},
-		{"disabled", http.StatusNotFound, false, false},
-		{"forbidden", http.StatusForbidden, false, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/repos/owner/repo/automated-security-fixes" {
-					t.Errorf("unexpected path %s", r.URL.Path)
-				}
-				w.WriteHeader(tt.status)
-			}), nil, func(c *Client) {
-				got, err := c.AutomatedSecurityFixesEnabled("owner", "repo")
-				if (err != nil) != tt.err {
-					t.Fatalf("error = %v, wantErr %v", err, tt.err)
-				}
-				if got != tt.want {
-					t.Errorf("got %v, want %v", got, tt.want)
-				}
-			}, nil)
-		})
+	for _, feature := range features {
+		for _, status := range statuses {
+			t.Run(feature.name+"/"+status.name, func(t *testing.T) {
+				testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != feature.path {
+						t.Errorf("unexpected path %s", r.URL.Path)
+					}
+					w.WriteHeader(status.status)
+				}), nil, func(c *Client) {
+					got, err := feature.check(c)
+					if (err != nil) != status.err {
+						t.Fatalf("error = %v, wantErr %v", err, status.err)
+					}
+					if got != status.want {
+						t.Errorf("got %v, want %v", got, status.want)
+					}
+				}, nil)
+			})
+		}
 	}
 }
 
