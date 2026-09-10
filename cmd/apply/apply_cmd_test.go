@@ -40,7 +40,7 @@ func newBuildItemsTestFull(t *testing.T, handler http.HandlerFunc, visibility st
 		t.Fatalf("Render() error: %v", err)
 	}
 
-	items, err := buildItems(c, "owner", "repo", "main", visibility, rendered, existsPlan(rulesetExists), existsPlan(tagExists), classicExists, &github.BranchProtectionOptions{}, false, "")
+	items, err := buildItems(c, nil, "owner", "repo", "main", visibility, rendered, existsPlan(rulesetExists), existsPlan(tagExists), classicExists, &github.BranchProtectionOptions{}, false, "")
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestBuildItems_Private(t *testing.T) {
 
 func TestBuildItems_PrivatePaidSecurity(t *testing.T) {
 	c := github.NewClient("", false)
-	items, err := buildItems(c, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, true, "")
+	items, err := buildItems(c, nil, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, true, "")
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -247,9 +247,181 @@ func TestBuildItems_PrivatePaidSecurity(t *testing.T) {
 	}
 }
 
+func TestBuildItems_SettingsAndSecurityActions(t *testing.T) {
+	tests := []struct {
+		name          string
+		info          github.Repo
+		defaultCodeQL string
+		wantSettings  wizard.Action
+		wantSecurity  wizard.Action
+	}{
+		{
+			name: "already configured",
+			info: github.Repo{
+				Visibility:           "public",
+				DeleteBranchOnMerge:  true,
+				SecretScanning:       true,
+				SecretPushProtection: true,
+			},
+			defaultCodeQL: "configured",
+			wantSettings:  wizard.ActionSkip,
+			wantSecurity:  wizard.ActionSkip,
+		},
+		{
+			name: "requires reconciliation",
+			info: github.Repo{
+				Visibility:           "public",
+				SecretScanning:       true,
+				SecretPushProtection: true,
+			},
+			defaultCodeQL: "not-configured",
+			wantSettings:  wizard.ActionUpdate,
+			wantSecurity:  wizard.ActionUpdate,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/repos/owner/repo/vulnerability-alerts", "/repos/owner/repo/automated-security-fixes":
+					w.WriteHeader(http.StatusNoContent)
+				case "/repos/owner/repo/code-scanning/default-setup":
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]string{"state": tt.defaultCodeQL})
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}), func(c *github.Client) {
+				items, err := buildItems(c, &tt.info, "owner", "repo", "main", "public", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, false, "")
+				if err != nil {
+					t.Fatalf("buildItems() error: %v", err)
+				}
+				foundSettings := false
+				foundSecurity := false
+				for _, item := range items {
+					switch item.Name {
+					case "General settings (auto-delete branches)":
+						foundSettings = true
+						if item.Action != tt.wantSettings {
+							t.Errorf("settings action = %v, want %v", item.Action, tt.wantSettings)
+						}
+					case "Security (secret scanning, CodeQL, Dependabot)":
+						foundSecurity = true
+						if item.Action != tt.wantSecurity {
+							t.Errorf("security action = %v, want %v", item.Action, tt.wantSecurity)
+						}
+					}
+				}
+				if !foundSettings || !foundSecurity {
+					t.Errorf("expected settings and security items, got %v", items)
+				}
+			}, nil)
+		})
+	}
+}
+
+func TestSecurityConfigured(t *testing.T) {
+	tests := []struct {
+		name    string
+		info    github.Repo
+		opts    github.SecurityOptions
+		alerts  int
+		fixes   int
+		want    bool
+		wantErr bool
+	}{
+		{
+			name:   "alerts disabled",
+			info:   github.Repo{SecretScanning: true, SecretPushProtection: true},
+			opts:   github.SecurityOptions{Visibility: "public"},
+			alerts: http.StatusNotFound,
+			fixes:  http.StatusNoContent,
+		},
+		{
+			name:   "security fixes disabled",
+			info:   github.Repo{SecretScanning: true, SecretPushProtection: true},
+			opts:   github.SecurityOptions{Visibility: "public"},
+			alerts: http.StatusNoContent,
+			fixes:  http.StatusNotFound,
+		},
+		{
+			name:   "secret scanning disabled",
+			opts:   github.SecurityOptions{Visibility: "public"},
+			alerts: http.StatusNoContent,
+			fixes:  http.StatusNoContent,
+		},
+		{
+			name:   "private baseline configured",
+			opts:   github.SecurityOptions{Visibility: "private"},
+			alerts: http.StatusNoContent,
+			fixes:  http.StatusNoContent,
+			want:   true,
+		},
+		{
+			name: "advanced CodeQL workflow configured",
+			info: github.Repo{
+				SecretScanning:       true,
+				SecretPushProtection: true,
+			},
+			opts:   github.SecurityOptions{Visibility: "public", AdvancedCodeQL: true},
+			alerts: http.StatusNoContent,
+			fixes:  http.StatusNoContent,
+			want:   true,
+		},
+		{
+			name:    "alerts status error",
+			opts:    github.SecurityOptions{Visibility: "public"},
+			alerts:  http.StatusForbidden,
+			fixes:   http.StatusNoContent,
+			wantErr: true,
+		},
+		{
+			name:    "security fixes status error",
+			opts:    github.SecurityOptions{Visibility: "public"},
+			alerts:  http.StatusNoContent,
+			fixes:   http.StatusForbidden,
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/repos/owner/repo/vulnerability-alerts":
+					w.WriteHeader(tt.alerts)
+				case "/repos/owner/repo/automated-security-fixes":
+					w.WriteHeader(tt.fixes)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}), func(c *github.Client) {
+				got, err := securityConfigured(c, tt.info, "owner", "repo", tt.opts)
+				if (err != nil) != tt.wantErr {
+					t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+				}
+				if got != tt.want {
+					t.Errorf("configured = %v, want %v", got, tt.want)
+				}
+			}, nil)
+		})
+	}
+}
+
+func TestSecurityItem_StatusErrorPlansUpdate(t *testing.T) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}), func(c *github.Client) {
+		item := securityItem(c, &github.Repo{}, "owner", "repo", "public", nil, false)
+		if item.Action != wizard.ActionUpdate {
+			t.Errorf("security action = %v, want update", item.Action)
+		}
+	}, nil)
+}
+
 func TestBuildItems_TagRulesetExists(t *testing.T) {
 	c := github.NewClient("", false)
-	items, err := buildItems(c, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, existsPlan(true), false, &github.BranchProtectionOptions{}, false, "")
+	items, err := buildItems(c, nil, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, existsPlan(true), false, &github.BranchProtectionOptions{}, false, "")
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}

@@ -2,6 +2,7 @@ package github
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -13,8 +14,28 @@ func TestDependabotAlertsEnabled_NetworkError(t *testing.T) {
 	}
 }
 
-func TestDependabotAlertsEnabled(t *testing.T) {
-	tests := []struct {
+func TestSecurityFeaturesEnabled(t *testing.T) {
+	features := []struct {
+		name  string
+		path  string
+		check func(*Client) (bool, error)
+	}{
+		{
+			name: "Dependabot alerts",
+			path: "/repos/owner/repo/vulnerability-alerts",
+			check: func(c *Client) (bool, error) {
+				return c.DependabotAlertsEnabled("owner", "repo")
+			},
+		},
+		{
+			name: "automated security fixes",
+			path: "/repos/owner/repo/automated-security-fixes",
+			check: func(c *Client) (bool, error) {
+				return c.AutomatedSecurityFixesEnabled("owner", "repo")
+			},
+		},
+	}
+	statuses := []struct {
 		name   string
 		status int
 		want   bool
@@ -24,15 +45,54 @@ func TestDependabotAlertsEnabled(t *testing.T) {
 		{"disabled", http.StatusNotFound, false, false},
 		{"forbidden", http.StatusForbidden, false, true},
 	}
+	for _, feature := range features {
+		for _, status := range statuses {
+			t.Run(feature.name+"/"+status.name, func(t *testing.T) {
+				testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != feature.path {
+						t.Errorf("unexpected path %s", r.URL.Path)
+					}
+					w.WriteHeader(status.status)
+				}), nil, func(c *Client) {
+					got, err := feature.check(c)
+					if (err != nil) != status.err {
+						t.Fatalf("error = %v, wantErr %v", err, status.err)
+					}
+					if got != status.want {
+						t.Errorf("got %v, want %v", got, status.want)
+					}
+				}, nil)
+			})
+		}
+	}
+}
+
+func TestDefaultCodeQLSetupEnabled(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		state  string // CodeQL setup state in the JSON body; empty means no body
+		want   bool
+		err    bool
+	}{
+		{"configured", http.StatusOK, "configured", true, false},
+		{"not configured", http.StatusOK, "not-configured", false, false},
+		{"missing", http.StatusNotFound, "", false, false},
+		{"forbidden", http.StatusForbidden, "", false, true},
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/repos/owner/repo/vulnerability-alerts" {
+				if r.URL.Path != "/repos/owner/repo/code-scanning/default-setup" {
 					t.Errorf("unexpected path %s", r.URL.Path)
 				}
+				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tt.status)
+				if tt.state != "" {
+					_ = json.NewEncoder(w).Encode(map[string]string{"state": tt.state})
+				}
 			}), nil, func(c *Client) {
-				got, err := c.DependabotAlertsEnabled("owner", "repo")
+				got, err := c.DefaultCodeQLSetupEnabled("owner", "repo")
 				if (err != nil) != tt.err {
 					t.Fatalf("error = %v, wantErr %v", err, tt.err)
 				}
@@ -41,6 +101,23 @@ func TestDependabotAlertsEnabled(t *testing.T) {
 				}
 			}, nil)
 		})
+	}
+}
+
+func TestDefaultCodeQLSetupEnabled_InvalidBody(t *testing.T) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "not json")
+	}), nil, func(c *Client) {
+		if _, err := c.DefaultCodeQLSetupEnabled("owner", "repo"); err == nil {
+			t.Fatal("expected decode error")
+		}
+	}, nil)
+}
+
+func TestDefaultCodeQLSetupEnabled_NetworkError(t *testing.T) {
+	if _, err := newErroringClient().DefaultCodeQLSetupEnabled("owner", "repo"); err == nil {
+		t.Fatal("expected network error")
 	}
 }
 

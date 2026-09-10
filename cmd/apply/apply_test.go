@@ -273,7 +273,7 @@ func TestBuildItems(t *testing.T) {
 
 func TestBuildItems_WithExistingRuleset(t *testing.T) {
 	c := &github.Client{}
-	items, err := buildItems(c, "owner", "repo", "main", "public", nil, existsPlan(true), existsPlan(true), false, &github.BranchProtectionOptions{}, false, "")
+	items, err := buildItems(c, nil, "owner", "repo", "main", "public", nil, existsPlan(true), existsPlan(true), false, &github.BranchProtectionOptions{}, false, "")
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -853,7 +853,7 @@ func TestBuildItems_AdvancedCodeQLSkipsDefaultSetup(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Render() error: %v", err)
 		}
-		items, err := buildItems(c, "owner", "repo", "main", "public", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, false, "")
+		items, err := buildItems(c, nil, "owner", "repo", "main", "public", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, false, "")
 		if err != nil {
 			t.Fatalf("buildItems() error: %v", err)
 		}
@@ -909,7 +909,7 @@ func TestBuildItems_FileStatusSkip(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNotFound)
 	}), func(c *github.Client) {
-		items, err := buildItems(c, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, false, "")
+		items, err := buildItems(c, nil, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, false, "")
 		if err != nil {
 			t.Fatalf("buildItems() error: %v", err)
 		}
@@ -1090,7 +1090,7 @@ func TestBuildItems_FileStatusErrorFailsPlan(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNotFound)
 	}), func(c *github.Client) {
-		items, err := buildItems(c, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, false, "")
+		items, err := buildItems(c, nil, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, false, "")
 		if err == nil {
 			t.Fatal("expected buildItems to fail when FileStatus errors, got nil")
 		}
@@ -1120,7 +1120,7 @@ func TestBuildItems_AliasCheckErrorFailsPlan(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}), func(c *github.Client) {
-		items, err := buildItems(c, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, false, "")
+		items, err := buildItems(c, nil, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, false, "")
 		if err == nil {
 			t.Fatal("expected buildItems to fail when the alias check errors, got nil")
 		}
