@@ -2,6 +2,7 @@
 package github
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 )
@@ -21,15 +22,49 @@ func IsPublicVisibility(visibility string) bool {
 // DependabotAlertsEnabled reports whether Dependabot alerts are on.
 // GitHub returns 204 when enabled and 404 when disabled.
 func (c *Client) DependabotAlertsEnabled(owner, repo string) (bool, error) {
-	resp, err := c.get(repoPath(owner, repo) + "/vulnerability-alerts")
+	return c.featureEnabled(repoPath(owner, repo)+"/vulnerability-alerts", "dependabot alerts")
+}
+
+// AutomatedSecurityFixesEnabled reports whether Dependabot security updates
+// are on. GitHub returns 204 when enabled and 404 when disabled.
+func (c *Client) AutomatedSecurityFixesEnabled(owner, repo string) (bool, error) {
+	return c.featureEnabled(repoPath(owner, repo)+"/automated-security-fixes", "automated security fixes")
+}
+
+func (c *Client) featureEnabled(path, name string) (bool, error) {
+	resp, err := c.get(path)
 	if err != nil {
-		return false, fmt.Errorf("check dependabot alerts: %w", err)
+		return false, fmt.Errorf("check %s: %w", name, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if err := expectStatus("check dependabot alerts", resp, http.StatusNoContent, http.StatusNotFound); err != nil {
+	if err := expectStatus("check "+name, resp, http.StatusNoContent, http.StatusNotFound); err != nil {
 		return false, err
 	}
 	return resp.StatusCode == http.StatusNoContent, nil
+}
+
+// DefaultCodeQLSetupEnabled reports whether the repository uses GitHub's
+// default CodeQL setup. A repository with an advanced CodeQL workflow does
+// not need this setting.
+func (c *Client) DefaultCodeQLSetupEnabled(owner, repo string) (bool, error) {
+	resp, err := c.get(repoPath(owner, repo) + "/code-scanning/default-setup")
+	if err != nil {
+		return false, fmt.Errorf("check default CodeQL setup: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if err := expectStatus("check default CodeQL setup", resp, http.StatusOK, http.StatusNotFound); err != nil {
+		return false, err
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	var result struct {
+		State string `json:"state"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false, fmt.Errorf("decode default CodeQL setup: %w", err)
+	}
+	return result.State == "configured", nil
 }
 
 // EnableSecurity enables Dependabot alerts and security updates for every repo.

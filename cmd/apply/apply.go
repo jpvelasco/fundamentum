@@ -144,7 +144,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 		}
 	}
 
-	items, err := buildItems(client, owner, repo, branch, visibility, rendered, branchPlan, tagPlan, classicExists, &opts, paidSecurity, pack)
+	items, err := buildItems(client, &info, owner, repo, branch, visibility, rendered, branchPlan, tagPlan, classicExists, &opts, paidSecurity, pack)
 	if err != nil {
 		return fmt.Errorf("plan %s/%s: %w (verify the token grants Contents read access and retry)", owner, repo, err)
 	}
@@ -194,7 +194,7 @@ func PlanNewRepo(owner, repo, visibility string, stdout io.Writer) error {
 	// Named presets must match a live apply: only strict / --advanced-security
 	// enable GHAS. Interactive dry-run still shows the offered plan line.
 	paid := globals.AdvancedSecurity || github.IsPublicVisibility(visibility) || (globals.DryRun && globals.Preset == "")
-	items, err := buildItems(nil, owner, repo, "main", visibility, rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, paid, pack)
+	items, err := buildItems(nil, nil, owner, repo, "main", visibility, rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, paid, pack)
 	if err != nil {
 		return err
 	}
@@ -207,6 +207,7 @@ func PlanNewRepo(owner, repo, visibility string, stdout io.Writer) error {
 
 func buildItems(
 	c *github.Client,
+	info *github.Repo,
 	owner, repo, branch, visibility string,
 	rendered []templates.RenderedFile,
 	branchPlan, tagPlan github.RulesetPlan,
@@ -256,20 +257,36 @@ func buildItems(
 		})
 	}
 
-	items = append(items, wizard.Item{
-		Name:   "General settings (auto-delete branches)",
-		Action: wizard.ActionCreate,
-		Apply:  func() error { return c.ApplyGeneralSettings(owner, repo) },
-	})
+	items = append(items, generalSettingsItem(c, info, owner, repo))
 	items = append(items, branchProtectionItem(c, owner, repo, branch, visibility, branchPlan, classicExists, opts, pack))
 	items = append(items, tagRulesetItem(c, owner, repo, tagPlan))
 
-	// Security features: CodeQL only for public repos (free-tier private needs GHAS).
-	// Secret scanning and Dependabot work for all repos.
+	security, err := securityItem(c, info, owner, repo, visibility, rendered, paidSecurity)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, security)
+
+	return items, nil
+}
+
+func generalSettingsItem(c *github.Client, info *github.Repo, owner, repo string) wizard.Item {
+	action := wizard.ActionCreate
+	if info != nil {
+		action = wizard.ActionUpdate
+		if info.DeleteBranchOnMerge {
+			action = wizard.ActionSkip
+		}
+	}
+	return wizard.Item{
+		Name:   "General settings (auto-delete branches)",
+		Action: action,
+		Apply:  func() error { return c.ApplyGeneralSettings(owner, repo) },
+	}
+}
+
+func securityItem(c *github.Client, info *github.Repo, owner, repo, visibility string, rendered []templates.RenderedFile, paidSecurity bool) (wizard.Item, error) {
 	securityName := "Security (Dependabot)"
-	// When the advanced codeql.yml workflow is part of the render, default-setup
-	// CodeQL must be skipped — GitHub rejects advanced SARIF uploads while
-	// default setup is configured (it also disables the advanced workflow).
 	advancedCodeQL := false
 	for _, f := range rendered {
 		if f.Path == ".github/workflows/codeql.yml" {
@@ -288,14 +305,47 @@ func buildItems(
 		AdvancedCodeQL: advancedCodeQL,
 		PaidFeatures:   paidSecurity,
 	}
-	items = append(items, wizard.Item{
+
+	action := wizard.ActionCreate
+	if info != nil {
+		action = wizard.ActionUpdate
+		configured, err := securityConfigured(c, *info, owner, repo, secOpts)
+		if err != nil {
+			return wizard.Item{}, err
+		}
+		if configured {
+			action = wizard.ActionSkip
+		}
+	}
+	return wizard.Item{
 		Name:     securityName,
-		Action:   wizard.ActionCreate,
+		Action:   action,
 		Optional: true,
 		Apply:    func() error { return c.EnableSecurity(owner, repo, secOpts) },
-	})
+	}, nil
+}
 
-	return items, nil
+func securityConfigured(c *github.Client, info github.Repo, owner, repo string, opts github.SecurityOptions) (bool, error) {
+	alertsEnabled, err := c.DependabotAlertsEnabled(owner, repo)
+	if err != nil {
+		return false, err
+	}
+	fixesEnabled, err := c.AutomatedSecurityFixesEnabled(owner, repo)
+	if err != nil {
+		return false, err
+	}
+	if !alertsEnabled || !fixesEnabled {
+		return false, nil
+	}
+	if github.IsPublicVisibility(opts.Visibility) || opts.PaidFeatures {
+		if !info.SecretScanning || !info.SecretPushProtection {
+			return false, nil
+		}
+	}
+	if github.IsPublicVisibility(opts.Visibility) && !opts.AdvancedCodeQL {
+		return c.DefaultCodeQLSetupEnabled(owner, repo)
+	}
+	return true, nil
 }
 
 // branchProtectionItem returns the correct Item for branch protection based on current state:
