@@ -97,14 +97,17 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	}
 
 	// Pre-flight: check branch protection state before asking solo/team.
+	// A 403 "rulesets not offered on this plan" (free-tier private) means no
+	// rulesets can exist, so plan them absent and let the item's classic
+	// fallback decide; other 403s (token scope, SSO, IP allow list) abort.
 	var opts github.BranchProtectionOptions
 	opts.SkipCodeOwners = orgOwner
 	branchPlan, err := client.PlanBranchRuleset(owner, repo, requiredChecks(pack), opts)
-	if err != nil {
+	if err != nil && !github.IsRulesetUnavailable(err) {
 		return fmt.Errorf("check branch ruleset: %w", err)
 	}
 	tagPlan, err := client.PlanTagRuleset(owner, repo)
-	if err != nil {
+	if err != nil && !github.IsRulesetUnavailable(err) {
 		return fmt.Errorf("check tag ruleset: %w", err)
 	}
 	classicExists, err := client.ClassicProtectionExists(owner, repo, branch)

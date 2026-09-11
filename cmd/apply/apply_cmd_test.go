@@ -1086,6 +1086,72 @@ func TestRunWithClient_TagRulesetError(t *testing.T) {
 	}
 }
 
+// rulesetsUnavailableHandler mocks a free-tier private repo whose plan does
+// not offer repository rulesets: every GET /rulesets responds with the
+// GitHub "Upgrade to GitHub Pro" 403.
+func rulesetsUnavailableHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo" {
+		_, _ = w.Write([]byte(`{"visibility":"private","default_branch":"main","owner":{"type":"User"}}`))
+		return
+	}
+	if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets") {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature.","documentation_url":"https://docs.github.com/rest/repos/rulesets#get-all-repository-rulesets","status":"403"}`))
+		return
+	}
+	w.WriteHeader(http.StatusNotFound)
+}
+
+// TestRunWithClient_RulesetsUnavailableOnFreeTier verifies a 403 "upgrade to
+// GitHub Pro" on the ruleset pre-flight plans the rulesets as absent instead
+// of aborting, so the rest of the plan (files, settings, branch-protection
+// create item) still builds on a private free-tier repo.
+func TestRunWithClient_RulesetsUnavailableOnFreeTier(t *testing.T) {
+	t.Cleanup(func() { globals.DryRun = false })
+	globals.DryRun = true
+
+	srv := httptest.NewServer(http.HandlerFunc(rulesetsUnavailableHandler))
+	defer srv.Close()
+
+	var out strings.Builder
+	err := runWithClient(newTestClient(srv), "owner", "repo", strings.NewReader(""), &out)
+	if err != nil {
+		t.Fatalf("runWithClient() error: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "Dry run complete — ") {
+		t.Errorf("expected dry-run summary, got:\n%s", got)
+	}
+	if !strings.Contains(got, "Branch protection (protect-main)") {
+		t.Errorf("expected branch protection create item, got:\n%s", got)
+	}
+	if !strings.Contains(got, "Tag ruleset (protect-version-tags)") {
+		t.Errorf("expected tag ruleset create item, got:\n%s", got)
+	}
+}
+
+// TestRunWithClient_RulesetsGeneric403StillFails verifies a non-upgrade 403
+// (token scope, SSO, IP allow list) on the ruleset pre-flight still aborts.
+func TestRunWithClient_RulesetsGeneric403StillFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
+			_, _ = w.Write([]byte(`{"visibility":"private","default_branch":"main","owner":{"type":"User"}}`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets"):
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"message":"Resource not accessible by integration"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	err := runWithClient(newTestClient(srv), "owner", "repo", strings.NewReader(""), &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "check branch ruleset") {
+		t.Errorf("error = %v, want check branch ruleset", err)
+	}
+}
+
 // TestRunWithClient_ClassicProtectionError verifies classic protection
 // pre-flight failures surface a wrapped error. A hijacked connection forces a
 // transport-level error on the GET /branches/main/protection request.
