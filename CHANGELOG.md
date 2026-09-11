@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-10
+
+**Patch release.** `apply` and `audit` no longer abort during pre-flight on free-tier private repos, where GitHub plan-gates both the rulesets and classic branch-protection APIs.
+
+### Fixed
+
+- **Pre-flight no longer aborts when branch protection is plan-gated.** Free-tier private repos get the same "Upgrade to GitHub Pro…" `403` from both the rulesets and classic branch-protection APIs. The pre-flight existence checks treated every `403` as fatal, so the plan died before the classic fallback could run. Plan-gate `403`s on the ruleset, tag-ruleset, and classic-protection probes are now read as "feature unavailable" (plan state modeled as absent) and planning continues; other `403`s (token scope, SSO, IP allow list) still fail.
+- **Actionable error when branch protection is unavailable.** When the rulesets API and the classic fallback are both plan-gated, `apply` fails the `protect-main` item with an error that tells the operator to set protection manually in repo Settings → Branches, preserving the underlying `403` cause for re-inspection.
+
 ## [0.2.0] - 2026-09-10
 
 **Feature release.** Adds the `audit` command, `--strict`, named `--preset` baselines, portable `export`/`--from` baselines, non-Go CI packs, and ruleset reconciliation, makes required status checks configurable, and makes dry-run planning report existing settings accurately.
@@ -174,7 +183,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.2.1
 [0.2.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.2.0
 [0.1.6]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.6
 [0.1.5]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.5
