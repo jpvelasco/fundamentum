@@ -89,19 +89,19 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 		return err
 	}
 	checksWanted := github.ResolveRequiredChecksForPack(globals.RequireChecks, pack)
-	// A 403 "rulesets not offered on this plan" (free-tier private) means no
-	// rulesets can exist, so plan them absent (the audit then reports the
-	// classic fallback or "missing") rather than aborting the whole report.
+	// On a free-tier private repo GitHub 403s both the rulesets and classic
+	// branch-protection probes with an "Upgrade to GitHub Pro" body, so plan
+	// all three absent (the report then shows "missing") rather than aborting.
 	branchPlan, err := client.PlanBranchRuleset(owner, repo, checksWanted, opts)
-	if err != nil && !github.IsRulesetUnavailable(err) {
+	if err != nil && !github.IsBranchProtectionUnavailable(err) {
 		return fmt.Errorf("check branch ruleset: %w", err)
 	}
 	tagPlan, err := client.PlanTagRuleset(owner, repo)
-	if err != nil && !github.IsRulesetUnavailable(err) {
+	if err != nil && !github.IsBranchProtectionUnavailable(err) {
 		return fmt.Errorf("check tag ruleset: %w", err)
 	}
 	classicExists, err := client.ClassicProtectionExists(owner, repo, info.DefaultBranch)
-	if err != nil {
+	if err != nil && !github.IsBranchProtectionUnavailable(err) {
 		return fmt.Errorf("check classic protection: %w", err)
 	}
 	dependabot, err := client.DependabotAlertsEnabled(owner, repo)

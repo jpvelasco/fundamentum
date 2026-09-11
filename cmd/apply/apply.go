@@ -97,21 +97,22 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	}
 
 	// Pre-flight: check branch protection state before asking solo/team.
-	// A 403 "rulesets not offered on this plan" (free-tier private) means no
-	// rulesets can exist, so plan them absent and let the item's classic
-	// fallback decide; other 403s (token scope, SSO, IP allow list) abort.
+	// On a free-tier private repo GitHub returns "Upgrade to GitHub Pro" 403s
+	// for both the rulesets and classic branch-protection APIs, so plan all
+	// three probes as absent instead of aborting; other 403s (token scope,
+	// SSO, IP allow list) still abort.
 	var opts github.BranchProtectionOptions
 	opts.SkipCodeOwners = orgOwner
 	branchPlan, err := client.PlanBranchRuleset(owner, repo, requiredChecks(pack), opts)
-	if err != nil && !github.IsRulesetUnavailable(err) {
+	if err != nil && !github.IsBranchProtectionUnavailable(err) {
 		return fmt.Errorf("check branch ruleset: %w", err)
 	}
 	tagPlan, err := client.PlanTagRuleset(owner, repo)
-	if err != nil && !github.IsRulesetUnavailable(err) {
+	if err != nil && !github.IsBranchProtectionUnavailable(err) {
 		return fmt.Errorf("check tag ruleset: %w", err)
 	}
 	classicExists, err := client.ClassicProtectionExists(owner, repo, branch)
-	if err != nil {
+	if err != nil && !github.IsBranchProtectionUnavailable(err) {
 		return fmt.Errorf("check classic protection: %w", err)
 	}
 
@@ -394,10 +395,18 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 				}
 				// Only fall back to classic when rulesets are not offered on this
 				// plan. Other 403s (token scope, SSO, IP allow lists) surface as-is.
-				if !github.IsRulesetUnavailable(err) {
+				if !github.IsBranchProtectionUnavailable(err) {
 					return err
 				}
-				return c.ApplyClassicBranchProtection(owner, repo, branch, checks, *opts)
+				if err := c.ApplyClassicBranchProtection(owner, repo, branch, checks, *opts); err != nil {
+					// Free-tier private: the classic API is plan-gated too. Both
+					// protection paths are unavailable — point at the manual page.
+					if github.IsBranchProtectionUnavailable(err) {
+						return fmt.Errorf("branch protection requires GitHub Pro for this private repo: rulesets and classic protection are both unavailable via API — set it manually in repo Settings → Branches")
+					}
+					return err
+				}
+				return nil
 			},
 		}
 	}

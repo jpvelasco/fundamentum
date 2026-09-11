@@ -391,7 +391,7 @@ func TestIsConflict409_HTTPError(t *testing.T) {
 	}
 }
 
-func TestIsRulesetUnavailable(t *testing.T) {
+func TestIsBranchProtectionUnavailable(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
@@ -407,8 +407,8 @@ func TestIsRulesetUnavailable(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsRulesetUnavailable(tt.err); got != tt.want {
-				t.Errorf("IsRulesetUnavailable(%v) = %v, want %v", tt.err, got, tt.want)
+			if got := IsBranchProtectionUnavailable(tt.err); got != tt.want {
+				t.Errorf("IsBranchProtectionUnavailable(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
 	}

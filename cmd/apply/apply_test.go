@@ -613,6 +613,7 @@ func TestBranchProtectionItem_FallbackOnlyOn403(t *testing.T) {
 		rulesetStatus   int
 		rulesetBody     string
 		classicStatus   int
+		classicBody     string
 		wantErr         bool
 		wantErrContains string
 		wantClassic     bool // true if classic API should be called
@@ -625,6 +626,19 @@ func TestBranchProtectionItem_FallbackOnlyOn403(t *testing.T) {
 			classicStatus: http.StatusOK,
 			wantErr:       false,
 			wantClassic:   true,
+		},
+		{
+			// Free-tier private: rulesets 403 (upgrade) and the classic PUT
+			// also 403s (upgrade) — both paths plan-gated, point at manual setup.
+			name:            "403 private upgrade and classic also plan-gated",
+			visibility:      "private",
+			rulesetStatus:   http.StatusForbidden,
+			rulesetBody:     `{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature."}`,
+			classicStatus:   http.StatusForbidden,
+			classicBody:     `{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature.","status":"403"}`,
+			wantErr:         true,
+			wantErrContains: "Settings → Branches",
+			wantClassic:     true,
 		},
 		{
 			name:            "403 private token-scope does not fall back",
@@ -698,6 +712,10 @@ func TestBranchProtectionItem_FallbackOnlyOn403(t *testing.T) {
 				case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/protection"):
 					classicCalled = true
 					w.WriteHeader(tt.classicStatus)
+					if tt.classicBody != "" {
+						w.Header().Set("Content-Type", "application/json")
+						_, _ = w.Write([]byte(tt.classicBody))
+					}
 				default:
 					w.WriteHeader(http.StatusNoContent)
 				}

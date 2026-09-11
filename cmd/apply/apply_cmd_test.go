@@ -1086,9 +1086,9 @@ func TestRunWithClient_TagRulesetError(t *testing.T) {
 	}
 }
 
-// rulesetsUnavailableHandler mocks a free-tier private repo whose plan does
-// not offer repository rulesets: every GET /rulesets responds with the
-// GitHub "Upgrade to GitHub Pro" 403.
+// rulesetsUnavailableHandler mocks a free-tier private repo whose plan offers
+// neither rulesets nor classic branch protection: both probe endpoints respond
+// with the GitHub "Upgrade to GitHub Pro" 403.
 func rulesetsUnavailableHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo" {
 		_, _ = w.Write([]byte(`{"visibility":"private","default_branch":"main","owner":{"type":"User"}}`))
@@ -1097,6 +1097,11 @@ func rulesetsUnavailableHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets") {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(`{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature.","documentation_url":"https://docs.github.com/rest/repos/rulesets#get-all-repository-rulesets","status":"403"}`))
+		return
+	}
+	if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/protection") {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature.","documentation_url":"https://docs.github.com/rest/branches/branch-protection#get-branch-protection","status":"403"}`))
 		return
 	}
 	w.WriteHeader(http.StatusNotFound)
