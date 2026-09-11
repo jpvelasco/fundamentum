@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-09-10
+
+**Patch release.** Codacy community files now ship only to public repos; private targets no longer receive templates Codacy's free Open Source plan cannot use.
+
+### Fixed
+
+- **Codacy templates are public-only.** `.codacy.yml`, the Codacy coverage workflow, and the Codacy instructions file are `public_`-prefixed so private and internal repos no longer get them. Codacy's free Open Source plan covers public repos only; convert a repo to public later and re-run `apply` to add them.
+
+### Documentation
+
+- **Contributor docs match live CI and the public-only Codacy file set.** AGENTS.md no longer claims a standalone Template-drift job or a Codacy Analysis CI job, and it documents that the three Codacy files do not ship to private repos.
+
 ## [0.2.1] - 2026-09-10
 
 **Patch release.** `apply` and `audit` no longer abort during pre-flight on free-tier private repos, where GitHub plan-gates both the rulesets and classic branch-protection APIs.
@@ -183,7 +195,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.2.2
 [0.2.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.2.1
 [0.2.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.2.0
 [0.1.6]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.1.6
