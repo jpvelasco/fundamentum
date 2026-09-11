@@ -34,8 +34,7 @@ go test ./internal/templatefs/ -run TestCodecovTemplateDrift -count=1
 # Embedded YAML validity gate (raw templates, pre-substitution)
 go test ./internal/templatefs/ -run TestEmbeddedYAMLParses -count=1
 
-# Run
-echo $env:GITHUB_TOKEN   # must be set, or pass --token
+# Run (GITHUB_TOKEN must be set, or pass --token)
 # OWNER is the GitHub username or organization, REPO is the repository name.
 go run . apply OWNER/REPO
 go run . init OWNER/REPO
@@ -126,7 +125,7 @@ For PRs: use pr-auto for full lifecycle (create, fix CI/reviews, land safely).
 
 Go CLI (Cobra). Entry point: `main.go` → `cmd/root/root.go`.
 
-Three subcommands:
+Four subcommands:
 - **apply OWNER/REPO** — harden an existing repo: upsert community health files, set branch protection, enable security features
 - **init OWNER/REPO** — create a new repo then apply hardening
 - **audit OWNER/REPO** — compare the repo to the intended baseline and print a compact PASS/FAIL report; `--strict` fails on optional drift (tag ruleset, secret scanning)
@@ -152,17 +151,17 @@ Shared flag `--ci auto|go|node|python|rust|generic|none` selects the starter CI 
 
 ### Templates
 
-`internal/templates/render.go` substitutes `{{.Owner}}`, `{{.RepoName}}`, `{{.DefaultBranch}}`, `{{.Visibility}}` with plain `strings.ReplaceAll` — no template engine. Owner, repo, and branch must already be valid GitHub/git names (including `.github` and dotted/plus-sign branches); invalid values return an error instead of being silently rewritten. Visibility is whitelist-checked, and rendered output passes through `sanitizeOutput` (strips dangerous HTML tags) as defense-in-depth. This also avoids false-positive XSS flags from static analyzers on YAML/Markdown output.
+`internal/templates/render.go` substitutes `{{.Owner}}`, `{{.RepoName}}`, `{{.DefaultBranch}}`, `{{.Visibility}}`, `{{.CodeOwnerLine}}` with plain `strings.ReplaceAll` — no template engine; unknown placeholders are left as-is so broken templates surface in review. Owner, repo, and branch must already be valid GitHub/git names (including `.github` and dotted/plus-sign branches); invalid values return an error instead of being silently rewritten. Visibility is whitelist-checked, and rendered output passes through `sanitizeOutput` (strips dangerous HTML tags) as defense-in-depth. This also avoids false-positive XSS flags from static analyzers on YAML/Markdown output.
 
 `resolveTarget` path mapping: `dotgithub/` → `.github/`, `public_codacy.yml` → `.codacy.yml` (the one root file that keeps a dot-prefixed target); other top-level template files map to repo root (`public_codecov.yml` → `codecov.yml`, `socket.yml` → `socket.yml`).
 
-Shipped CI follows the **fabrica standard** when the resolved pack is `go` (`--ci go`, or `--ci auto` when the target has `go.mod`): `public_ci.yml` (full Go CI — Lint, Lint (Windows), Vulnerability scan, 3-OS Build/Test matrices, gosec, Trivy — with Codecov coverage + Test Analytics folded into the Test job's Linux leg), `private_ci.yml` (same minus Codecov — private repos keep `private_octocov.yml`), root `public_codeql.yml` plus `codeql/public_codeql-config.yml` (`security-extended` queries; add a commented-out `javascript-typescript` leg if the target repo ships JS/TS). `--ci node|python|rust` (and `auto` when those manifests exist) ship `node_ci.yml` / `python_ci.yml` / `rust_ci.yml` (Lint + Test + Trivy). Non-language targets (`--ci auto` with no known manifest, or `--ci generic`) ship `generic_ci.yml` (`CI` + `Trivy` only). `--ci none` ships no starter CI. `socket.yml` (Socket Security supply-chain scan via GitHub App — no visibility prefix, ships for every repo; the free plan includes the first private repo; requires the app installed), root `public_octopus.yml` (Octopus Review PR-triaging bot via `pull_request_target`, public only), and `dependabot.yml` watching only the `github-actions` ecosystem (no `gomod` entry) still ship regardless of pack. **Codacy is public-only** — its free Open Source plan covers public repos only, so the three Codacy files (`.codacy.yml`, `.github/workflows/codacy-coverage.yml`, `.github/instructions/codacy.instructions.md`, from the `public_`-prefixed templates) do not ship to private repos; a repo converted to public later just re-runs `apply` to add them. Required status-check defaults follow the resolved pack (`CI`+`Trivy` for generic; none for `--ci none`).
+Shipped CI follows the **fabrica standard** when the resolved pack is `go` (`--ci go`, or `--ci auto` when the target has `go.mod`): `public_ci.yml` (full Go CI — Lint, Lint (Windows), Vulnerability scan, 3-OS Build/Test matrices, gosec, Trivy — with Codecov coverage + Test Analytics folded into the Test job's Linux leg), `private_ci.yml` (same minus Codecov — private repos keep `private_octocov.yml`), `dotgithub/workflows/public_codeql.yml` (→ `.github/workflows/codeql.yml`) plus `dotgithub/codeql/public_codeql-config.yml` (→ `.github/codeql/codeql-config.yml`, `security-extended` queries; add a commented-out `javascript-typescript` leg if the target repo ships JS/TS). `--ci node|python|rust` (and `auto` when those manifests exist) ship `node_ci.yml` / `python_ci.yml` / `rust_ci.yml` (Lint + Test + Trivy). Non-language targets (`--ci auto` with no known manifest, or `--ci generic`) ship `generic_ci.yml` (`CI` + `Trivy` only). `--ci none` ships no starter CI. `socket.yml` (Socket Security supply-chain scan via GitHub App — no visibility prefix, ships for every repo; the free plan includes the first private repo; requires the app installed), root `public_octopus.yml` (Octopus Review PR-triaging bot via `pull_request_target`, public only), and `dependabot.yml` watching only the `github-actions` ecosystem (no `gomod` entry) still ship regardless of pack. **Codacy is public-only** — its free Open Source plan covers public repos only, so the three Codacy files (`.codacy.yml`, `.github/workflows/codacy-coverage.yml`, `.github/instructions/codacy.instructions.md`, from the `public_`-prefixed templates) do not ship to private repos; a repo converted to public later just re-runs `apply` to add them. Required status-check defaults follow the resolved pack (`CI`+`Trivy` for generic; none for `--ci none`).
 
 ### Key behavior
 
 - **Branch protection**: tries modern ruleset first (names `protect-main`, `protect-version-tags`), falls back to classic protection only when the 403 says branch protection is unavailable on this plan (`IsBranchProtectionUnavailable`). Token-scope / SSO / IP-allow-list 403s surface as errors. Existing managed rulesets are fetched and compared, not trusted by name — a disabled or emptied `protect-main` is reconciled in place. **Free-tier private limitation:** GitHub 403s *both* the rulesets and classic branch-protection APIs with the same "Upgrade to GitHub Pro" body, so on a free-tier private repo both pre-flight probes are treated as absent and the live apply's classic fallback also 403s — fundamentum then fails the branch-protection item with a message pointing to Settings → Branches (all other items still apply). Use the `--no-overwrite` flag if you only want to add missing files.
 - **File aliasing** (`cmd/apply/apply.go` `aliases` map in `buildItems`): checks path variants before deciding create/skip/update — e.g., `CODEOWNERS` at root counts as existing even though target is `.github/CODEOWNERS`
-- **Workflow 404 handling** (`internal/github/files.go` `putFileContents`, sentinel `ErrWorkflowLocked` in `pr.go`): GitHub Actions locks workflow files — HTTP PUT returns 404 when updating an existing workflow via the Contents API. Returns `action="skipped"` so apply continues.
+- **Workflow 404 handling** (`internal/github/client.go` `putFileContents`, sentinel `ErrWorkflowLocked` + `IsWorkflowLocked` in `pr.go`): GitHub Actions locks workflow files — HTTP PUT returns 404 when updating an existing workflow via the Contents API. Returns `action="skipped"` so apply continues.
 - **409 auto-fallback to PR mode** (`cmd/apply/apply.go` `applyItems`): a direct file commit rejected with 409 (branch protection requires PR) switches the remaining file changes into a single batch PR — no re-run needed.
 - **Retry/backoff** (`internal/github/client.go`): transient failures (429, 5xx, 403 rate-limit exhaustion) retry up to `maxAttempts` (3) with exponential backoff + full jitter (capped 30s), honoring `Retry-After`. POST is never retried — a lost 5xx after the write landed can duplicate a repo, ruleset, branch, or PR. Jitter uses `crypto/rand` (gosec), not `math/rand`.
 - **Solo/team prompt**: `apply` asks solo/team only when the `protect-main` ruleset doesn't already exist. Only exact `team`/`t` selects team — anything else (typos included) takes the advertised solo default, because team mode enables CODEOWNERS review a solo maintainer can't satisfy. Solo disables the CODEOWNERS-review and stale-review-dismissal requirements (`github.BranchProtectionOptions.Solo`). `ConfirmDefaults` accepts `y` **and** `yes`.
@@ -194,7 +193,7 @@ Shipped CI follows the **fabrica standard** when the resolved pack is `go` (`--c
 - Two import groups: stdlib first, then third-party + internal (mirrors ludus)
 - Error wrapping: `fmt.Errorf("ctx: %w", err)`
 - No `exec.Command` anywhere
-- Table-driven tests; stdlib-only at runtime — `gopkg.in/yaml.v3` is the single sanctioned dependency and it is test-only (embedded-template validation)
+- Table-driven tests; direct deps are limited to `cobra` (CLI wiring) and `gopkg.in/yaml.v3`, which is test-only (embedded-template validation)
 - golangci-lint v2 with staticcheck `-ST1005` excluded; gosec excludes G104, G204, G304, G704
 
 ## Codacy
