@@ -400,9 +400,10 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 				}
 				if err := c.ApplyClassicBranchProtection(owner, repo, branch, checks, *opts); err != nil {
 					// Free-tier private: the classic API is plan-gated too. Both
-					// protection paths are unavailable — point at the manual page.
+					// protection paths are unavailable — point at the manual page
+					// while preserving the 403 cause for re-inspection (--verbose).
 					if github.IsBranchProtectionUnavailable(err) {
-						return fmt.Errorf("branch protection requires GitHub Pro for this private repo: rulesets and classic protection are both unavailable via API — set it manually in repo Settings → Branches")
+						return fmt.Errorf("branch protection requires GitHub Pro for this private repo: rulesets and classic protection are both unavailable via API — set it manually in repo Settings → Branches: %w", err)
 					}
 					return err
 				}

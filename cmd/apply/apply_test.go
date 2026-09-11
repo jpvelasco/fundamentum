@@ -711,9 +711,11 @@ func TestBranchProtectionItem_FallbackOnlyOn403(t *testing.T) {
 					_ = json.NewEncoder(w).Encode(out)
 				case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/protection"):
 					classicCalled = true
-					w.WriteHeader(tt.classicStatus)
 					if tt.classicBody != "" {
 						w.Header().Set("Content-Type", "application/json")
+					}
+					w.WriteHeader(tt.classicStatus)
+					if tt.classicBody != "" {
 						var out any
 						_ = json.Unmarshal([]byte(tt.classicBody), &out)
 						_ = json.NewEncoder(w).Encode(out)
