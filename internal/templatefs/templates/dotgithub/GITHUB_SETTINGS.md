@@ -107,7 +107,11 @@ EOF
 
 ---
 
-## Codacy setup (one-time, outside the repo)
+## Codacy setup (one-time, outside the repo — public repos only)
+
+> **Public repos only:** Codacy's free Open Source plan covers public repos;
+> private repos have no Codacy integration (its files aren't shipped there).
+> Skip this section for private repos.
 
 Codacy cannot be fully configured from repo files — these steps are done once
 in the Codacy dashboard, then everything runs automatically (PR checks and the

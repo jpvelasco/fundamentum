@@ -115,7 +115,7 @@ func validGitBranch(name string) bool {
 }
 
 // Render renders all embedded templates and returns RenderedFiles with target
-// paths (dotgithub/ → .github/, dotcodacy.yml → .codacy.yml).
+// paths (dotgithub/ → .github/, public_codacy.yml → .codacy.yml).
 // Templates with a "public_" filename prefix are only included for public repos.
 // Templates with a "private_" filename prefix are only included for private repos.
 func Render(data RepoData) ([]RenderedFile, error) {
@@ -180,10 +180,16 @@ func shouldInclude(path, visibility string) bool {
 // "public_", "private_", and "generic_" prefixes are stripped from the filename.
 func resolveTarget(path string) string {
 	target := strings.Replace(path, "dotgithub/", ".github/", 1)
-	target = strings.Replace(target, "dotcodacy.yml", ".codacy.yml", 1)
 
 	dir, base := filepath.Split(target)
-	return dir + stripVisibilityPrefix(base)
+	switch base {
+	case "public_codacy.yml":
+		// Unlike other public_ root files (public_codecov.yml → codecov.yml),
+		// the Codacy config lives at dot-prefixed .codacy.yml.
+		return dir + ".codacy.yml"
+	default:
+		return dir + stripVisibilityPrefix(base)
+	}
 }
 
 func stripVisibilityPrefix(base string) string {
