@@ -183,6 +183,40 @@ func TestAudit_PreflightErrors(t *testing.T) {
 	}
 }
 
+// TestAudit_RulesetsUnavailableOnFreeTier verifies a 403 "upgrade to GitHub
+// Pro" on the ruleset pre-flight does not abort the audit: the report proceeds
+// and flags the missing rulesets instead.
+func TestAudit_RulesetsUnavailableOnFreeTier(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/owner/repo/rulesets" {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature.","status":"403"}`))
+			return
+		}
+		writePassingAudit(w, r, true, true)
+	}))
+	defer srv.Close()
+
+	var out strings.Builder
+	err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &out)
+	// The report itself must be produced (no pre-flight abort). The audit
+	// then fails on purpose: a free-tier private repo has no protect-main
+	// ruleset, which is a required check.
+	if err == nil || !strings.Contains(err.Error(), "audit failed") {
+		t.Fatalf("error = %v, want audit failed (missing protect-main)", err)
+	}
+	if strings.Contains(err.Error(), "check branch ruleset") {
+		t.Fatalf("pre-flight must not abort on the free-tier 403: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "protect-main") || !strings.Contains(got, "protect-version-tags") {
+		t.Errorf("expected report with both ruleset rows, got:\n%s", got)
+	}
+	if !strings.Contains(got, "missing") {
+		t.Errorf("unavailable rulesets must report as missing, got:\n%s", got)
+	}
+}
+
 func TestAudit_RenderError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/repos/owner/repo" {

@@ -165,10 +165,13 @@ func IsForbidden403(err error) bool {
 	return strings.Contains(err.Error(), "403")
 }
 
-// IsRulesetUnavailable reports a 403 that means repository rulesets are not
-// offered on this plan (free-tier private). Other 403s — token scope, SSO,
-// IP allow lists — must surface instead of falling back to classic protection.
-func IsRulesetUnavailable(err error) bool {
+// IsBranchProtectionUnavailable reports a 403 that means branch protection is
+// not offered on this plan (free-tier private). GitHub returns the same
+// "Upgrade to GitHub Pro / make this repository public" 403 for both the
+// rulesets API and the classic branch-protection API, so the same predicate
+// covers pre-flight probes of either. Other 403s — token scope, SSO, IP
+// allow lists — must surface as errors instead.
+func IsBranchProtectionUnavailable(err error) bool {
 	if !IsForbidden403(err) {
 		return false
 	}
