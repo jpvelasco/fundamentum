@@ -269,7 +269,8 @@ func TestRenderSanitizesInput(t *testing.T) {
 }
 
 func TestRender(t *testing.T) {
-	data := RepoData{Owner: "jpvelasco", RepoName: "fundamentum", DefaultBranch: "main", Visibility: "private"}
+	// public visibility so the public-only Codacy config (.codacy.yml) renders.
+	data := RepoData{Owner: "jpvelasco", RepoName: "fundamentum", DefaultBranch: "main", Visibility: "public"}
 	files, err := Render(data)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -292,8 +293,8 @@ func TestRender(t *testing.T) {
 		if strings.HasPrefix(f.Path, "dotgithub/") {
 			t.Errorf("path %q still has dotgithub prefix, expected .github/", f.Path)
 		}
-		if strings.HasPrefix(f.Path, "dotcodacy") {
-			t.Errorf("path %q still has dotcodacy prefix, expected .codacy.yml", f.Path)
+		if f.Path == "codacy.yml" {
+			t.Errorf("path %q is missing its dot prefix, expected .codacy.yml", f.Path)
 		}
 	}
 	if !found {
@@ -357,32 +358,46 @@ func TestRender_CodeOwners(t *testing.T) {
 
 func TestRenderVisibilityFiltering(t *testing.T) {
 	tests := []struct {
-		name             string
-		visibility       string
-		wantPublicFiles  []string
-		wantPrivateFiles []string
+		name       string
+		visibility string
+		wantFiles  []string
+		// excludeFiles must NOT render for this visibility. ci.yml and socket.yml
+		// render for BOTH visibilities, so they appear in neither list.
+		excludeFiles []string
 	}{
 		{
 			name:       "public repo",
 			visibility: "public",
-			wantPublicFiles: []string{
+			wantFiles: []string{
 				".github/workflows/ci.yml",
 				"codecov.yml",
 				".github/workflows/octopus.yml",
 				".github/workflows/codeql.yml",
 				".github/codeql/codeql-config.yml",
 				"socket.yml",
+				".codacy.yml",
 				".github/workflows/codacy-coverage.yml",
+				".github/instructions/codacy.instructions.md",
 			},
+			excludeFiles: []string{".github/workflows/octocov.yml"},
 		},
 		{
 			name:       "private repo",
 			visibility: "private",
-			wantPrivateFiles: []string{
+			wantFiles: []string{
 				".github/workflows/ci.yml",
 				".github/workflows/octocov.yml",
 				"socket.yml",
+			},
+			// Codacy's free (Open Source) plan is public-only; its three files
+			// must not ship to private repos.
+			excludeFiles: []string{
+				"codecov.yml",
+				".github/workflows/octopus.yml",
+				".github/workflows/codeql.yml",
+				".codacy.yml",
 				".github/workflows/codacy-coverage.yml",
+				".github/instructions/codacy.instructions.md",
 			},
 		},
 	}
@@ -398,32 +413,12 @@ func TestRenderVisibilityFiltering(t *testing.T) {
 				pathSet[f.Path] = true
 			}
 
-			for _, want := range tt.wantPublicFiles {
+			for _, want := range tt.wantFiles {
 				if !pathSet[want] {
 					t.Errorf("missing %q in rendered files", want)
 				}
 			}
-			for _, want := range tt.wantPrivateFiles {
-				if !pathSet[want] {
-					t.Errorf("missing %q in rendered files", want)
-				}
-			}
-
-			// Verify opposite visibility files are excluded.
-			// Note: ci.yml and socket.yml render for BOTH visibilities (from
-			// public_ci.yml / private_ci.yml and the shared socket.yml), so they
-			// must not appear in either exclude list.
-			var excludeFiles []string
-			if tt.visibility == "public" {
-				excludeFiles = []string{".github/workflows/octocov.yml"}
-			} else {
-				excludeFiles = []string{
-					"codecov.yml",
-					".github/workflows/octopus.yml",
-					".github/workflows/codeql.yml",
-				}
-			}
-			for _, exclude := range excludeFiles {
+			for _, exclude := range tt.excludeFiles {
 				if pathSet[exclude] {
 					t.Errorf("%s: %q should not be rendered for %s repos", tt.visibility, exclude, tt.visibility)
 				}

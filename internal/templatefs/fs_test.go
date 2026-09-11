@@ -58,21 +58,21 @@ func TestFS_ReadDir(t *testing.T) {
 	if len(entries) == 0 {
 		t.Fatal("expected entries in root")
 	}
-	// The root should contain "dotgithub" and "dotcodacy.yml"
+	// The root should contain "dotgithub" and "public_codacy.yml"
 	foundDotGitHub := false
-	foundDotCodacy := false
+	foundCodacy := false
 	for _, e := range entries {
 		if e.Name() == "dotgithub" {
 			foundDotGitHub = true
 		}
-		if e.Name() == "dotcodacy.yml" {
-			foundDotCodacy = true
+		if e.Name() == "public_codacy.yml" {
+			foundCodacy = true
 		}
 	}
 	if !foundDotGitHub {
 		t.Error("expected dotgithub directory")
 	}
-	if !foundDotCodacy {
-		t.Error("expected dotcodacy.yml file")
+	if !foundCodacy {
+		t.Error("expected public_codacy.yml file")
 	}
 }

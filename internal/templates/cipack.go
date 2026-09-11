@@ -116,7 +116,7 @@ func templatePack(path string) string {
 	}
 	switch base {
 	case "public_ci.yml", "private_ci.yml", "public_codecov.yml", "private_octocov.yml",
-		"public_codeql.yml", "public_codeql-config.yml", "codacy-coverage.yml":
+		"public_codeql.yml", "public_codeql-config.yml", "public_codacy-coverage.yml":
 		return CIPackGo
 	default:
 		return ""
