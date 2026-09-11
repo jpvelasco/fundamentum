@@ -714,7 +714,9 @@ func TestBranchProtectionItem_FallbackOnlyOn403(t *testing.T) {
 					w.WriteHeader(tt.classicStatus)
 					if tt.classicBody != "" {
 						w.Header().Set("Content-Type", "application/json")
-						_, _ = w.Write([]byte(tt.classicBody))
+						var out any
+						_ = json.Unmarshal([]byte(tt.classicBody), &out)
+						_ = json.NewEncoder(w).Encode(out)
 					}
 				default:
 					w.WriteHeader(http.StatusNoContent)
