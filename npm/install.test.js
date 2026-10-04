@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 "use strict";
 
-// Unit tests for the post-extraction path validation (zip-slip hardening, #236).
+// Unit tests for the pre-extraction member validation (zip-slip hardening, #236).
 // Runs with the built-in test runner: `node --test install.test.js`.
 
 const test = require("node:test");
@@ -10,16 +10,13 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const { validateExtraction, isPathEscape } = require("./install.js");
-
-function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "fundamentum-zip-slip-"));
-}
+const { isPathEscape, validateMembers } = require("./install.js");
 
 test("isPathEscape flags traversal primitives and absolute names", () => {
   assert.equal(isPathEscape(".."), true);
   assert.equal(isPathEscape("../evil"), true);
   assert.equal(isPathEscape("a/.."), true);
+  assert.equal(isPathEscape("a/../../x"), true);
   assert.equal(isPathEscape("C:\\..\\x"), true);
   assert.equal(isPathEscape("/abs"), true);
 });
@@ -28,31 +25,51 @@ test("isPathEscape accepts ordinary member names", () => {
   assert.equal(isPathEscape("fundamentum"), false);
   assert.equal(isPathEscape("a..b"), false);
   assert.equal(isPathEscape(".hidden"), false);
-  assert.equal(isPathEscape("sub/dir"), false);
+  assert.equal(isPathEscape("sub/dir/file"), false);
 });
 
-test("validateExtraction accepts a flat layout that stays inside the temp dir", () => {
-  const tmpDir = makeTempDir();
-  try {
-    fs.mkdirSync(path.join(tmpDir, "sub"));
-    fs.writeFileSync(path.join(tmpDir, "fundamentum"), "x");
-    fs.writeFileSync(path.join(tmpDir, "sub", "README"), "y");
-    assert.doesNotThrow(() => validateExtraction(tmpDir));
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+test("validateMembers rejects a member that traverses outside the dir", () => {
+  assert.throws(
+    () => validateMembers(["fundamentum", "../../.bashrc"]),
+    /Archive path escape/
+  );
+  assert.throws(
+    () => validateMembers(["C:\\Users\\x\\evil"]),
+    /Archive path escape/
+  );
 });
 
-test("validateExtraction accepts the temp dir passed as a relative path", () => {
-  const tmpDir = makeTempDir();
-  const cwd = process.cwd();
+test("validateMembers accepts a flat GoReleaser-style member list", () => {
+  assert.doesNotThrow(() =>
+    validateMembers([
+      "fundamentum_1.2.3_linux_amd64/",
+      "fundamentum_1.2.3_linux_amd64/fundamentum",
+      "fundamentum_1.2.3_linux_amd64/README.md",
+    ])
+  );
+});
+
+test("listMembers + validateMembers reject a real tar that escapes (end to end)", () => {
+  const { execFileSync } = require("node:child_process");
+  const { listMembers } = require("./install.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fundamentum-zip-slip-"));
+  const archivePath = path.join(tmpDir, "evil.tar.gz");
+  const outside = path.join(path.dirname(tmpDir), "fundamentum-evil-probe");
   try {
-    fs.mkdirSync(path.join(tmpDir, "a"), { recursive: true });
-    process.chdir(path.dirname(tmpDir));
-    const rel = path.relative(path.dirname(tmpDir), tmpDir);
-    assert.doesNotThrow(() => validateExtraction(rel));
+    // Build a tar.gz whose single member is ../fundamentum-evil-probe, a
+    // traversal path relative to the -C dir.
+    fs.writeFileSync(outside, "x");
+    execFileSync(
+      "tar",
+      ["-czf", archivePath, "-C", tmpDir, "../fundamentum-evil-probe"],
+      { stdio: "pipe" }
+    );
+    const members = listMembers(archivePath, false);
+    assert.ok(members.includes("../fundamentum-evil-probe"));
+    assert.throws(() => validateMembers(members), /Archive path escape/);
   } finally {
-    process.chdir(cwd);
+    fs.rmSync(archivePath, { force: true });
+    fs.rmSync(outside, { force: true });
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

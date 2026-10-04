@@ -132,7 +132,7 @@ function psEscape(s) {
   return s.replace(/'/g, "''");
 }
 
-function spawnOrFail(cmd, args, label) {
+function spawnStdout(cmd, args, label) {
   const result = spawnSync(cmd, args, { stdio: "pipe" });
   if (result.error) {
     throw new Error(`${label}: ${result.error.message}`);
@@ -143,6 +143,11 @@ function spawnOrFail(cmd, args, label) {
       `${label} exited with code ${result.status}${stderr ? ": " + stderr : ""}`
     );
   }
+  return result.stdout.toString("utf8");
+}
+
+function spawnOrFail(cmd, args, label) {
+  spawnStdout(cmd, args, label);
 }
 
 function extract(buffer, archiveName, binDir) {
@@ -153,7 +158,13 @@ function extract(buffer, archiveName, binDir) {
   fs.writeFileSync(archivePath, buffer);
 
   try {
-    if (archiveName.endsWith(".zip")) {
+    // Validate the member list before extraction: a crafted archive can name
+    // members like ../../.bashrc, and the extractor would happily write them
+    // outside tmpDir. Reject such members up front so nothing leaves the dir.
+    const isZip = archiveName.endsWith(".zip");
+    validateMembers(listMembers(archivePath, isZip));
+
+    if (isZip) {
       if (process.platform === "win32") {
         spawnOrFail(
           "powershell",
@@ -172,8 +183,6 @@ function extract(buffer, archiveName, binDir) {
     } else {
       spawnOrFail("tar", ["-xzf", archivePath, "-C", tmpDir], "tar");
     }
-
-    validateExtraction(tmpDir);
 
     const extractedBinary = path.join(tmpDir, binaryName);
 
@@ -197,23 +206,19 @@ function isPathEscape(name) {
   return path.isAbsolute(name) || name.split(/[\\/]/).includes("..");
 }
 
-function validateExtraction(tmpDir) {
-  const root = path.resolve(tmpDir);
-  // Walk the extracted tree and reject any member whose path leaves the
-  // install dir. On Windows path.resolve does not follow junction/symlink
-  // targets, so a lexical ".." check is what reliably catches traversal.
-  const stack = [root];
-  while (stack.length > 0) {
-    const dir = stack.pop();
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (isPathEscape(entry.name)) {
-        throw new Error(
-          `Archive path escape detected: ${entry.name} resolves outside the install directory`
-        );
-      }
-      if (entry.isDirectory()) {
-        stack.push(path.join(dir, entry.name));
-      }
+function listMembers(archivePath, isZip) {
+  const listing = isZip
+    ? spawnStdout("unzip", ["-Z1", archivePath], "unzip -Z1")
+    : spawnStdout("tar", ["-tzf", archivePath], "tar -tzf");
+  return listing.split(/\r?\n/).filter(Boolean);
+}
+
+function validateMembers(members) {
+  for (const member of members) {
+    if (isPathEscape(member)) {
+      throw new Error(
+        `Archive path escape detected: ${member} resolves outside the install directory`
+      );
     }
   }
 }
@@ -258,4 +263,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { validateExtraction, isPathEscape };
+module.exports = { isPathEscape, listMembers, validateMembers };
