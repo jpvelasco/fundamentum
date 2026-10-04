@@ -173,6 +173,8 @@ function extract(buffer, archiveName, binDir) {
       spawnOrFail("tar", ["-xzf", archivePath, "-C", tmpDir], "tar");
     }
 
+    validateExtraction(tmpDir);
+
     const extractedBinary = path.join(tmpDir, binaryName);
 
     if (!fs.existsSync(extractedBinary)) {
@@ -188,6 +190,31 @@ function extract(buffer, archiveName, binDir) {
     }
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+function isPathEscape(name) {
+  return path.isAbsolute(name) || name.split(/[\\/]/).includes("..");
+}
+
+function validateExtraction(tmpDir) {
+  const root = path.resolve(tmpDir);
+  // Walk the extracted tree and reject any member whose path leaves the
+  // install dir. On Windows path.resolve does not follow junction/symlink
+  // targets, so a lexical ".." check is what reliably catches traversal.
+  const stack = [root];
+  while (stack.length > 0) {
+    const dir = stack.pop();
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (isPathEscape(entry.name)) {
+        throw new Error(
+          `Archive path escape detected: ${entry.name} resolves outside the install directory`
+        );
+      }
+      if (entry.isDirectory()) {
+        stack.push(path.join(dir, entry.name));
+      }
+    }
   }
 }
 
@@ -224,7 +251,11 @@ async function main() {
   console.log("fundamentum: installed successfully");
 }
 
-main().catch((err) => {
-  console.error(`fundamentum: installation failed: ${err.message}`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(`fundamentum: installation failed: ${err.message}`);
+    process.exit(1);
+  });
+}
+
+module.exports = { validateExtraction, isPathEscape };
