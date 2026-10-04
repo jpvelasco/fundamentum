@@ -11,4 +11,5 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
+      # On pull_request_target this action uploads the PR diff + GITHUB_TOKEN (scoped to contents:read, pull-requests:write) to https://octopus-review.ai for review. Delete this file to opt out.
       - uses: octopusreview/action@c7156c0dc465c20e8b06da84b92b64f9ae8c7c36
