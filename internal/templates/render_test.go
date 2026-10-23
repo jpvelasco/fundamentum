@@ -511,8 +511,20 @@ func TestRenderCIPackFiltering(t *testing.T) {
 					}
 				}
 			}
-			if tt.pack == CIPackPython && !strings.Contains(pathSet[".github/workflows/ci.yml"], "setup-python") {
-				t.Error("python pack must ship setup-python")
+			if tt.pack == CIPackPython {
+				ci := pathSet[".github/workflows/ci.yml"]
+				if !strings.Contains(ci, "setup-python") {
+					t.Error("python pack must ship setup-python")
+				}
+				if !strings.Contains(ci, "pip install -r requirements.txt") {
+					t.Error("python pack must install from requirements.txt when that manifest exists")
+				}
+				if !strings.Contains(ci, "pip install .") {
+					t.Error("python pack must install the project when pyproject.toml exists")
+				}
+				if !strings.Contains(ci, "ruff check .") || !strings.Contains(ci, "pytest -q") {
+					t.Error("python pack must still run ruff and pytest after installing project deps")
+				}
 			}
 			if tt.pack == CIPackRust && !strings.Contains(pathSet[".github/workflows/ci.yml"], "rust-toolchain") {
 				t.Error("rust pack must ship rust-toolchain")
