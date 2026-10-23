@@ -534,26 +534,7 @@ func TestCreateBranchRuleset_DedupStatusChecks(t *testing.T) {
 }
 
 func countRequiredStatusChecks(body map[string]any) int {
-	rules, ok := body["rules"].([]any)
-	if !ok {
-		return 0
-	}
-	for _, rule := range rules {
-		rm, ok := rule.(map[string]any)
-		if !ok || rm["type"] != "required_status_checks" {
-			continue
-		}
-		params, ok := rm["parameters"].(map[string]any)
-		if !ok {
-			continue
-		}
-		checks, ok := params["required_status_checks"].([]any)
-		if !ok {
-			return 0
-		}
-		return len(checks)
-	}
-	return 0
+	return len(statusCheckContexts(requiredStatusChecksRule(body)))
 }
 
 func TestDefaultStatusChecks_NoCodacy(t *testing.T) {

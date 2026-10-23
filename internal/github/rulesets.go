@@ -401,7 +401,8 @@ func DefaultChecksForPack(pack string) []string {
 	case "node", "python", "rust":
 		return append([]string{}, LanguageStatusChecks...)
 	case "none":
-		return nil
+		// Empty, not nil: intendedChecks treats nil as the Go defaults.
+		return []string{}
 	default:
 		return append([]string{}, DefaultStatusChecks...)
 	}
