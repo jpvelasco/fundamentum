@@ -1,6 +1,7 @@
 package root
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jpvelasco/fundamentum/cmd/globals"
@@ -20,7 +21,9 @@ func resetRootGlobals(t *testing.T) {
 		globals.Preset = ""
 		globals.AdvancedSecurity = false
 		globals.FromFile = ""
+		globals.ResetExplicit()
 	})
+	globals.ResetExplicit()
 }
 
 func TestRequireChecksFlag(t *testing.T) {
@@ -78,6 +81,63 @@ func TestCIPackFlag(t *testing.T) {
 	}
 	if globals.CIPack != "generic" {
 		t.Errorf("CIPack = %q, want generic", globals.CIPack)
+	}
+}
+
+func TestStrictFalseRecordsExplicit(t *testing.T) {
+	resetRootGlobals(t)
+
+	// Cobra returns flag.ErrHelp before PersistentPreRun, so --help never
+	// notes the flag. export RunE returns before any network call.
+	cmd := newRootCmd()
+	cmd.SetOut(&strings.Builder{})
+	cmd.SetArgs([]string{"--strict=false", "export"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if globals.Strict {
+		t.Error("expected Strict=false after --strict=false")
+	}
+	if !globals.Explicit("strict") {
+		t.Error("expected --strict=false to be recorded as explicit")
+	}
+	if globals.Explicit("advanced-security") || globals.Explicit("no-overwrite") {
+		t.Error("flags the operator did not pass must not be explicit")
+	}
+}
+
+func TestNoteExplicitBaselineFlags(t *testing.T) {
+	resetRootGlobals(t)
+
+	cmd := newRootCmd()
+	export := cmd.Commands()[0]
+	for _, child := range cmd.Commands() {
+		if child.Name() == "export" {
+			export = child
+			break
+		}
+	}
+	// ParseFlags merges persistent flags; calling PreRun before that sees
+	// an empty local set and Changed is always false.
+	if err := export.ParseFlags([]string{"--strict=false", "--advanced-security=false", "--no-overwrite=false"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := noteExplicitBaselineFlags(export, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"strict", "advanced-security", "no-overwrite"} {
+		if !globals.Explicit(name) {
+			t.Errorf("%s was passed and must be explicit", name)
+		}
+	}
+}
+
+func TestChildCommandsInheritBaselinePreRun(t *testing.T) {
+	cmd := newRootCmd()
+	for _, child := range cmd.Commands() {
+		if child.PersistentPreRunE != nil || child.PersistentPreRun != nil || child.PreRunE != nil || child.PreRun != nil {
+			t.Errorf("%s sets its own pre-run; it must inherit the root baseline note", child.Name())
+		}
 	}
 }
 
