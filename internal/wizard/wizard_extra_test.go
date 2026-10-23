@@ -209,6 +209,13 @@ func TestPlanSummary(t *testing.T) {
 	if got := PlanSummary(nil); got != "nothing to do" {
 		t.Errorf("PlanSummary() = %q", got)
 	}
+	unavailable := []Item{
+		{Name: "a.md", Action: ActionCreate},
+		{Name: "Branch protection (protect-main)", Action: ActionSkip, Detail: "unavailable on this plan — set it in Settings → Branches"},
+	}
+	if got := PlanSummary(unavailable); got != "1 to create, 1 unavailable" {
+		t.Errorf("PlanSummary() = %q, want unavailable counted apart from already exist", got)
+	}
 }
 
 func TestLiveLabel(t *testing.T) {
