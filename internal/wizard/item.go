@@ -35,11 +35,18 @@ type Item struct {
 	Apply    func() error
 	Optional bool   // failures show as ⚠ (plan limit) rather than ✗ (error)
 	Content  []byte // rendered file content for file items (used by PR mode)
+	// Detail overrides the dry-run skip label when Action is ActionSkip.
+	// A non-empty Detail means the skip is not "already exists" — the plan
+	// summary counts it separately so a plan-unavailable step is not a lie.
+	Detail string
 }
 
 // DryRunLabel returns the human-readable action for --dry-run output.
 func (i Item) DryRunLabel() string {
 	if i.Action == ActionSkip {
+		if i.Detail != "" {
+			return i.Detail
+		}
 		return "already exists — skip"
 	}
 	return fmt.Sprintf("would %s", i.Action)

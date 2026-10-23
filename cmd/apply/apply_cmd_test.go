@@ -40,7 +40,7 @@ func newBuildItemsTestFull(t *testing.T, handler http.HandlerFunc, visibility st
 		t.Fatalf("Render() error: %v", err)
 	}
 
-	items, err := buildItems(c, nil, "owner", "repo", "main", visibility, rendered, existsPlan(rulesetExists), existsPlan(tagExists), classicExists, &github.BranchProtectionOptions{}, false, "")
+	items, err := buildItems(c, nil, "owner", "repo", "main", visibility, rendered, existsPlan(rulesetExists), existsPlan(tagExists), classicExists, false, &github.BranchProtectionOptions{}, false, "")
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -97,32 +97,32 @@ func TestRun_NoArg(t *testing.T) {
 }
 
 func TestBranchProtectionItem_RulesetExists(t *testing.T) {
-	item := branchProtectionItem(nil, "owner", "repo", "main", "public", github.RulesetPlan{Exists: true}, false, &github.BranchProtectionOptions{}, "")
+	item := branchProtectionItem(nil, "owner", "repo", "main", "public", github.RulesetPlan{Exists: true}, false, false, &github.BranchProtectionOptions{}, "")
 	if item.Action != wizard.ActionSkip {
 		t.Errorf("expected ActionSkip when matching ruleset exists, got %v", item.Action)
 	}
 }
 
 func TestTagRulesetItem_CreateAndSkip(t *testing.T) {
-	create := tagRulesetItem(nil, "owner", "repo", github.RulesetPlan{})
+	create := tagRulesetItem(nil, "owner", "repo", github.RulesetPlan{}, false)
 	if create.Action != wizard.ActionCreate {
 		t.Errorf("missing tag ruleset Action = %v, want create", create.Action)
 	}
-	skip := tagRulesetItem(nil, "owner", "repo", existsPlan(true))
+	skip := tagRulesetItem(nil, "owner", "repo", existsPlan(true), false)
 	if skip.Action != wizard.ActionSkip {
 		t.Errorf("matching tag ruleset Action = %v, want skip", skip.Action)
 	}
 }
 
 func TestTagRulesetItem_Drift(t *testing.T) {
-	item := tagRulesetItem(nil, "owner", "repo", github.RulesetPlan{Exists: true, Drift: []string{"enforcement"}})
+	item := tagRulesetItem(nil, "owner", "repo", github.RulesetPlan{Exists: true, Drift: []string{"enforcement"}}, false)
 	if item.Action != wizard.ActionUpdate {
 		t.Errorf("expected ActionUpdate on tag ruleset drift, got %v", item.Action)
 	}
 }
 
 func TestBranchProtectionItem_RulesetDrift(t *testing.T) {
-	item := branchProtectionItem(nil, "owner", "repo", "main", "public", github.RulesetPlan{Exists: true, Drift: []string{"enforcement"}}, false, &github.BranchProtectionOptions{}, "")
+	item := branchProtectionItem(nil, "owner", "repo", "main", "public", github.RulesetPlan{Exists: true, Drift: []string{"enforcement"}}, false, false, &github.BranchProtectionOptions{}, "")
 	if item.Action != wizard.ActionUpdate {
 		t.Errorf("expected ActionUpdate on ruleset drift, got %v", item.Action)
 	}
@@ -175,7 +175,7 @@ func TestBranchProtectionItem_Creation(t *testing.T) {
 				w.WriteHeader(http.StatusCreated)
 				_, _ = w.Write([]byte(`{"id":1}`))
 			}), func(c *github.Client) {
-				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, existsPlan(tt.rulesetExists), tt.classicExists, &github.BranchProtectionOptions{}, "")
+				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, existsPlan(tt.rulesetExists), tt.classicExists, false, &github.BranchProtectionOptions{}, "")
 				if item.Action != tt.wantAction {
 					t.Errorf("expected action %v, got %v", tt.wantAction, item.Action)
 				}
@@ -229,7 +229,7 @@ func TestBuildItems_Private(t *testing.T) {
 
 func TestBuildItems_PrivatePaidSecurity(t *testing.T) {
 	c := github.NewClient("", false)
-	items, err := buildItems(c, nil, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, true, "")
+	items, err := buildItems(c, nil, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, true, "")
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestBuildItems_SettingsAndSecurityActions(t *testing.T) {
 					w.WriteHeader(http.StatusNotFound)
 				}
 			}), func(c *github.Client) {
-				items, err := buildItems(c, &tt.info, "owner", "repo", "main", "public", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, false, "")
+				items, err := buildItems(c, &tt.info, "owner", "repo", "main", "public", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "")
 				if err != nil {
 					t.Fatalf("buildItems() error: %v", err)
 				}
@@ -421,7 +421,7 @@ func TestSecurityItem_StatusErrorPlansUpdate(t *testing.T) {
 
 func TestBuildItems_TagRulesetExists(t *testing.T) {
 	c := github.NewClient("", false)
-	items, err := buildItems(c, nil, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, existsPlan(true), false, &github.BranchProtectionOptions{}, false, "")
+	items, err := buildItems(c, nil, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, existsPlan(true), false, false, &github.BranchProtectionOptions{}, false, "")
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -1108,9 +1108,8 @@ func rulesetsUnavailableHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // TestRunWithClient_RulesetsUnavailableOnFreeTier verifies a 403 "upgrade to
-// GitHub Pro" on the ruleset pre-flight plans the rulesets as absent instead
-// of aborting, so the rest of the plan (files, settings, branch-protection
-// create item) still builds on a private free-tier repo.
+// GitHub Pro" on the ruleset pre-flight still builds the rest of the plan,
+// but does not claim dry-run would create protection that cannot land.
 func TestRunWithClient_RulesetsUnavailableOnFreeTier(t *testing.T) {
 	t.Cleanup(func() { globals.DryRun = false })
 	globals.DryRun = true
@@ -1127,12 +1126,36 @@ func TestRunWithClient_RulesetsUnavailableOnFreeTier(t *testing.T) {
 	if !strings.Contains(got, "Dry run complete — ") {
 		t.Errorf("expected dry-run summary, got:\n%s", got)
 	}
-	if !strings.Contains(got, "Branch protection (protect-main)") {
-		t.Errorf("expected branch protection create item, got:\n%s", got)
+	for _, name := range []string{
+		"Branch protection (protect-main)",
+		"Tag ruleset (protect-version-tags)",
+	} {
+		row := summaryRow(t, got, name)
+		if strings.Contains(row, "would create") {
+			t.Errorf("%s row must not say would create, got %q", name, row)
+		}
+		if strings.Contains(row, "already exists") {
+			t.Errorf("%s row must not say already exists, got %q", name, row)
+		}
+		if !strings.Contains(row, "unavailable") || !strings.Contains(row, "Settings → Branches") {
+			t.Errorf("%s row = %q, want unavailable and Settings → Branches", name, row)
+		}
 	}
-	if !strings.Contains(got, "Tag ruleset (protect-version-tags)") {
-		t.Errorf("expected tag ruleset create item, got:\n%s", got)
+	if strings.Contains(got, "already exist") {
+		t.Errorf("summary must not count unavailable protection as already exist:\n%s", got)
 	}
+}
+
+// summaryRow returns the plan-table line whose setting name is name.
+func summaryRow(t *testing.T, out, name string) string {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, name) {
+			return line
+		}
+	}
+	t.Fatalf("missing plan row %q in:\n%s", name, out)
+	return ""
 }
 
 // TestRunWithClient_RulesetsGeneric403StillFails verifies a non-upgrade 403
