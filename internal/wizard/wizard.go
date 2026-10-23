@@ -81,13 +81,18 @@ func ShouldSkip(item Item, w io.Writer) bool {
 }
 
 // PlanSummary returns a human-readable counts summary of the item plan,
-// e.g. "3 to create, 1 to update, 2 already exist". Returns "nothing to do"
-// when the plan is entirely skips.
+// e.g. "3 to create, 1 to update, 2 already exist". A skip with Detail is
+// not "already exist" — it is counted as unavailable. Returns "nothing to do"
+// when the plan is entirely ordinary skips.
 func PlanSummary(items []Item) string {
-	var toCreate, toUpdate, toUpgrade, alreadyExist int
+	var toCreate, toUpdate, toUpgrade, alreadyExist, unavailable int
 	for _, it := range items {
 		switch it.Action {
 		case ActionSkip:
+			if it.Detail != "" {
+				unavailable++
+				continue
+			}
 			alreadyExist++
 		case ActionUpdate:
 			toUpdate++
@@ -109,6 +114,9 @@ func PlanSummary(items []Item) string {
 	}
 	if alreadyExist > 0 {
 		parts = append(parts, fmt.Sprintf("%d already exist", alreadyExist))
+	}
+	if unavailable > 0 {
+		parts = append(parts, fmt.Sprintf("%d unavailable", unavailable))
 	}
 	if len(parts) == 0 {
 		return "nothing to do"

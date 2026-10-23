@@ -100,18 +100,23 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	// On a free-tier private repo GitHub returns "Upgrade to GitHub Pro" 403s
 	// for both the rulesets and classic branch-protection APIs, so plan all
 	// three probes as absent instead of aborting; other 403s (token scope,
-	// SSO, IP allow list) still abort.
+	// SSO, IP allow list) still abort. A plan-unavailable 403 is remembered
+	// so dry-run does not claim it would create protection that cannot land.
 	var opts github.BranchProtectionOptions
 	opts.SkipCodeOwners = orgOwner
+	protectionUnavailable := false
 	branchPlan, err := client.PlanBranchRuleset(owner, repo, requiredChecks(pack), opts)
+	protectionUnavailable = noteProtectionUnavailable(protectionUnavailable, err)
 	if err != nil && !github.IsBranchProtectionUnavailable(err) {
 		return fmt.Errorf("check branch ruleset: %w", err)
 	}
 	tagPlan, err := client.PlanTagRuleset(owner, repo)
+	protectionUnavailable = noteProtectionUnavailable(protectionUnavailable, err)
 	if err != nil && !github.IsBranchProtectionUnavailable(err) {
 		return fmt.Errorf("check tag ruleset: %w", err)
 	}
 	classicExists, err := client.ClassicProtectionExists(owner, repo, branch)
+	protectionUnavailable = noteProtectionUnavailable(protectionUnavailable, err)
 	if err != nil && !github.IsBranchProtectionUnavailable(err) {
 		return fmt.Errorf("check classic protection: %w", err)
 	}
@@ -148,7 +153,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 		}
 	}
 
-	items, err := buildItems(client, &info, owner, repo, branch, visibility, rendered, branchPlan, tagPlan, classicExists, &opts, paidSecurity, pack)
+	items, err := buildItems(client, &info, owner, repo, branch, visibility, rendered, branchPlan, tagPlan, classicExists, protectionUnavailable, &opts, paidSecurity, pack)
 	if err != nil {
 		return fmt.Errorf("plan %s/%s: %w (verify the token grants Contents read access and retry)", owner, repo, err)
 	}
@@ -198,7 +203,7 @@ func PlanNewRepo(owner, repo, visibility string, stdout io.Writer) error {
 	// Named presets must match a live apply: only strict / --advanced-security
 	// enable GHAS. Interactive dry-run still shows the offered plan line.
 	paid := globals.AdvancedSecurity || github.IsPublicVisibility(visibility) || (globals.DryRun && globals.Preset == "")
-	items, err := buildItems(nil, nil, owner, repo, "main", visibility, rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, &github.BranchProtectionOptions{}, paid, pack)
+	items, err := buildItems(nil, nil, owner, repo, "main", visibility, rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, paid, pack)
 	if err != nil {
 		return err
 	}
@@ -215,7 +220,7 @@ func buildItems(
 	owner, repo, branch, visibility string,
 	rendered []templates.RenderedFile,
 	branchPlan, tagPlan github.RulesetPlan,
-	classicExists bool,
+	classicExists, protectionUnavailable bool,
 	opts *github.BranchProtectionOptions,
 	paidSecurity bool,
 	pack string,
@@ -262,8 +267,8 @@ func buildItems(
 	}
 
 	items = append(items, generalSettingsItem(c, info, owner, repo))
-	items = append(items, branchProtectionItem(c, owner, repo, branch, visibility, branchPlan, classicExists, opts, pack))
-	items = append(items, tagRulesetItem(c, owner, repo, tagPlan))
+	items = append(items, branchProtectionItem(c, owner, repo, branch, visibility, branchPlan, classicExists, protectionUnavailable, opts, pack))
+	items = append(items, tagRulesetItem(c, owner, repo, tagPlan, protectionUnavailable))
 
 	items = append(items, securityItem(c, info, owner, repo, visibility, rendered, paidSecurity))
 
@@ -350,7 +355,7 @@ func securityConfigured(c *github.Client, info github.Repo, owner, repo string, 
 //   - drifted ruleset → update in place
 //   - classic exists → upgrade (create ruleset + remove classic)
 //   - neither exists → ruleset for public repos; try ruleset then fall back to classic for private
-func branchProtectionItem(c *github.Client, owner, repo, branch, visibility string, plan github.RulesetPlan, classicExists bool, opts *github.BranchProtectionOptions, pack string) wizard.Item {
+func branchProtectionItem(c *github.Client, owner, repo, branch, visibility string, plan github.RulesetPlan, classicExists, protectionUnavailable bool, opts *github.BranchProtectionOptions, pack string) wizard.Item {
 	if opts == nil {
 		opts = &github.BranchProtectionOptions{}
 	}
@@ -380,6 +385,9 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			},
 		}
 	default:
+		if item, ok := unavailableProtectionItem("Branch protection (protect-main)", false, protectionUnavailable, false); ok {
+			return item
+		}
 		return wizard.Item{
 			Name:   "Branch protection (protect-main)",
 			Action: wizard.ActionCreate,
@@ -448,7 +456,38 @@ func requiredChecks(pack string) []string {
 	return github.ResolveRequiredChecksForPack(globals.RequireChecks, pack)
 }
 
-func tagRulesetItem(c *github.Client, owner, repo string, plan github.RulesetPlan) wizard.Item {
+// protectionUnavailableDetail is the dry-run row for a plan that 403s both
+// ruleset and classic protection. ActionSkip so applyItems will not call
+// Apply; Detail so the table does not say "already exists" or "would create".
+// Live apply is unchanged: it still tries ruleset, then classic, then the
+// Settings → Branches error.
+const protectionUnavailableDetail = "unavailable on this plan — set it in Settings → Branches"
+
+// unavailableProtectionItem is the dry-run row when protection APIs are
+// plan-unavailable and the item does not already exist. Live runs and
+// existing plans return ok=false so the caller keeps ActionCreate.
+func unavailableProtectionItem(name string, optional, protectionUnavailable, exists bool) (wizard.Item, bool) {
+	if !globals.DryRun || !protectionUnavailable || exists {
+		return wizard.Item{}, false
+	}
+	return wizard.Item{
+		Name:     name,
+		Action:   wizard.ActionSkip,
+		Optional: optional,
+		Detail:   protectionUnavailableDetail,
+	}, true
+}
+
+// noteProtectionUnavailable remembers a plan-limit 403. The probe is still
+// planned as absent (err is left for the caller to ignore or abort).
+func noteProtectionUnavailable(already bool, err error) bool {
+	return already || github.IsBranchProtectionUnavailable(err)
+}
+
+func tagRulesetItem(c *github.Client, owner, repo string, plan github.RulesetPlan, protectionUnavailable bool) wizard.Item {
+	if item, ok := unavailableProtectionItem("Tag ruleset (protect-version-tags)", true, protectionUnavailable, plan.Exists); ok {
+		return item
+	}
 	item := wizard.Item{
 		Name:     "Tag ruleset (protect-version-tags)",
 		Optional: true,
