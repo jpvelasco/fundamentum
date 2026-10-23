@@ -30,4 +30,8 @@ func TestItemDryRunLabel(t *testing.T) {
 	if item.DryRunLabel() != "already exists — skip" {
 		t.Errorf("unexpected dry-run label for skip: %q", item.DryRunLabel())
 	}
+	item.Detail = "unavailable on this plan — set it in Settings → Branches"
+	if item.DryRunLabel() != item.Detail {
+		t.Errorf("skip with Detail = %q, want the detail", item.DryRunLabel())
+	}
 }
