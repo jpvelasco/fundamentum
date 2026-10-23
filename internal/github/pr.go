@@ -179,10 +179,7 @@ func IsBranchProtectionUnavailable(err error) bool {
 	for _, needle := range []string{
 		"upgrade to github",
 		"github pro",
-		"github team",
 		"make this repository public",
-		"not available for this repository",
-		"using the free plan",
 	} {
 		if strings.Contains(msg, needle) {
 			return true
