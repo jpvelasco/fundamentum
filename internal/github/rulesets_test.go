@@ -248,8 +248,8 @@ func TestResolveRequiredChecksForPack(t *testing.T) {
 	if got := ResolveRequiredChecksForPack(nil, "generic"); len(got) != 2 || got[0] != "CI" || got[1] != "Trivy" {
 		t.Fatalf("generic defaults = %#v", got)
 	}
-	if got := ResolveRequiredChecksForPack(nil, "none"); got != nil {
-		t.Fatalf("none defaults = %#v, want nil", got)
+	if got := ResolveRequiredChecksForPack(nil, "none"); got == nil || len(got) != 0 {
+		t.Fatalf("none defaults = %#v, want empty non-nil", got)
 	}
 	if got := ResolveRequiredChecksForPack(nil, "go"); len(got) != len(DefaultStatusChecks) {
 		t.Fatalf("go defaults = %#v", got)
@@ -261,6 +261,86 @@ func TestResolveRequiredChecksForPack(t *testing.T) {
 	if len(got) != 1 || got[0] != "Lint" {
 		t.Fatalf("explicit overrides pack = %#v", got)
 	}
+	explicit := ResolveRequiredChecksForPack([]string{"CI"}, "none")
+	if len(explicit) != 1 || explicit[0] != "CI" {
+		t.Fatalf("explicit overrides none = %#v", explicit)
+	}
+}
+
+func TestCreateBranchRuleset_CINoneRequiresNoChecks(t *testing.T) {
+	tests := []struct {
+		name         string
+		statusChecks []string
+		wantRule     bool
+		wantContexts []string
+	}{
+		{
+			name:         "pack none posts no required_status_checks rule",
+			statusChecks: ResolveRequiredChecksForPack(nil, "none"),
+			wantRule:     false,
+		},
+		{
+			name:         "nil statusChecks still posts Go defaults",
+			statusChecks: nil,
+			wantRule:     true,
+			wantContexts: append([]string{}, DefaultStatusChecks...),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var postBody map[string]any
+			testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&postBody); err != nil {
+					t.Errorf("decode ruleset body: %v", err)
+				}
+				w.WriteHeader(http.StatusCreated)
+				_ = json.NewEncoder(w).Encode(map[string]any{"id": 1})
+			}), nil, func(c *Client) {
+				if err := c.CreateBranchRuleset("owner", "repo", tt.statusChecks, BranchProtectionOptions{}); err != nil {
+					t.Fatalf("CreateBranchRuleset() error: %v", err)
+				}
+			}, func(t *testing.T) {
+				rule := requiredStatusChecksRule(postBody)
+				if tt.wantRule != (rule != nil) {
+					t.Fatalf("required_status_checks present = %v, want %v", rule != nil, tt.wantRule)
+				}
+				if !tt.wantRule {
+					return
+				}
+				got := statusCheckContexts(rule)
+				if !sameStrings(got, tt.wantContexts) {
+					t.Fatalf("contexts = %#v, want %#v", got, tt.wantContexts)
+				}
+				if !containsString(got, "Lint") {
+					t.Fatalf("nil statusChecks missing Lint: %#v", got)
+				}
+			})
+		})
+	}
+}
+
+func requiredStatusChecksRule(body map[string]any) map[string]any {
+	rules, _ := body["rules"].([]any)
+	for _, rule := range rules {
+		rm, ok := rule.(map[string]any)
+		if ok && rm["type"] == "required_status_checks" {
+			return rm
+		}
+	}
+	return nil
+}
+
+func statusCheckContexts(rule map[string]any) []string {
+	params, _ := rule["parameters"].(map[string]any)
+	raw, _ := params["required_status_checks"].([]any)
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		m, _ := item.(map[string]any)
+		if ctx, ok := m["context"].(string); ok {
+			out = append(out, ctx)
+		}
+	}
+	return out
 }
 
 func TestIntendedChecksAndHelpers(t *testing.T) {
