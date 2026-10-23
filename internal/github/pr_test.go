@@ -401,9 +401,12 @@ func TestIsBranchProtectionUnavailable(t *testing.T) {
 		{"generic 403", &HTTPError{StatusCode: http.StatusForbidden, Msg: "403 Forbidden: Forbidden"}, false},
 		{"token scope", &HTTPError{StatusCode: http.StatusForbidden, Msg: "403 Forbidden: Resource not accessible by integration"}, false},
 		{"upgrade to pro", &HTTPError{StatusCode: http.StatusForbidden, Msg: "403 Forbidden: Upgrade to GitHub Pro or make this repository public to enable this feature."}, true},
-		{"github team", fmt.Errorf("create branch ruleset: 403 Forbidden: GitHub Team is required"), true},
-		{"free plan", &HTTPError{StatusCode: http.StatusForbidden, Msg: "403: this repository is using the free plan"}, true},
+		{"make public", &HTTPError{StatusCode: http.StatusForbidden, Msg: "403 Forbidden: make this repository public"}, true},
+		{"github team", fmt.Errorf("create branch ruleset: 403 Forbidden: GitHub Team is required"), false},
+		{"free plan", &HTTPError{StatusCode: http.StatusForbidden, Msg: "403: this repository is using the free plan"}, false},
+		{"not available", &HTTPError{StatusCode: http.StatusForbidden, Msg: "403 Forbidden: Branch protection is not available for this repository"}, false},
 		{"409", &HTTPError{StatusCode: http.StatusConflict, Msg: "409 Conflict"}, false},
+		{"upgrade text non-403", fmt.Errorf("upgrade to github pro required, but the request was rejected"), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
