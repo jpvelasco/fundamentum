@@ -18,7 +18,9 @@ func resetBaseline(t *testing.T) {
 		Strict = false
 		NoOverwrite = false
 		FromFile = ""
+		ResetExplicit()
 	})
+	ResetExplicit()
 }
 
 func TestCurrentAndWriteBaseline(t *testing.T) {
@@ -70,6 +72,57 @@ func TestApplyBaseline_ExplicitFlagsWin(t *testing.T) {
 	gotPreset, gotCI := Preset, CIPack
 	if gotPreset != "oss" || gotCI != "go" || RequireChecks[0] != "Lint" {
 		t.Fatalf("explicit flags must win: Preset=%q CI=%q checks=%v", gotPreset, gotCI, RequireChecks)
+	}
+}
+
+func TestApplyBaseline_ExplicitFalseBeatsFileTrue(t *testing.T) {
+	resetBaseline(t)
+	NoteExplicit("strict")
+	NoteExplicit("advanced-security")
+	NoteExplicit("no-overwrite")
+	Strict = false
+	AdvancedSecurity = false
+	NoOverwrite = false
+	if err := ApplyBaseline(Baseline{
+		AdvancedSecurity: true,
+		Strict:           true,
+		NoOverwrite:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if Strict || AdvancedSecurity || NoOverwrite {
+		t.Fatalf("explicit false must stay false: Strict=%v GHAS=%v NoOverwrite=%v", Strict, AdvancedSecurity, NoOverwrite)
+	}
+}
+
+func TestApplyBaseline_UnnotedBoolInherits(t *testing.T) {
+	resetBaseline(t)
+	NoteExplicit("strict")
+	Strict = false
+	if err := ApplyBaseline(Baseline{Strict: true, AdvancedSecurity: true, NoOverwrite: true}); err != nil {
+		t.Fatal(err)
+	}
+	if Strict {
+		t.Fatal("explicit --strict=false must stay false")
+	}
+	if !AdvancedSecurity || !NoOverwrite {
+		t.Fatalf("unnoted bools must inherit: GHAS=%v NoOverwrite=%v", AdvancedSecurity, NoOverwrite)
+	}
+}
+
+func TestApplyBaseline_ExplicitTrueBeatsFileFalse(t *testing.T) {
+	resetBaseline(t)
+	NoteExplicit("strict")
+	NoteExplicit("advanced-security")
+	NoteExplicit("no-overwrite")
+	Strict = true
+	AdvancedSecurity = true
+	NoOverwrite = true
+	if err := ApplyBaseline(Baseline{}); err != nil {
+		t.Fatal(err)
+	}
+	if !Strict || !AdvancedSecurity || !NoOverwrite {
+		t.Fatalf("explicit true must stay true: Strict=%v GHAS=%v NoOverwrite=%v", Strict, AdvancedSecurity, NoOverwrite)
 	}
 }
 
