@@ -497,8 +497,19 @@ func TestRenderCIPackFiltering(t *testing.T) {
 			if tt.pack == CIPackGo && !strings.Contains(pathSet[".github/workflows/ci.yml"], "go-version-file") {
 				t.Error("go pack must keep go-version-file")
 			}
-			if tt.pack == CIPackNode && !strings.Contains(pathSet[".github/workflows/ci.yml"], "setup-node") {
-				t.Error("node pack must ship setup-node")
+			if tt.pack == CIPackNode {
+				ci := pathSet[".github/workflows/ci.yml"]
+				if !strings.Contains(ci, "setup-node") {
+					t.Error("node pack must ship setup-node")
+				}
+				if !strings.Contains(ci, "npm ci") || !strings.Contains(ci, "npm install") {
+					t.Error("node pack must use npm ci when a lockfile exists and npm install otherwise")
+				}
+				for _, line := range strings.Split(ci, "\n") {
+					if strings.TrimSpace(line) == "cache: npm" {
+						t.Error("node pack must not set cache: npm unconditionally")
+					}
+				}
 			}
 			if tt.pack == CIPackPython {
 				ci := pathSet[".github/workflows/ci.yml"]
