@@ -53,7 +53,8 @@ func WriteBaseline(w io.Writer, b Baseline) error {
 }
 
 // LoadBaselineFile reads a JSON baseline and applies it to flag state.
-// Explicit non-empty flags already set by the operator win over the file.
+// Explicit flags already set by the operator win over the file, including
+// an explicit false on --strict, --advanced-security, and --no-overwrite.
 func LoadBaselineFile(path string) error {
 	raw, err := readBaselineBytes(path)
 	if err != nil {
@@ -66,7 +67,9 @@ func LoadBaselineFile(path string) error {
 	return ApplyBaseline(b)
 }
 
-// ApplyBaseline copies file values into unset flag slots.
+// ApplyBaseline copies file values into unset flag slots. A baseline bool
+// is copied only when that flag was not passed and the current value is
+// false, so --strict=false stays false even when the file says true.
 func ApplyBaseline(b Baseline) error {
 	if b.Version != 0 && b.Version != BaselineVersion {
 		return fmt.Errorf("unsupported baseline version %d (want %d)", b.Version, BaselineVersion)
@@ -83,15 +86,7 @@ func ApplyBaseline(b Baseline) error {
 	if RequireChecks == nil && b.RequireChecks != nil {
 		RequireChecks = append([]string{}, b.RequireChecks...)
 	}
-	if !AdvancedSecurity {
-		AdvancedSecurity = b.AdvancedSecurity
-	}
-	if !Strict {
-		Strict = b.Strict
-	}
-	if !NoOverwrite {
-		NoOverwrite = b.NoOverwrite
-	}
+	applyBaselineBools(b)
 	return nil
 }
 
