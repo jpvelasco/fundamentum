@@ -78,7 +78,7 @@ Everything is **idempotent** — re-running is safe and fast.
 | `--require-checks`  | Required status-check contexts for `protect-main` (comma-separated; default: jobs for the resolved `--ci` pack) |
 | `--ci`              | CI pack: `auto` (detect go/node/python/rust, else generic), `go`, `node`, `python`, `rust`, `generic`, or `none` |
 | `--preset`          | Named baseline: `oss` (no prompts), `private` (solo, no GHAS prompt), `strict` (`--strict` + GHAS) |
-| `--from`            | Load a portable JSON baseline from `export` (explicit flags still win) |
+| `--from`            | Load a portable JSON baseline from `export` (explicit flags win, including `--flag=false`) |
 | `--version`         | Print version and exit                           |
 
 `init` also supports `--private` (default: `true`).
@@ -88,7 +88,7 @@ Everything is **idempotent** — re-running is safe and fast.
 1. fundamentum detects your repo's current state (existing files, branch protection, visibility).
 2. It renders opinionated templates and shows a summary table of what will change.
 3. You confirm all defaults or step through items interactively.
-4. Files are created or updated directly (or via PR with `--pr`). Settings, security, and branch protection are applied via the GitHub API even in `--pr` mode — `--pr` is not a dry-run for those steps.
+4. Files are created or updated directly (or via PR with `--pr`). Settings, security, and branch protection are applied via the GitHub API even in `--pr` mode — `--pr` is not a dry-run for those steps. A `--from` baseline fills flags the operator did not pass; an explicit flag wins, including `--strict=false`.
 
 ## Install
 
