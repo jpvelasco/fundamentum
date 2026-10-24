@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-10-24
+
+**Patch release.** Correctness and security fixes for the npm shim and the shipped Node/Python CI packs, plus baseline flag, `--ci none`, and branch-protection reporting fixes, on a fully updated toolchain.
+
+### Fixed
+
+- **npm shim validates release archives against path traversal.** The install script now rejects archive members with absolute paths or `..` segments from the tar/unzip member list before extraction, closing the traversal vector independently of the checksum pin (defense-in-depth). A `node --test` suite covers the validator.
+- **Shipped Node CI installs deps without a lockfile.** The `node` CI pack no longer requires a lockfile, so `--ci node`/`auto` targets without one lint and test successfully.
+- **Shipped Python CI installs project deps before lint and test.** The `python` CI pack installs the project before the lint and test steps run.
+- **`--ci none` requires no status checks.** Resolving the CI pack to `none` leaves `protect-main` without required checks instead of requiring CI contexts that never report.
+- **Explicit `false` flags override baseline bools.** An explicitly passed `false` flag now overrides a `true` value loaded from a `--from` baseline instead of deferring to the baseline.
+- **Dry-run reports plan-gated branch protection.** `apply --dry-run` on a plan-gated private repo now surfaces the unavailable branch-protection state in the plan instead of silently planning a create.
+- **Plan-gate 403 detection narrowed.** The "branch protection unavailable" match is narrowed so other 403 bodies (token scope, SSO, IP allow list) are no longer misread as plan-gated.
+
+### Documentation
+
+- **Octopus data flow disclosed.** The shipped Octopus Review workflow template (and the live self-applied copy) now states that on `pull_request_target` the action uploads the PR diff and its scoped `GITHUB_TOKEN` to octopus-review.ai, and that deleting the file opts out.
+
+### Other
+
+- **Go 1.26.9 → 1.26.10.** GO-2026-6809 in `crypto/x509` is fixed in the 1.26.10 standard library. `govulncheck` moves to v1.9.0 (the earlier pin cannot load Go 1.26), and npm is pinned to 11.21.0 before the trusted-publishing step (OIDC publishing requires npm ≥ 11.5.1).
+- **golangci-lint pin v2.12.2 → v2.15.0.** The v2.12.2 binary was built with go1.26.5 and its embedded type-checker panics under go1.27 toolchains; v2.15.0 (built with go1.27.0) lints clean.
+- **GitHub Actions updates.** CodeQL actions 4.39.0, codecov-action 7.1.1, goreleaser-action 7.3.0, setup-node 7.1.0, artifact actions 7.0.2/8.0.2.
+
 ## [0.2.2] - 2026-09-10
 
 **Patch release.** Codacy community files now ship only to public repos; private targets no longer receive templates Codacy's free Open Source plan cannot use.
@@ -195,7 +219,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.2.3
 [0.2.2]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.2.2
 [0.2.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.2.1
 [0.2.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.2.0
