@@ -497,11 +497,34 @@ func TestRenderCIPackFiltering(t *testing.T) {
 			if tt.pack == CIPackGo && !strings.Contains(pathSet[".github/workflows/ci.yml"], "go-version-file") {
 				t.Error("go pack must keep go-version-file")
 			}
-			if tt.pack == CIPackNode && !strings.Contains(pathSet[".github/workflows/ci.yml"], "setup-node") {
-				t.Error("node pack must ship setup-node")
+			if tt.pack == CIPackNode {
+				ci := pathSet[".github/workflows/ci.yml"]
+				if !strings.Contains(ci, "setup-node") {
+					t.Error("node pack must ship setup-node")
+				}
+				if !strings.Contains(ci, "npm ci") || !strings.Contains(ci, "npm install") {
+					t.Error("node pack must use npm ci when a lockfile exists and npm install otherwise")
+				}
+				for _, line := range strings.Split(ci, "\n") {
+					if strings.TrimSpace(line) == "cache: npm" {
+						t.Error("node pack must not set cache: npm unconditionally")
+					}
+				}
 			}
-			if tt.pack == CIPackPython && !strings.Contains(pathSet[".github/workflows/ci.yml"], "setup-python") {
-				t.Error("python pack must ship setup-python")
+			if tt.pack == CIPackPython {
+				ci := pathSet[".github/workflows/ci.yml"]
+				if !strings.Contains(ci, "setup-python") {
+					t.Error("python pack must ship setup-python")
+				}
+				if !strings.Contains(ci, "pip install -r requirements.txt") {
+					t.Error("python pack must install from requirements.txt when that manifest exists")
+				}
+				if !strings.Contains(ci, "pip install .") {
+					t.Error("python pack must install the project when pyproject.toml exists")
+				}
+				if !strings.Contains(ci, "ruff check .") || !strings.Contains(ci, "pytest -q") {
+					t.Error("python pack must still run ruff and pytest after installing project deps")
+				}
 			}
 			if tt.pack == CIPackRust && !strings.Contains(pathSet[".github/workflows/ci.yml"], "rust-toolchain") {
 				t.Error("rust pack must ship rust-toolchain")

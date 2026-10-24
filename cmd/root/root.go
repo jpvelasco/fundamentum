@@ -30,7 +30,8 @@ Examples:
   fundamentum --from baseline.json apply OWNER/REPO
   fundamentum --dry-run apply OWNER/REPO    # preview without changes
   fundamentum --version                     # show version`,
-		Version: Version,
+		Version:           Version,
+		PersistentPreRunE: noteExplicitBaselineFlags,
 	}
 	cmd.PersistentFlags().BoolVar(&globals.DryRun, "dry-run", false, "print actions without applying them")
 	cmd.PersistentFlags().BoolVar(&globals.Verbose, "verbose", false, "print API calls")
@@ -42,7 +43,7 @@ Examples:
 	cmd.PersistentFlags().StringSliceVar(&globals.RequireChecks, "require-checks", nil, "required status-check contexts for protect-main (comma-separated; default: jobs for the resolved --ci pack)")
 	cmd.PersistentFlags().StringVar(&globals.CIPack, "ci", "", "CI pack: auto (default; detect go/node/python/rust, else generic), go, node, python, rust, generic, or none")
 	cmd.PersistentFlags().StringVar(&globals.Preset, "preset", "", "named baseline: oss (public defaults, no prompts), private (solo, no GHAS prompt), strict (fail optional steps + enable GHAS)")
-	cmd.PersistentFlags().StringVar(&globals.FromFile, "from", "", "load a portable JSON baseline (export writes this; explicit flags still win)")
+	cmd.PersistentFlags().StringVar(&globals.FromFile, "from", "", "load a portable JSON baseline (export writes this; explicit flags win, including --flag=false)")
 	cmd.AddCommand(apply.NewCmd())
 	cmd.AddCommand(repoinit.NewCmd())
 	cmd.AddCommand(audit.NewCmd())
@@ -55,4 +56,12 @@ Examples:
 func Execute() error {
 	cmd := newRootCmd()
 	return cmd.Execute()
+}
+
+// noteExplicitBaselineFlags records bool flags the operator actually passed
+// before apply/audit load a baseline. Cobra parses flags first; a false
+// value is otherwise indistinguishable from "never set".
+func noteExplicitBaselineFlags(cmd *cobra.Command, _ []string) error {
+	globals.NoteExplicitBools(cmd.Flags().Changed)
+	return nil
 }
