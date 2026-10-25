@@ -1,77 +1,68 @@
 ---
-description: Configuration for AI behavior when interacting with Codacy's MCP Server
+description: Optional Codacy MCP rules for AI coding agents. Applies ONLY when a Codacy MCP server is available; never block a task on Codacy.
 applyTo: '**'
 ---
-# Codacy Rules
-Configuration for AI behavior when interacting with Codacy's MCP Server
 
-## using any tool that accepts the arguments: `provider`, `organization`, or `repository`
+# Codacy Rules (optional)
+
+These rules configure AI behavior when a Codacy MCP server is available in the
+session. The rules are conditional: if no Codacy MCP tools are present, SKIP
+Codacy analysis entirely and continue with the task — do not install anything
+and do not stop work.
+
+## Precondition — is Codacy MCP available?
+
+Before any Codacy step, check whether Codacy MCP tools (for example
+`codacy_cli_analyze`) are available in this session:
+
+- **If yes**: follow the rules below.
+- **If no**: skip Codacy analysis for the whole task. Do not prompt the user,
+  do not attempt to install the CLI, and do not retry. Continue the task.
+
+## When using any tool that accepts `provider`, `organization`, or `repository`
+
 - ALWAYS use:
- - provider: gh
- - organization: jpvelasco
- - repository: fundamentum
-- Avoid calling `git remote -v` unless really necessary
+  - provider: gh
+  - organization: jpvelasco
+  - repository: fundamentum
+- Avoid calling `git remote -v` unless really necessary.
 
-## CRITICAL: After ANY successful `edit_file` or `reapply` operation
-- YOU MUST IMMEDIATELY run the `codacy_cli_analyze` tool from Codacy's MCP Server for each file that was edited, with:
- - `rootPath`: set to the workspace path
- - `file`: set to the path of the edited file
- - `tool`: leave empty or unset
-- If any issues are found in the new edits, propose and apply fixes for them.
-- > NOTE: Failure to follow this rule is considered a critical error.
+## After ANY successful `edit_file` or `reapply` operation
 
-## When you tried to run the `codacy_cli_analyze` tool and the Codacy CLI is not installed
-- Ask the user 'Codacy CLI is not installed. Would you like me to install it now?'
-- If the user responds with "yes", run the `codacy_cli_install` tool and then continue with the original task
-- If the user responds with "no", instruct the user that they can disable automatic analysis in the extension settings
-- Wait for the user to respond before proceeding with any other actions
+- IF Codacy MCP tools are available, run `codacy_cli_analyze` for each edited file:
+  - `rootPath`: set to the workspace path
+  - `file`: set to the path of the edited file
+  - `tool`: leave empty or unset
+- If issues are found in the new edits, propose and apply fixes for them.
+- This is a quality aid, not a hard requirement: if the tool call fails, note
+  it and continue — do not retry in a loop.
 
-## After every response
-- If you made any file edits in this conversation, verify you ran `codacy_cli_analyze` tool from Codacy's MCP Server
+## Dependencies and security checks
 
-## When there are no Codacy MCP Server tools available, or the MCP Server is not reachable
-- Suggest the user the following troubleshooting steps:
- - Try to reset the MCP on the extension
- - If the user is using VSCode, suggest them to review their Copilot > MCP settings in Github, under their organization or personal account. Refer them to Settings > Copilot > Enable MCP servers in Copilot. Suggested URL (https://github.com/settings/copilot/features) or https://github.com/organizations/{organization-name}/settings/copilot/features (This can only be done by their organization admins / owners)
-- If none of the above steps work, suggest the user to contact Codacy support
-
-## Trying to call a tool that needs a rootPath as a parameter
-- Always use the standard, non-URL-encoded file system path
-
-## CRITICAL: Dependencies and Security Checks
-- IMMEDIATELY after ANY of these actions:
- - Running npm/yarn/pnpm install
- - Adding dependencies to package.json
- - Adding requirements to requirements.txt
- - Adding dependencies to pom.xml
- - Adding dependencies to build.gradle
- - Any other package manager operations
-- You MUST run the `codacy_cli_analyze` tool with:
- - `rootPath`: set to the workspace path
- - `tool`: set to "trivy"
- - `file`: leave empty or unset
-- If any vulnerabilities are found because of the newly added packages:
- - Stop all other operations
- - Propose and apply fixes for the security issues
- - Only continue with the original task after security issues are resolved
-- EXAMPLE:
- - After: npm install react-markdown
- - Do: Run codacy_cli_analyze with trivy
- - Before: Continuing with any other tasks
+- After dependency changes (npm/yarn/pnpm install, package.json,
+  requirements.txt, pom.xml, build.gradle, etc.), IF Codacy MCP tools are
+  available, run `codacy_cli_analyze` with:
+  - `rootPath`: set to the workspace path
+  - `tool`: set to "trivy"
+  - `file`: leave empty or unset
+- If vulnerabilities are found, propose (and when possible apply) fixes
+  before continuing with unrelated work.
 
 ## General
-- Repeat the relevant steps for each modified file.
-- "Propose fixes" means to both suggest and, if possible, automatically apply the fixes.
-- You MUST NOT wait for the user to ask for analysis or remind you to run the tool.
-- Do not run `codacy_cli_analyze` looking for changes in duplicated code or code complexity metrics.
-- Complexity metrics are different from complexity issues. When trying to fix complexity in a repository or file, focus on solving the complexity issues and ignore the complexity metric.
-- Do not run `codacy_cli_analyze` looking for changes in code coverage.
-- Do not try to manually install Codacy CLI using either brew, npm, npx, or any other package manager.
-- If the Codacy CLI is not installed, just run the `codacy_cli_analyze` tool from Codacy's MCP Server.
-- When calling `codacy_cli_analyze`, only send provider, organization and repository if the project is a git repository.
 
-## Whenever a call to a Codacy tool that uses `repository` or `organization` as a parameter returns a 404 error
-- Offer to run the `codacy_setup_repository` tool to add the repository to Codacy
-- If the user accepts, run the `codacy_setup_repository` tool
-- Do not ever try to run the `codacy_setup_repository` tool on your own
-- After setup, immediately retry the action that failed (only retry once)
+- Only run the analysis when the precondition holds — repeat it per task, not
+  per file edit loop iteration.
+- "Propose fixes" means both suggesting and, if possible, applying them.
+- Do not run `codacy_cli_analyze` looking for duplicated code, complexity
+  metrics, or code coverage.
+- Do not manually install Codacy CLI with brew, npm, npx, or any other
+  package manager; when tools are missing, the precondition already skips
+  Codacy.
+- When calling `codacy_cli_analyze`, only send provider, organization and
+  repository if the project is a git repository.
+
+## When a Codacy tool call returns a 404 for `repository` or `organization`
+
+- Offer to run `codacy_setup_repository` (only when Codacy MCP is available),
+  and only with the user's consent. Do not run it unprompted.
+- After setup, retry the failed action once.
