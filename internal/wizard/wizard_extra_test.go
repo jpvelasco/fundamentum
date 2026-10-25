@@ -282,3 +282,105 @@ func TestPrintItemError_ShowsActualError(t *testing.T) {
 		})
 	}
 }
+
+func TestItemLabels_DetailAndOptOut(t *testing.T) {
+	tests := []struct {
+		name          string
+		item          Item
+		wantDryRun    string
+		wantLive      string
+	}{
+		{
+			name:       "skip with detail",
+			item:       Item{Action: ActionSkip, Detail: "unavailable on this plan"},
+			wantDryRun: "unavailable on this plan",
+			wantLive:   "already exists — skip",
+		},
+		{
+			name:       "skip via opt-out",
+			item:       Item{Action: ActionSkip, OptOutReason: "--skip"},
+			wantDryRun: "skipped (--skip)",
+			wantLive:   "skipped (--skip)",
+		},
+		{
+			name:       "plain skip",
+			item:       Item{Action: ActionSkip},
+			wantDryRun: "already exists — skip",
+			wantLive:   "already exists — skip",
+		},
+		{
+			name:       "update with drift detail",
+			item:       Item{Action: ActionUpdate, Detail: "drift: enforcement"},
+			wantDryRun: "would update (drift: enforcement)",
+			wantLive:   "update (drift: enforcement)",
+		},
+		{
+			name:       "update with diffstat",
+			item:       Item{Action: ActionUpdate, Detail: "content differs (+3/-5)"},
+			wantDryRun: "would update (content differs (+3/-5))",
+			wantLive:   "update (content differs (+3/-5))",
+		},
+		{
+			name:       "create plain",
+			item:       Item{Action: ActionCreate},
+			wantDryRun: "would create",
+			wantLive:   "create",
+		},
+		{
+			name:       "upgrade plain",
+			item:       Item{Action: ActionUpgrade},
+			wantDryRun: "would upgrade classic → ruleset",
+			wantLive:   "upgrade classic → ruleset",
+		},
+	}
+	for _, tt := range tests {
+		if got := tt.item.DryRunLabel(); got != tt.wantDryRun {
+			t.Errorf("%s: DryRunLabel() = %q, want %q", tt.name, got, tt.wantDryRun)
+		}
+		if got := tt.item.LiveLabel(); got != tt.wantLive {
+			t.Errorf("%s: LiveLabel() = %q, want %q", tt.name, got, tt.wantLive)
+		}
+	}
+}
+
+func TestPlanSummary_OptedOutBucket(t *testing.T) {
+	items := []Item{
+		{Action: ActionSkip, OptOutReason: "--skip"},
+		{Action: ActionSkip, OptOutReason: "--only"},
+		{Action: ActionSkip, Detail: "unavailable on this plan"},
+		{Action: ActionSkip},
+		{Action: ActionUpdate, Detail: "x"},
+		{Action: ActionCreate},
+	}
+	want := "1 to create, 1 to update, 1 already exist, 1 unavailable, 2 opted out"
+	if got := PlanSummary(items); got != want {
+		t.Errorf("PlanSummary() = %q, want %q", got, want)
+	}
+}
+
+func TestShouldSkip_Reasons(t *testing.T) {
+	var out strings.Builder
+	if !ShouldSkip(Item{Action: ActionSkip}, &out) {
+		t.Fatal("skip item must be skipped")
+	}
+	if !strings.Contains(out.String(), "skipped") {
+		t.Errorf("plain skip line: %q", out.String())
+	}
+	out.Reset()
+	if !ShouldSkip(Item{Action: ActionSkip, OptOutReason: "--only"}, &out) {
+		t.Fatal("opted-out item must be skipped")
+	}
+	if !strings.Contains(out.String(), "skipped (--only)") {
+		t.Errorf("opt-out line: %q", out.String())
+	}
+	out.Reset()
+	if !ShouldSkip(Item{Action: ActionSkip, Detail: "unavailable on this plan"}, &out) {
+		t.Fatal("unavailable item must be skipped")
+	}
+	if !strings.Contains(out.String(), "unavailable on this plan") {
+		t.Errorf("unavailable line: %q", out.String())
+	}
+	if ShouldSkip(Item{Action: ActionCreate}, &out) {
+		t.Fatal("non-skip item must not be skipped")
+	}
+}

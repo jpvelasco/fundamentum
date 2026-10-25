@@ -190,3 +190,109 @@ func TestCreateBaselineFile(t *testing.T) {
 		t.Fatal("empty path must fail")
 	}
 }
+
+func TestCurrentBaseline_NewFields(t *testing.T) {
+	resetBaseline(t)
+	NoteExplicit("branch-up-to-date")
+	BranchUpToDate = false
+	BranchUpToDateSet = true
+	SkipSteps = []string{"protect-main", "socket.yml"}
+	OnlySteps = []string{"security"}
+	Octopus = true
+	CodacyInstructions = true
+	t.Cleanup(func() {
+		BranchUpToDate = true
+		BranchUpToDateSet = false
+		SkipSteps = nil
+		OnlySteps = nil
+		Octopus = false
+		CodacyInstructions = false
+	})
+
+	var out strings.Builder
+	if err := WriteBaseline(&out, CurrentBaseline()); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		`"skip"`, `"protect-main"`, `"socket.yml"`,
+		`"only"`, `"security"`,
+		`"octopus": true`,
+		`"codacy_instructions": true`,
+		`"require_branch_up_to_date": false`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestApplyBaseline_NewFieldsFillUnset(t *testing.T) {
+	resetBaseline(t)
+	falseUpToDate := false
+	if err := ApplyBaseline(Baseline{
+		Skip:                []string{"security"},
+		Only:                []string{"files"},
+		Octopus:             true,
+		CodacyInstructions:  true,
+		RequireBranchUpToDate: &falseUpToDate,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		BranchUpToDate = true
+		BranchUpToDateSet = false
+	}()
+	if len(SkipSteps) != 1 || SkipSteps[0] != "security" {
+		t.Errorf("SkipSteps = %v", SkipSteps)
+	}
+	if len(OnlySteps) != 1 || OnlySteps[0] != "files" {
+		t.Errorf("OnlySteps = %v", OnlySteps)
+	}
+	if !Octopus || !CodacyInstructions {
+		t.Errorf("opt-in bools not applied: octopus=%v codacy=%v", Octopus, CodacyInstructions)
+	}
+	if BranchUpToDate || !BranchUpToDateSet {
+		t.Errorf("tri-state not applied: up-to-date=%v set=%v", BranchUpToDate, BranchUpToDateSet)
+	}
+}
+
+func TestApplyBaseline_BranchUpToDateExplicitWins(t *testing.T) {
+	resetBaseline(t)
+	NoteExplicit("branch-up-to-date")
+	t.Cleanup(func() {
+		BranchUpToDate = true
+		BranchUpToDateSet = false
+	})
+	// Explicit flag true must beat the file's false.
+	if err := ApplyBaseline(Baseline{RequireBranchUpToDate: boolPtr(false)}); err != nil {
+		t.Fatal(err)
+	}
+	if !BranchUpToDate {
+		t.Error("explicit --branch-up-to-date must win over the baseline file")
+	}
+}
+
+func TestApplyBaseline_SetStateBlocksReread(t *testing.T) {
+	resetBaseline(t)
+	t.Cleanup(func() {
+		BranchUpToDate = true
+		BranchUpToDateSet = false
+	})
+	// First load applies the file value and marks it set.
+	if err := ApplyBaseline(Baseline{RequireBranchUpToDate: boolPtr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	if !BranchUpToDateSet {
+		t.Fatal("baseline tri-state must mark the value as set")
+	}
+	// A second load (different value) must not overwrite the already-set one.
+	if err := ApplyBaseline(Baseline{RequireBranchUpToDate: boolPtr(false)}); err != nil {
+		t.Fatal(err)
+	}
+	if !BranchUpToDate {
+		t.Error("an already-set tri-state must not be overwritten by a later baseline")
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }

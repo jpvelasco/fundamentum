@@ -349,3 +349,155 @@ func TestMergedConditions(t *testing.T) {
 		t.Errorf("fresh conditions must include the intent: %v", got)
 	}
 }
+
+func TestMergeBranchRulesetBody_NilLiveFallsBack(t *testing.T) {
+	// A nil live ruleset must fall back to the plain create body.
+	body := mergeBranchRulesetBody(nil, []string{"Lint"}, BranchProtectionOptions{Solo: true})
+	if ruleFromBody(body, "deletion") == nil || ruleFromBody(body, "pull_request") == nil {
+		t.Errorf("nil live merge must produce the create body: %v", body)
+	}
+}
+
+func TestStatusChecksRuleMerged_LiveRuleWithoutParams(t *testing.T) {
+	// A live required_status_checks rule with no parameters map: merged rule
+	// still gets the intended checks and the intended strict default.
+	live := &Ruleset{
+		Enforcement: "active",
+		Conditions:  map[string]any{"ref_name": map[string]any{"include": []any{"~DEFAULT_BRANCH"}}},
+		Rules: []map[string]any{
+			{"type": "deletion"},
+			{"type": "non_fast_forward"},
+			{"type": "required_status_checks"},
+		},
+	}
+	body := mergeBranchRulesetBody(live, []string{"Lint"}, BranchProtectionOptions{Solo: true})
+	rule := ruleFromBody(body, "required_status_checks")
+	if rule == nil {
+		t.Fatal("merged body must have a checks rule")
+	}
+	params, _ := rule["parameters"].(map[string]any)
+	checks := anySlice(params["required_status_checks"])
+	if !checkContextPresent(checks, "Lint") {
+		t.Errorf("intended checks missing: %v", checks)
+	}
+	if mapBool(params, "strict_required_status_checks_policy") {
+		t.Error("unset intent keeps the live strict policy (false in a parameterless rule)")
+	}
+}
+
+func TestStrictestPRRule_NilParams(t *testing.T) {
+	// A live pull_request rule with no parameters: intended params survive.
+	got := strictestPRRule(map[string]any{"type": "pull_request"}, BranchProtectionOptions{Solo: true})
+	if !mapBool(got, "required_review_thread_resolution") {
+		t.Errorf("nil live params must keep the intended thread resolution: %v", got)
+	}
+	if mapBool(got, "dismiss_stale_reviews_on_push") {
+		t.Error("solo intent must keep dismissal off when live has nothing")
+	}
+}
+
+func TestBranchRulesetRules_SkipStatusChecksOmitsRule(t *testing.T) {
+	rules := branchRulesetRules(nil, BranchProtectionOptions{SkipStatusChecks: true, Solo: true}, prRuleParams(BranchProtectionOptions{Solo: true}))
+	for _, rule := range rules {
+		if rule["type"] == "required_status_checks" {
+			t.Error("SkipStatusChecks must omit the required_status_checks rule")
+		}
+	}
+}
+
+func TestIntendedChecks_NoOverwriteDefaults(t *testing.T) {
+	if got := intendedChecks(nil, BranchProtectionOptions{}); len(got) == 0 || got[0] != "Lint" {
+		t.Errorf("nil checks must fall back to the shipped defaults: %v", got)
+	}
+	if got := intendedChecks(nil, BranchProtectionOptions{SkipStatusChecks: true}); got != nil {
+		t.Errorf("SkipStatusChecks must nil out intended checks: %v", got)
+	}
+}
+
+func TestMergeTagRulesetBody_NilLive(t *testing.T) {
+	body := mergeTagRulesetBody(nil)
+	if body["name"] != "protect-version-tags" {
+		t.Errorf("nil live tag merge must produce the create body: %v", body)
+	}
+}
+
+func TestPrRuleWeaker(t *testing.T) {
+	team := BranchProtectionOptions{Solo: false}
+	solo := BranchProtectionOptions{Solo: true}
+
+	// Missing rule is always weaker.
+	if !prRuleWeaker(nil, solo) {
+		t.Error("nil rule is weaker")
+	}
+
+	// Thread resolution off: weaker for any mode.
+	weak := map[string]any{"parameters": map[string]any{"required_review_thread_resolution": false}}
+	if !prRuleWeaker(weak, solo) {
+		t.Error("thread resolution off is weaker")
+	}
+
+	// Team intent, stale dismissal off: weaker.
+	teamRule := map[string]any{"parameters": map[string]any{
+		"required_review_thread_resolution": true,
+		"dismiss_stale_reviews_on_push":     false,
+	}}
+	if !prRuleWeaker(teamRule, team) {
+		t.Error("team intent with dismissal off is weaker")
+	}
+	// Solo intent tolerates dismissal off (solo mode disables it anyway).
+	if prRuleWeaker(teamRule, solo) {
+		t.Error("solo intent must not require stale dismissal")
+	}
+
+	// Code-owner review required but live off: weaker.
+	owner := BranchProtectionOptions{SkipCodeOwners: false}
+	rule := map[string]any{"parameters": map[string]any{
+		"required_review_thread_resolution": true,
+		"dismiss_stale_reviews_on_push":     true,
+		"require_code_owner_review":        false,
+	}}
+	if !prRuleWeaker(rule, owner) {
+		t.Error("missing code-owner review is weaker when required")
+	}
+
+	// Fully at-intent rule: not weaker.
+	rule = map[string]any{"parameters": map[string]any{
+		"required_review_thread_resolution": true,
+		"dismiss_stale_reviews_on_push":     true,
+		"require_code_owner_review":        true,
+	}}
+	if prRuleWeaker(rule, owner) {
+		t.Error("at-intent rule is not weaker")
+	}
+}
+
+func TestStrictChecksWeaker(t *testing.T) {
+	atStrict := &Ruleset{Rules: []map[string]any{
+		{"type": "required_status_checks", "parameters": map[string]any{
+			"strict_required_status_checks_policy": true,
+		}},
+	}}
+	offStrict := &Ruleset{Rules: []map[string]any{
+		{"type": "required_status_checks", "parameters": map[string]any{
+			"strict_required_status_checks_policy": false,
+		}},
+	}}
+
+	// Unset intent never drifts.
+	if strictChecksWeaker(offStrict, BranchProtectionOptions{StrictChecksSet: false}) {
+		t.Error("unset intent must not drift")
+	}
+	// Explicit false never drifts (never weaken a stricter repo; and relax
+	// intent only applies at enforcement, not drift).
+	if strictChecksWeaker(atStrict, BranchProtectionOptions{StrictChecks: false, StrictChecksSet: true}) {
+		t.Error("explicit false must not drift on a stricter live repo")
+	}
+	// Explicit true on a live false: drift.
+	if !strictChecksWeaker(offStrict, BranchProtectionOptions{StrictChecks: true, StrictChecksSet: true}) {
+		t.Error("explicit true with live false must drift")
+	}
+	// Explicit true but no checks rule at all: drift.
+	if !strictChecksWeaker(&Ruleset{}, BranchProtectionOptions{StrictChecks: true, StrictChecksSet: true}) {
+		t.Error("explicit true with no rule must drift")
+	}
+}

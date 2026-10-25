@@ -137,6 +137,9 @@ func TestRepoDataSanitize(t *testing.T) {
 			if want.ReadmePath == "" {
 				want.ReadmePath = "README.md"
 			}
+			if want.AgentGuideLine == "" {
+				want.AgentGuideLine = agentGuideLine("AGENTS.md")
+			}
 			if want.NodeLintCommand == "" {
 				want.NodeLintCommand = defaultNodeLintCommand
 			}

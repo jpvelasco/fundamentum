@@ -131,11 +131,9 @@ var safeNameRe = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
 // sanitizeAgentGuideLine validates the PR-template checklist line. The line
 // is generated internally by DetectAgentGuideLine from a fixed candidate
-// list; anything else falls back to the AGENTS.md standard line.
+// list. Empty or unknown values fall back to the AGENTS.md standard line —
+// "if there is no file, use agents.md".
 func sanitizeAgentGuideLine(line string) string {
-	if line == "" {
-		return line
-	}
 	for _, guide := range agentGuideCandidates {
 		if line == agentGuideLine(guide) {
 			return line

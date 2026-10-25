@@ -218,30 +218,28 @@ func TestAudit_MissingFileFails(t *testing.T) {
 }
 
 func TestAudit_AliasFileCountsAsPresent(t *testing.T) {
+	// The canonical .github/CODEOWNERS is missing but the root CODEOWNERS
+	// alias exists — audit must report PASS with "alias path in use".
 	resetAuditGlobals(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/contents/.github/CODEOWNERS") ||
-			strings.HasSuffix(r.URL.Path, "/contents/CODEOWNERS") {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/contents/.github/CODEOWNERS"):
 			w.WriteHeader(http.StatusNotFound)
-			return
+		case strings.HasSuffix(r.URL.Path, "/contents/CODEOWNERS"):
+			_, _ = w.Write([]byte(`{"content":"","sha":"x"}`))
+		default:
+			writePassingAudit(t, w, r, true, true)
 		}
-		writePassingAudit(t, w, r, true, true)
 	}))
 	defer srv.Close()
 
 	var out strings.Builder
-	// Root CODEOWNERS exists (mock serves it as part of the passing fixture's
-	// content map? no — the alias is 404 above, so instead serve root CODEOWNERS).
-	// The passing handler serves rendered content only at canonical paths; the
-	// alias variant check looks at the root path, which writePassingAudit also
-	// serves. See writePassingAudit: it serves any rendered file's path —
-	// the canonical .github/CODEOWNERS. For this test, serve the root alias.
-	err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &out)
-	_ = err
-	// Covered by TestAudit_MissingFileFails above (both paths 404 → FAIL);
-	// the alias-present case is covered by writePassingAudit serving the
-	// canonical path. This test documents the alias path specifically.
-	_ = out
+	if err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &out); err != nil {
+		t.Fatalf("root CODEOWNERS alias must satisfy audit: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "alias path in use") {
+		t.Errorf("expected alias PASS row, got:\n%s", out.String())
+	}
 }
 
 func TestAudit_FromMissingBaseline(t *testing.T) {
@@ -508,13 +506,7 @@ func TestFormatReport(t *testing.T) {
 	}
 }
 
-// newAuditServer serves the passing fixture (kept for tests that don't need
-// the *testing.T-aware content rendering).
-func newAuditServer(healthyBranch bool) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writePassingAudit(nil, w, r, healthyBranch, true)
-	}))
-}
+
 
 // writePassingAudit serves a repo that matches the baseline. When t is nil
 // the file contents are served as short non-matching bodies (WARN rows) —

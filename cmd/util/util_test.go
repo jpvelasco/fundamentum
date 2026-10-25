@@ -110,3 +110,14 @@ func TestRequireToken_GhAuthEmpty(t *testing.T) {
 		t.Fatal("empty gh token must not count as authenticated")
 	}
 }
+func TestGhAuthTokenExecutes(t *testing.T) {
+	// Cover the production fallback body by invoking it directly. The
+	// outcome is machine-dependent (gh installed + authenticated or not):
+	// a valid token with nil error, or any error — both acceptable. The
+	// contract is only that it returns without panicking.
+	t.Setenv("GITHUB_TOKEN", "")
+	token, err := GhAuthToken()
+	if err == nil && token == "" {
+		t.Fatal("gh success with an empty token is a contradiction")
+	}
+}

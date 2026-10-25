@@ -712,18 +712,6 @@ func inferSolo(got *Ruleset) bool {
 	return !mapBool(params, "require_code_owner_review") && !mapBool(params, "dismiss_stale_reviews_on_push")
 }
 
-// matchingPRRule reports whether the live rule matches the intended one
-// exactly (used by tests; a reconcile only requires not-weaker).
-func matchingPRRule(rule map[string]any, opts BranchProtectionOptions) bool {
-	if rule == nil {
-		return false
-	}
-	params, _ := rule["parameters"].(map[string]any)
-	return mapBool(params, "required_review_thread_resolution") &&
-		mapBool(params, "require_code_owner_review") == opts.requireCodeOwners() &&
-		mapBool(params, "dismiss_stale_reviews_on_push") == !opts.Solo
-}
-
 func hasAllChecks(got *Ruleset, want []string) bool {
 	if len(want) == 0 {
 		return true

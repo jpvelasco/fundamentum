@@ -1,6 +1,9 @@
 package templates
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestNodeCommands(t *testing.T) {
 	tests := []struct {
@@ -89,6 +92,33 @@ func TestDetectDocData(t *testing.T) {
 	_, _, _, _, err = DetectDocData(func(string) (bool, error) { return false, errProbe }, read, CIPackGo)
 	if err != errProbe {
 		t.Errorf("exists error must propagate: %v", err)
+	}
+
+	// Node pack with package.json absent: empty commands (RepoData.sanitize
+	// substitutes the failing defaults at render time), no error.
+	absent := func(string) (bool, error) { return false, nil }
+	_, _, lint, test, err = DetectDocData(absent, func() ([]byte, bool, error) { return nil, false, nil }, CIPackNode)
+	if err != nil {
+		t.Fatalf("absent package.json must not error: %v", err)
+	}
+	if lint != "" || test != "" {
+		t.Errorf("absent package.json = (%q, %q), want empty (sanitize defaults at render)", lint, test)
+	}
+	// The render choke point fills the failing defaults for the empty values.
+	data := RepoData{Owner: "o", RepoName: "r", DefaultBranch: "main", Visibility: "public", CIPack: CIPackNode}
+	rendered, err := Render(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ci := contentFor(rendered, ".github/workflows/ci.yml")
+	if !strings.Contains(ci, defaultNodeLintCommand) || !strings.Contains(ci, defaultNodeTestCommand) {
+		t.Errorf("empty node commands must render the failing defaults:\n%s", ci)
+	}
+
+	// Node pack with a read error: propagates.
+	_, _, _, _, err = DetectDocData(absent, func() ([]byte, bool, error) { return nil, false, errProbe }, CIPackNode)
+	if err != errProbe {
+		t.Errorf("package.json read error must propagate: %v", err)
 	}
 }
 

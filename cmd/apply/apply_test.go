@@ -43,14 +43,6 @@ func prMockHandler() http.HandlerFunc {
 	})
 }
 
-// simpleFileHandler returns an http.HandlerFunc that returns 201 + {"content":{}} for all requests.
-func simpleFileHandler() http.HandlerFunc {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"content":{}}`))
-	})
-}
-
 // newFileItems builds a wizard.Item slice with the given names, content, and Apply closures.
 // names, content, and applies must be of equal length.
 func newFileItems(names []string, content [][]byte, applies []func() error) []wizard.Item {
@@ -1367,4 +1359,59 @@ func TestApplyItems_PerFile409SwitchesToPR(t *testing.T) {
 			t.Errorf("per-file 409 fallback must defer required checks for the open PR\n%s", dbg.String())
 		}
 	}, nil)
+}
+
+func TestRenderData_DetectionErrorsPropagate(t *testing.T) {
+	// Any detection error aborts the plan instead of falling back silently.
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/contents/") {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	info := github.Repo{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"}
+	_, err := RenderData(c, info, "go", false)
+	if err == nil {
+		t.Fatal("a 403 on the README detection must propagate")
+	}
+	if !strings.Contains(err.Error(), "check file README.md") {
+		t.Errorf("error must name the failing probe: %v", err)
+	}
+}
+
+func TestRenderData_NilClientTakesDefaults(t *testing.T) {
+	info := github.Repo{Owner: "o", RepoName: "r", DefaultBranch: "main", Visibility: "public"}
+	data, err := RenderData(nil, info, "node", false)
+	if err != nil {
+		t.Fatalf("nil client must not probe: %v", err)
+	}
+	// Detection fields stay empty; RenderData.sanitize substitutes the
+	// defaults (README.md, the AGENTS.md standard line, and the honest
+	// failing node commands) at render time.
+	rendered, err := renderTemplates(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl := ""
+	for _, f := range rendered {
+		if f.Path == ".github/PULL_REQUEST_TEMPLATE.md" {
+			tpl = f.Content
+		}
+	}
+	if !strings.Contains(tpl, "Updated README.md") || !strings.Contains(tpl, "Updated AGENTS.md") {
+		t.Errorf("defaults must land in the PR template:\n%s", tpl)
+	}
+	ci := ""
+	for _, f := range rendered {
+		if f.Path == ".github/workflows/ci.yml" {
+			ci = f.Content
+		}
+	}
+	if !strings.Contains(ci, "package.json has no lint script") {
+		t.Errorf("node defaults must fail honestly:\n%s", ci)
+	}
 }

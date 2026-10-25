@@ -785,6 +785,7 @@ func applyFilesPerItem(c *github.Client, owner, repo, branch string, changes []g
 			rest := changesAfter(changes, ch.Path)
 			remaining = append(remaining, rest...)
 			if err := applyFilesViaPR(c, owner, repo, branch, remaining, stdout); err != nil {
+				_, _ = fmt.Fprintf(stdout, "  %-45s  ✗ %v\n", "files (PR fallback)", err)
 				requiredFailed = true
 			}
 			return requiredFailed

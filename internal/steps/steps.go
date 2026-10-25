@@ -48,15 +48,15 @@ func (s Selector) IncludeStep(step string) bool {
 }
 
 // ExcludeReason reports which opt-out mechanism excludes an item: "--skip",
-// "--only", or "" when the item is included. Used for plan-table labels.
+// "--only", or "" when the item is included.
 func (s Selector) ExcludeReason(stepOrPath string) string {
 	if _, ok := s.skip[stepOrPath]; ok {
 		return "--skip"
 	}
-	if _, ok := s.only[stepOrPath]; ok {
-		return "--only"
-	}
 	if len(s.only) > 0 {
+		if _, ok := s.only[stepOrPath]; ok {
+			return "" // listed in --only: included
+		}
 		return "--only"
 	}
 	return ""
