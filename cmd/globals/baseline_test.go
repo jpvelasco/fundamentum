@@ -231,10 +231,10 @@ func TestApplyBaseline_NewFieldsFillUnset(t *testing.T) {
 	resetBaseline(t)
 	falseUpToDate := false
 	if err := ApplyBaseline(Baseline{
-		Skip:                []string{"security"},
-		Only:                []string{"files"},
-		Octopus:             true,
-		CodacyInstructions:  true,
+		Skip:                  []string{"security"},
+		Only:                  []string{"files"},
+		Octopus:               true,
+		CodacyInstructions:    true,
 		RequireBranchUpToDate: &falseUpToDate,
 	}); err != nil {
 		t.Fatal(err)

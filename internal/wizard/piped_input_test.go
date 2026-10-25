@@ -16,7 +16,7 @@ func TestPipedAnswersSurviveAcrossPrompts(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
-		decline  bool  // ConfirmDefaults answer
+		decline  bool // ConfirmDefaults answer
 		wantActs []Action
 	}{
 		{

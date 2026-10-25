@@ -1415,3 +1415,41 @@ func TestRenderData_NilClientTakesDefaults(t *testing.T) {
 		t.Errorf("node defaults must fail honestly:\n%s", ci)
 	}
 }
+
+func TestRunWithClient_UnknownSkipKeyErrors(t *testing.T) {
+	t.Cleanup(func() {
+		globals.SkipSteps = nil
+		globals.OnlySteps = nil
+	})
+	globals.SkipSteps = []string{"protect-mian"} // typo: silent no-op would be dangerous
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/owner/repo":
+			_, _ = w.Write([]byte(`{"name":"repo","visibility":"public","default_branch":"main","owner":{"type":"User"}}`))
+		case strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(http.StatusNotFound)
+		case strings.HasSuffix(r.URL.Path, "/rulesets"):
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	err := runWithClient(c, "owner", "repo", newLineReader("\n"), &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "unknown --skip/--only key(s): protect-mian") {
+		t.Fatalf("typo in --skip must error with the token named, got: %v", err)
+	}
+
+	// A valid path token passes validation.
+	globals.SkipSteps = []string{"socket.yml"}
+	if err := runWithClient(c, "owner", "repo", newLineReader("\n"), &strings.Builder{}); err == nil || !strings.Contains(err.Error(), "Dry run complete") {
+		// runWithClient without --dry-run does a live run; with the mock server
+		// the flow ends in apply errors. Validation happens BEFORE any of that,
+		// so only the unknown-key case must error; the valid case must NOT error
+		// with the unknown-key message.
+		if err != nil && strings.Contains(err.Error(), "unknown --skip/--only") {
+			t.Fatalf("valid token must not trigger the unknown-key error: %v", err)
+		}
+	}
+}

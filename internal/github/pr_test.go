@@ -548,9 +548,9 @@ func TestDeleteBranch_Errors(t *testing.T) {
 
 func TestApplyViaPR(t *testing.T) {
 	tests := []struct {
-		name    string
-		handler http.HandlerFunc
-		changes []FileChange
+		name       string
+		handler    http.HandlerFunc
+		changes    []FileChange
 		wantErr    bool
 		errMsg     string
 		wantZeroPR bool

@@ -108,6 +108,13 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 		return fmt.Errorf("render templates: %w", err)
 	}
 
+	// Validate --skip/--only tokens against the real steps and rendered
+	// paths: a typo must be an error, not a silent no-op that lets apply
+	// touch exactly what the operator meant to leave alone.
+	if unknown := steps.New(globals.SkipSteps, globals.OnlySteps).Unknown(renderedPaths(rendered)); len(unknown) > 0 {
+		return fmt.Errorf("unknown --skip/--only key(s): %s — use settings, protect-main, protect-version-tags, security, files, or an exact shipped file path", strings.Join(unknown, ", "))
+	}
+
 	// Pre-flight: check branch protection state before asking solo/team.
 	// On a free-tier private repo GitHub returns "Upgrade to GitHub Pro" 403s
 	// for both the rulesets and classic branch-protection APIs, so plan all
@@ -203,7 +210,7 @@ func RenderData(client *github.Client, info github.Repo, pack string, orgOwner b
 		RepoName:           info.RepoName,
 		DefaultBranch:      info.DefaultBranch,
 		Visibility:         info.Visibility,
-		CodeOwnerLine:       codeOwnerLine(info.Owner, orgOwner),
+		CodeOwnerLine:      codeOwnerLine(info.Owner, orgOwner),
 		CIPack:             pack,
 		Octopus:            globals.Octopus,
 		CodacyInstructions: globals.CodacyInstructions,
@@ -256,6 +263,9 @@ func PlanNewRepo(owner, repo, visibility string, stdout io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("render templates: %w", err)
 	}
+	if unknown := steps.New(globals.SkipSteps, globals.OnlySteps).Unknown(renderedPaths(rendered)); len(unknown) > 0 {
+		return fmt.Errorf("unknown --skip/--only key(s): %s — use settings, protect-main, protect-version-tags, security, files, or an exact shipped file path", strings.Join(unknown, ", "))
+	}
 	// Named presets must match a live apply: only strict / --advanced-security
 	// enable GHAS. Interactive dry-run still shows the offered plan line.
 	paid := globals.AdvancedSecurity || github.IsPublicVisibility(visibility) || (globals.DryRun && globals.Preset == "")
@@ -293,7 +303,7 @@ func buildItems(
 		detail := ""
 
 		if !selector.IncludeFile(file.Path) {
-			items = append(items, optedOutItem(file.Path, file.Path, selector))
+			items = append(items, optedOutFileItem(file.Path, selector))
 			continue
 		}
 
@@ -319,9 +329,9 @@ func buildItems(
 			}
 		}
 		items = append(items, wizard.Item{
-			Name:    file.Path,
-			Action:  action,
-			Detail:  detail,
+			Name:   file.Path,
+			Action: action,
+			Detail: detail,
 			// No Apply closure: file items are applied exclusively through the
 			// client (single-commit batch, per-file fallback, or PR mode).
 			Content: []byte(file.Content),
@@ -363,6 +373,12 @@ func buildItems(
 // stepKey is the canonical step key or the file's target path.
 func optedOutItem(name, stepKey string, selector steps.Selector) wizard.Item {
 	return wizard.Item{Name: name, Action: wizard.ActionSkip, OptOutReason: selector.ExcludeReason(stepKey)}
+}
+
+// optedOutFileItem is optedOutItem for file paths (the "files" key and exact
+// path entries have file-specific reason semantics).
+func optedOutFileItem(path string, selector steps.Selector) wizard.Item {
+	return wizard.Item{Name: path, Action: wizard.ActionSkip, OptOutReason: selector.ExcludeFileReason(path)}
 }
 
 func generalSettingsItem(c *github.Client, info *github.Repo, owner, repo string) wizard.Item {
@@ -550,6 +566,16 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			},
 		}
 	}
+}
+
+// renderedPaths lists the target paths of the rendered files (for --skip /
+// --only token validation).
+func renderedPaths(rendered []templates.RenderedFile) []string {
+	paths := make([]string, 0, len(rendered))
+	for _, f := range rendered {
+		paths = append(paths, f.Path)
+	}
+	return paths
 }
 
 func loadFlags() error {

@@ -44,7 +44,7 @@ Examples:
   fundamentum audit OWNER/REPO
   fundamentum --preset oss audit OWNER/REPO
   fundamentum --ci generic audit OWNER/REPO
-  fundamentum --skip octopus.yml audit OWNER/REPO
+  fundamentum --skip socket.yml audit OWNER/REPO
   fundamentum --strict audit OWNER/REPO`,
 		Args: cobra.ExactArgs(1),
 		RunE: run,
@@ -113,9 +113,9 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 	selector := steps.New(globals.SkipSteps, globals.OnlySteps)
 
 	opts := github.BranchProtectionOptions{
-		SkipCodeOwners:   strings.EqualFold(info.OwnerType, "Organization"),
-		StrictChecks:     globals.BranchUpToDate,
-		StrictChecksSet:  globals.BranchUpToDateSet,
+		SkipCodeOwners:  strings.EqualFold(info.OwnerType, "Organization"),
+		StrictChecks:    globals.BranchUpToDate,
+		StrictChecksSet: globals.BranchUpToDateSet,
 	}
 	m, err := templates.DetectManifests(func(path string) (bool, error) {
 		return client.AnyFileExists(owner, repo, []string{path})
@@ -162,6 +162,16 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 		return fmt.Errorf("render templates: %w", err)
 	}
 
+	// Validate --skip/--only tokens the same way apply does: a typo must be
+	// an error, not a silent no-op that audits steps the operator excluded.
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		paths = append(paths, f.Path)
+	}
+	if unknown := steps.New(globals.SkipSteps, globals.OnlySteps).Unknown(paths); len(unknown) > 0 {
+		return fmt.Errorf("unknown --skip/--only key(s): %s — use settings, protect-main, protect-version-tags, security, files, or an exact shipped file path", strings.Join(unknown, ", "))
+	}
+
 	results := []check{
 		branchCheck(branchPlan, classicExists, protectionUnavailable, selector),
 		tagCheck(tagPlan, protectionUnavailable, selector),
@@ -171,7 +181,7 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 	}
 	for _, f := range files {
 		if !selector.IncludeFile(f.Path) {
-			results = append(results, skipCheck(f.Path, selector))
+			results = append(results, skipFileCheck(f.Path, selector))
 			continue
 		}
 		results = append(results, fileCheck(client, owner, repo, f.Path, []byte(f.Content)))
@@ -184,9 +194,14 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 	return nil
 }
 
-// skipCheck is a SKIP row for a step or file excluded via --skip / --only.
-func skipCheck(name string, selector steps.Selector) check {
-	return check{Name: name, Status: statusSkip, Detail: "opted out (" + selector.ExcludeReason(name) + ")"}
+// skipCheck is a SKIP row for a step excluded via --skip / --only.
+func skipCheck(step string, selector steps.Selector) check {
+	return check{Name: step, Status: statusSkip, Detail: "opted out (" + selector.ExcludeReason(step) + ")"}
+}
+
+// skipFileCheck is a SKIP row for a shipped file excluded via --skip / --only.
+func skipFileCheck(path string, selector steps.Selector) check {
+	return check{Name: path, Status: statusSkip, Detail: "opted out (" + selector.ExcludeFileReason(path) + ")"}
 }
 
 // stepSkipped returns a SKIP row when the step is opted out, otherwise ok=false.

@@ -100,13 +100,13 @@ func (c *Client) accountType(login string) (string, error) {
 
 // Repo is the subset of GET /repos/{owner}/{repo} that apply and audit need.
 type Repo struct {
-	Owner               string
-	RepoName            string
-	Visibility          string
-	DefaultBranch       string
-	OwnerType           string // "User" or "Organization"
-	DeleteBranchOnMerge bool
-	SecretScanning      bool
+	Owner                string
+	RepoName             string
+	Visibility           string
+	DefaultBranch        string
+	OwnerType            string // "User" or "Organization"
+	DeleteBranchOnMerge  bool
+	SecretScanning       bool
 	SecretPushProtection bool
 }
 

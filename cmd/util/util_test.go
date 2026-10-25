@@ -8,11 +8,11 @@ import (
 
 func TestParseOwnerRepo(t *testing.T) {
 	tests := []struct {
-		name    string
-		arg     string
-		wantOwn string
+		name     string
+		arg      string
+		wantOwn  string
 		wantRepo string
-		wantErr bool
+		wantErr  bool
 	}{
 		{"valid", "owner/repo", "owner", "repo", false},
 		{"with hyphens", "my-org/my-repo", "my-org", "my-repo", false},

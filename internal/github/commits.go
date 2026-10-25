@@ -93,7 +93,7 @@ func (c *Client) commitTree(owner, repo, sha string) (string, error) {
 // createBlob uploads content and returns the blob SHA.
 func (c *Client) createBlob(owner, repo string, content []byte) (string, error) {
 	resp, err := c.post(repoPath(owner, repo)+"/git/blobs", map[string]any{
-		"content":   base64.StdEncoding.EncodeToString(content),
+		"content":  base64.StdEncoding.EncodeToString(content),
 		"encoding": "base64",
 	})
 	if err != nil {

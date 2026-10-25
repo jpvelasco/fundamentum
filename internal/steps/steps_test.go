@@ -172,8 +172,8 @@ func TestSelector_UppercasePathsMatch(t *testing.T) {
 	if !s.IncludeFile(".github/SECURITY.md") {
 		t.Error("other files stay included")
 	}
-	if got := s.ExcludeReason(".github/CODEOWNERS"); got != "--skip" {
-		t.Errorf("ExcludeReason = %q, want --skip", got)
+	if got := s.ExcludeFileReason(".github/CODEOWNERS"); got != "--skip" {
+		t.Errorf("ExcludeFileReason = %q, want --skip", got)
 	}
 
 	only := New(nil, []string{".github/SECURITY.md"})
@@ -182,5 +182,66 @@ func TestSelector_UppercasePathsMatch(t *testing.T) {
 	}
 	if only.IncludeFile(".github/CODEOWNERS") {
 		t.Error("unlisted uppercase path must be excluded by --only")
+	}
+}
+
+func TestSelector_ExcludeReasonFilesKey(t *testing.T) {
+	// Files excluded via the "files" key must still name their mechanism —
+	// otherwise the plan reports them as "already exists".
+	s := New([]string{Files}, nil)
+	if got := s.ExcludeFileReason(".github/CODEOWNERS"); got != "--skip" {
+		t.Errorf("ExcludeFileReason under --skip files = %q, want --skip", got)
+	}
+	if got := s.ExcludeReason(ProtectMain); got != "" {
+		t.Errorf("steps stay included: %q", got)
+	}
+
+	// Only-files: every file included, steps excluded.
+	only := New(nil, []string{Files})
+	if got := only.ExcludeFileReason(".github/CODEOWNERS"); got != "" {
+		t.Errorf("file under --only files = %q, want included", got)
+	}
+	if got := only.ExcludeReason(Security); got != "--only" {
+		t.Errorf("step under --only files = %q, want --only", got)
+	}
+
+	// Exact path in --only: that file included, others excluded by --only.
+	pathOnly := New(nil, []string{"socket.yml"})
+	if got := pathOnly.ExcludeFileReason("socket.yml"); got != "" {
+		t.Errorf("only-listed path = %q, want included", got)
+	}
+	if got := pathOnly.ExcludeFileReason(".github/CODEOWNERS"); got != "--only" {
+		t.Errorf("unlisted path = %q, want --only", got)
+	}
+}
+
+func TestSelector_Unknown(t *testing.T) {
+	paths := []string{".github/CODEOWNERS", "socket.yml", ".github/workflows/octopus.yml"}
+	tests := []struct {
+		name string
+		skip []string
+		only []string
+		want []string
+	}{
+		{"known steps pass", []string{"protect-main", "security"}, nil, nil},
+		{"known paths pass", []string{"socket.yml", ".github/CODEOWNERS"}, nil, nil},
+		{"files key passes", []string{"files"}, nil, nil},
+		{"typo flagged", []string{"protect-mian"}, nil, []string{"protect-mian"}},
+		{"bare filename flagged", []string{"octopus.yml"}, nil, []string{"octopus.yml"}},
+		{"wrong separator flagged", []string{"protect_main"}, nil, []string{"protect_main"}},
+		{"only typo flagged", nil, []string{"settngs"}, []string{"settngs"}},
+		{"case-insensitive path passes", []string{".github/codeowners"}, nil, nil},
+	}
+	for _, tt := range tests {
+		got := New(tt.skip, tt.only).Unknown(paths)
+		if len(got) != len(tt.want) {
+			t.Errorf("%s: Unknown = %v, want %v", tt.name, got, tt.want)
+			continue
+		}
+		for i := range tt.want {
+			if got[i] != tt.want[i] {
+				t.Errorf("%s: Unknown = %v, want %v", tt.name, got, tt.want)
+			}
+		}
 	}
 }

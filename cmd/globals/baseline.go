@@ -14,17 +14,17 @@ const BaselineVersion = 1
 
 // Baseline is a portable harden config that apply --from can reapply.
 type Baseline struct {
-	Version          int      `json:"version"`
-	Preset           string   `json:"preset,omitempty"`
-	CI               string   `json:"ci,omitempty"`
-	RequireChecks    []string `json:"require_checks,omitempty"`
-	AdvancedSecurity bool     `json:"advanced_security,omitempty"`
-	Strict           bool     `json:"strict,omitempty"`
-	NoOverwrite      bool     `json:"no_overwrite,omitempty"`
-	Skip             []string `json:"skip,omitempty"`
-	Only             []string `json:"only,omitempty"`
-	Octopus          bool     `json:"octopus,omitempty"`
-	CodacyInstructions bool   `json:"codacy_instructions,omitempty"`
+	Version            int      `json:"version"`
+	Preset             string   `json:"preset,omitempty"`
+	CI                 string   `json:"ci,omitempty"`
+	RequireChecks      []string `json:"require_checks,omitempty"`
+	AdvancedSecurity   bool     `json:"advanced_security,omitempty"`
+	Strict             bool     `json:"strict,omitempty"`
+	NoOverwrite        bool     `json:"no_overwrite,omitempty"`
+	Skip               []string `json:"skip,omitempty"`
+	Only               []string `json:"only,omitempty"`
+	Octopus            bool     `json:"octopus,omitempty"`
+	CodacyInstructions bool     `json:"codacy_instructions,omitempty"`
 	// RequireBranchUpToDate is a tri-state: nil keeps the live ruleset
 	// policy on reconcile; true/false forces the policy.
 	RequireBranchUpToDate *bool `json:"require_branch_up_to_date,omitempty"`
@@ -33,13 +33,13 @@ type Baseline struct {
 // CurrentBaseline snapshots the active flags into a portable baseline.
 func CurrentBaseline() Baseline {
 	b := Baseline{
-		Version:          BaselineVersion,
-		Preset:           Preset,
-		CI:               CIPack,
-		AdvancedSecurity: AdvancedSecurity,
-		Strict:           Strict,
-		NoOverwrite:      NoOverwrite,
-		Octopus:           Octopus,
+		Version:            BaselineVersion,
+		Preset:             Preset,
+		CI:                 CIPack,
+		AdvancedSecurity:   AdvancedSecurity,
+		Strict:             Strict,
+		NoOverwrite:        NoOverwrite,
+		Octopus:            Octopus,
 		CodacyInstructions: CodacyInstructions,
 	}
 	if RequireChecks != nil {

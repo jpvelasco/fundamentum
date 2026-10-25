@@ -506,8 +506,6 @@ func TestFormatReport(t *testing.T) {
 	}
 }
 
-
-
 // writePassingAudit serves a repo that matches the baseline. When t is nil
 // the file contents are served as short non-matching bodies (WARN rows) —
 // tests that assert on FAIL/SKIP logic tolerate the extra warns. With t set,
@@ -615,5 +613,17 @@ func TestAudit_FileProbeErrorFailsClosed(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "status check failed") {
 		t.Errorf("report must name the probe failure:\n%s", out.String())
+	}
+}
+
+func TestAudit_UnknownSkipKeyErrors(t *testing.T) {
+	resetAuditGlobals(t)
+	globals.SkipSteps = []string{"octopus.yml"} // bare filename: never matches the target path
+	srv := httptest.NewServer(passingAuditHandler(t))
+	defer srv.Close()
+
+	err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "unknown --skip/--only key(s): octopus.yml") {
+		t.Fatalf("a token that matches nothing must error, got: %v", err)
 	}
 }

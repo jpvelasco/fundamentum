@@ -454,7 +454,7 @@ func TestPrRuleWeaker(t *testing.T) {
 	rule := map[string]any{"parameters": map[string]any{
 		"required_review_thread_resolution": true,
 		"dismiss_stale_reviews_on_push":     true,
-		"require_code_owner_review":        false,
+		"require_code_owner_review":         false,
 	}}
 	if !prRuleWeaker(rule, owner) {
 		t.Error("missing code-owner review is weaker when required")
@@ -464,7 +464,7 @@ func TestPrRuleWeaker(t *testing.T) {
 	rule = map[string]any{"parameters": map[string]any{
 		"required_review_thread_resolution": true,
 		"dismiss_stale_reviews_on_push":     true,
-		"require_code_owner_review":        true,
+		"require_code_owner_review":         true,
 	}}
 	if prRuleWeaker(rule, owner) {
 		t.Error("at-intent rule is not weaker")

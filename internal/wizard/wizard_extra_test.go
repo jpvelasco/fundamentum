@@ -285,10 +285,10 @@ func TestPrintItemError_ShowsActualError(t *testing.T) {
 
 func TestItemLabels_DetailAndOptOut(t *testing.T) {
 	tests := []struct {
-		name          string
-		item          Item
-		wantDryRun    string
-		wantLive      string
+		name       string
+		item       Item
+		wantDryRun string
+		wantLive   string
 	}{
 		{
 			name:       "skip with detail",
