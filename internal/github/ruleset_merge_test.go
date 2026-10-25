@@ -501,3 +501,37 @@ func TestStrictChecksWeaker(t *testing.T) {
 		t.Error("explicit true with no rule must drift")
 	}
 }
+
+func TestInferSoloHybridRule(t *testing.T) {
+	// A solo maintainer with stale-dismissal kept on: CODEOWNERS review off
+	// is the solo marker. Inferring team here would make reconcile force
+	// code-owner review on and deadlock the maintainer's own PRs.
+	hybrid := &Ruleset{Rules: []map[string]any{
+		{"type": "pull_request", "parameters": map[string]any{
+			"require_code_owner_review":        false,
+			"dismiss_stale_reviews_on_push":   true,
+			"required_review_thread_resolution": true,
+		}},
+	}}
+	if !inferSolo(hybrid) {
+		t.Error("code-owner-off with dismiss-on must infer solo")
+	}
+
+	team := &Ruleset{Rules: []map[string]any{
+		{"type": "pull_request", "parameters": map[string]any{
+			"require_code_owner_review":        true,
+			"dismiss_stale_reviews_on_push":     true,
+		}},
+	}}
+	if inferSolo(team) {
+		t.Error("code-owner-on must infer team")
+	}
+
+	// Drift stays silent for the hybrid (intent matches live).
+	drift := BranchRulesetDrift(hybrid, nil, BranchProtectionOptions{Solo: true})
+	for _, d := range drift {
+		if d == "pull_request" {
+			t.Errorf("hybrid solo ruleset must not drift on pull_request: %v", drift)
+		}
+	}
+}

@@ -703,13 +703,19 @@ func intendedChecks(statusChecks []string, opts BranchProtectionOptions) []strin
 	return dedup(statusChecks)
 }
 
+// inferSolo reports whether the live pull_request rule reads as a solo repo.
+// The CODEOWNERS-review flag is THE marker: a solo maintainer must have it
+// off (they cannot approve their own PRs), so off means solo regardless of
+// the stale-dismissal hygiene flag — a solo maintainer may legitimately
+// keep dismiss_stale on. Forcing code-owner review back on for such a
+// ruleset would deadlock the maintainer's own PRs.
 func inferSolo(got *Ruleset) bool {
 	pr := ruleByType(got, "pull_request")
 	if pr == nil {
 		return false
 	}
 	params, _ := pr["parameters"].(map[string]any)
-	return !mapBool(params, "require_code_owner_review") && !mapBool(params, "dismiss_stale_reviews_on_push")
+	return !mapBool(params, "require_code_owner_review")
 }
 
 func hasAllChecks(got *Ruleset, want []string) bool {

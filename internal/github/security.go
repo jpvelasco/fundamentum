@@ -40,16 +40,33 @@ func (c *Client) AutomatedSecurityFixesEnabled(owner, repo string) (bool, error)
 	return c.featureEnabled(repoPath(owner, repo)+"/automated-security-fixes", "automated security fixes")
 }
 
+// featureEnabled reports whether a toggle endpoint says a feature is on.
+// GitHub documents 204 for enabled and 404 for disabled, but some
+// deployments answer 200 with a JSON body ({"enabled":true,...}) — accept
+// both shapes so a healthy feature is not misreported as a check error.
 func (c *Client) featureEnabled(path, name string) (bool, error) {
 	resp, err := c.get(path)
 	if err != nil {
 		return false, fmt.Errorf("check %s: %w", name, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if err := expectStatus("check "+name, resp, http.StatusNoContent, http.StatusNotFound); err != nil {
+	if err := expectStatus("check "+name, resp, http.StatusOK, http.StatusNoContent, http.StatusNotFound); err != nil {
 		return false, err
 	}
-	return resp.StatusCode == http.StatusNoContent, nil
+	switch resp.StatusCode {
+	case http.StatusNotFound:
+		return false, nil
+	case http.StatusNoContent:
+		return true, nil
+	default: // 200 with a JSON body
+		var body struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			return false, fmt.Errorf("check %s: decode body: %w", name, err)
+		}
+		return body.Enabled, nil
+	}
 }
 
 // DefaultCodeQLSetupEnabled reports whether the repository uses GitHub's

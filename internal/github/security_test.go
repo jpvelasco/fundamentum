@@ -38,12 +38,15 @@ func TestSecurityFeaturesEnabled(t *testing.T) {
 	statuses := []struct {
 		name   string
 		status int
+		body   string
 		want   bool
 		err    bool
 	}{
-		{"enabled", http.StatusNoContent, true, false},
-		{"disabled", http.StatusNotFound, false, false},
-		{"forbidden", http.StatusForbidden, false, true},
+		{"enabled", http.StatusNoContent, "", true, false},
+		{"disabled", http.StatusNotFound, "", false, false},
+		{"forbidden", http.StatusForbidden, "", false, true},
+		{"enabled-with-body", http.StatusOK, `{"enabled":true,"paused":false}`, true, false},
+		{"disabled-with-body", http.StatusOK, `{"enabled":false}`, false, false},
 	}
 	for _, feature := range features {
 		for _, status := range statuses {
@@ -53,6 +56,9 @@ func TestSecurityFeaturesEnabled(t *testing.T) {
 						t.Errorf("unexpected path %s", r.URL.Path)
 					}
 					w.WriteHeader(status.status)
+					if status.body != "" {
+						_, _ = w.Write([]byte(status.body))
+					}
 				}), nil, func(c *Client) {
 					got, err := feature.check(c)
 					if (err != nil) != status.err {
