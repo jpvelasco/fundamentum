@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-25
+
+**Feature release.** Per-step opt-outs, merge-based ruleset reconcile, honest CI starters, a PASS/FAIL/WARN/SKIP audit, and single-commit file apply — plus opt-in treatment for third-party data-sharing templates and the AI agent-instructions file.
+
+### Added
+
+- **`--skip` / `--only` per-step opt-outs.** `--skip settings,protect-main,protect-version-tags,security,files` (or exact file paths) leaves steps alone; `--only` restricts apply/audit to the listed keys. Opted-out rows show as skipped in the plan and SKIP in audit; unknown tokens are a hard error instead of a silent no-op. Both persist in `export` baselines (`skip` / `only`).
+- **Merge-based ruleset reconcile.** Reconciling `protect-main` now merges with the live ruleset instead of rebuilding it: required checks already present keep their `integration_id` (only the app that posted them can satisfy them), extra checks and unowned rules survive, condition entries are kept, and stricter live review settings (approval count, last-push approval, stale dismissal, code-owner review) are never weakened. Drift is judged weaker-only — a hand-tuned stricter ruleset passes untouched.
+- **`--branch-up-to-date`.** The `strict_required_status_checks_policy` ("require branches up to date") is now a flag (default `true`) and a tri-state baseline field; when left unset on a reconcile, the live policy is kept instead of being forced back.
+- **Audit PASS/FAIL/WARN/SKIP.** `audit` now judges intent: FAIL (missing files, weakened ruleset, disabled core settings) fails the run; WARN (content drift on shipped files, tag-ruleset or secret-scanning drift) fails only with `--strict`; SKIP (opted-out steps, plan-gated protection, private-without-GHAS secret scanning) never fails. Required checks are judged "at least the intended ones", so a stricter-than-baseline repo passes, and shipped file content is compared — not just existence.
+- **Single-commit file apply.** Direct-mode file changes land as ONE commit via the git data API instead of one commit per file; a protection rejection (409/422) switches the batch to PR mode, and any other batch failure falls back to the per-file Contents API (which still skips Actions-locked workflow files).
+- **`gh auth token` fallback.** When `--token` and `GITHUB_TOKEN` are absent, the GitHub CLI's authenticated session is used.
+- **Per-language Dependabot and Codacy configs.** `dependabot.yml` ships the detected ecosystem(s) — `gomod` / `npm` / `pip` / `cargo` alongside `github-actions` — and `.codacy.yml` is generated per CI pack, so Go analyzers (govet, staticcheck) no longer run on Node/Python/Rust targets.
+
+### Changed
+
+- **Octopus Review is an explicit opt-in (`--octopus`).** The third-party workflow (it uploads PR diffs plus a PR-write token to octopus-review.ai on `pull_request_target`) no longer ships by default and is not part of any preset.
+- **Codacy agent instructions are an explicit opt-in (`--codacy-instructions`).** `.github/instructions/codacy.instructions.md` no longer ships by default; the content is rewritten to be conditional — with no Codacy MCP server available, agents skip Codacy analysis instead of stalling ("critical error" language removed).
+- **Generic CI fails until configured.** The `generic` pack's `CI` job ends with a `::error::` "configure me" annotation instead of passing vacuously — a required check that always passed was false confidence. The `node` pack runs the real `lint`/`test` scripts from `package.json` and fails the same way when they are missing.
+- **PR template standardizes on AGENTS.md.** The PR template detects the actual README filename and references the repo's agent guide — AGENTS.md (the standard) or a legacy CLAUDE.md when only that exists; the default for new repos is AGENTS.md.
+- **Runtime errors no longer dump usage text.** Failed runs print the error, not the full help block.
+
+### Fixed
+
+- **Dry-run says what would update.** Update rows carry the exact drift: ruleset fields (`drift: …`), missing security features (`off: dependabot alerts, …`), and per-file content diffstats (`content differs (+3/-5)`).
+- **Security planning is fail-closed.** A security status-check error aborts the plan instead of silently planning "would update"; CodeQL counts as enabled via default setup OR a `codeql*.yml` workflow, fixing the false positive on advanced-workflow repos.
+- **`featureEnabled` accepts 200-with-body.** GitHub answers `automated-security-fixes` with `200 {"enabled":true,…}` on some deployments; only 204/404 were accepted, which aborted every plan against such a repo.
+- **Solo inference reads the CODEOWNERS flag.** A solo maintainer keeping stale-review dismissal on was misread as team mode, which would have forced code-owner review back on and deadlocked their own PRs; `require_code_owner_review: false` is now the solo marker regardless.
+- **`--skip`/`--only` file tokens match case-insensitively.** Flag tokens are lowercased but file lookups were not, so `--skip .github/CODEOWNERS` silently did nothing.
+- **Audit file-probe errors FAIL.** A 5xx/403 while checking a baseline file previously WARNed (passing without `--strict`) — now it fails the audit, matching the fail-closed planning everywhere else.
+- **Per-file 409 fallback reports PR-creation errors.** The error from the fallback PR is printed instead of being swallowed into a generic "required items failed".
+
+### Documentation
+
+- **AGENTS.md and README match the new baseline.** New flags, merge-reconcile semantics, audit states, opt-in templates, single-commit apply, and the one sanctioned `exec.Command` exception (the fixed-argv `gh auth token` fallback) are documented; live counterparts (`PULL_REQUEST_TEMPLATE.md`, `dependabot.yml`) are synced.
+
+### Other
+
+- **Template action pins synced to live versions** (checkout v7.0.1, codecov-action v7.1.1, upload/download-artifact 7.0.2/8.0.2, setup-node v7.1.0, codeql-action 9b325408), so re-applying no longer reverts Dependabot's bumps; the octocov starter's stale v4 checkout pin is unified with the v7 template set.
+
 ## [0.2.3] - 2026-10-24
 
 **Patch release.** Correctness and security fixes for the npm shim and the shipped Node/Python CI packs, plus baseline flag, `--ci none`, and branch-protection reporting fixes, on a fully updated toolchain.
@@ -219,7 +259,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.3.0
 [0.2.3]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.2.3
 [0.2.2]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.2.2
 [0.2.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.2.1
