@@ -10,8 +10,8 @@ Brief description of what this PR does.
 - [ ] Tested on: (OS/environment)
 
 ## Documentation
-- [ ] Updated README.md (if applicable)
-- [ ] Updated CLAUDE.md (if applicable)
+- [ ] Updated {{.ReadmePath}} (if applicable)
+{{.AgentGuideLine}}
 
 ## Related Issues
 Closes #

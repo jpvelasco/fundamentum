@@ -1,0 +1,21 @@
+# Dependency updates for the detected ecosystems (github-actions from the
+# generic baseline plus pip detected from the root pyproject.toml or requirements.txt). Monorepos with
+# manifests in subdirectories need one entry per directory — add those by hand.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip:
+        patterns:
+          - "*"

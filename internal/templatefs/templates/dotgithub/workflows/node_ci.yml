@@ -9,7 +9,9 @@ on:
 permissions:
   contents: read
 
-# Node pack. Does not assume go.mod. Override with --ci.
+# Node pack. Lint/Test run the scripts detected in package.json; a missing
+# script fails the job with a configure-me annotation instead of passing
+# vacuously — a required check that skips silently would be false confidence.
 # npm ci (and setup-node's npm cache) require package-lock.json or
 # npm-shrinkwrap.json. Repos that only have package.json use npm install
 # with caching disabled so the required Lint/Test checks can still report.
@@ -40,7 +42,7 @@ jobs:
           else
             npm install
           fi
-      - run: npm run lint --if-present
+      - run: '{{.NodeLintCommand}}'
 
   test:
     name: Test
@@ -68,7 +70,7 @@ jobs:
           else
             npm install
           fi
-      - run: npm test --if-present
+      - run: '{{.NodeTestCommand}}'
 
   trivy:
     name: Trivy

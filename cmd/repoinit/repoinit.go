@@ -40,6 +40,7 @@ Examples:
   fundamentum --dry-run init OWNER/REPO   # preview only`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			cmd.SilenceUsage = true
 			return run(args[0], private, cmd.OutOrStdout())
 		},
 	}

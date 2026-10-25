@@ -11,6 +11,7 @@ import (
 	"github.com/jpvelasco/fundamentum/cmd/globals"
 	"github.com/jpvelasco/fundamentum/cmd/util"
 	"github.com/jpvelasco/fundamentum/internal/github"
+	"github.com/jpvelasco/fundamentum/internal/steps"
 	"github.com/jpvelasco/fundamentum/internal/templates"
 	"github.com/jpvelasco/fundamentum/internal/wizard"
 )
@@ -31,6 +32,17 @@ func NewCmd() *cobra.Command {
 		Long: `Harden an existing GitHub repository with community health files,
 branch protection, security features, and starter workflows.
 
+Files land as ONE commit (git data API); --pr batches them into a single
+pull request instead. A direct commit rejected by branch protection (409)
+switches to PR mode automatically.
+
+Reconcile MERGES with the live ruleset: required checks already present keep
+their integration_id, extra checks and unowned rules survive, and stricter
+live review settings are never weakened.
+
+Steps can be excluded or selected with --skip / --only: settings,
+protect-main, protect-version-tags, security, files, or an exact file path.
+
 Examples:
   fundamentum apply OWNER/REPO              # interactive harden
   fundamentum --dry-run apply OWNER/REPO    # preview without changes
@@ -40,6 +52,8 @@ Examples:
   fundamentum --ci node apply OWNER/REPO    # Node starter CI
   fundamentum --ci generic apply OWNER/REPO # generic starter CI (no language)
   fundamentum --strict apply OWNER/REPO     # fail if any core step fails
+  fundamentum --skip protect-main,security apply OWNER/REPO # leave steps alone
+  fundamentum --octopus apply OWNER/REPO    # opt in to Octopus Review
   fundamentum --require-checks Lint,gosec apply OWNER/REPO
   fundamentum --token $GITHUB_TOKEN apply OWNER/REPO`,
 		Args: cobra.ExactArgs(1),
@@ -48,6 +62,9 @@ Examples:
 }
 
 func run(cmd *cobra.Command, args []string) error {
+	// Runtime errors must not dump the usage block after the plan output.
+	cmd.SilenceUsage = true
+
 	owner, repo, err := util.ParseOwnerRepo(args[0])
 	if err != nil {
 		return err
@@ -82,18 +99,20 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 		return err
 	}
 
-	data := templates.RepoData{
-		Owner:         owner,
-		RepoName:      repo,
-		DefaultBranch: branch,
-		Visibility:    visibility,
-		CodeOwnerLine: codeOwnerLine(owner, orgOwner),
-		CIPack:        pack,
+	data, err := RenderData(client, info, pack, orgOwner)
+	if err != nil {
+		return fmt.Errorf("plan %s/%s: %w (verify the token grants Contents read access and retry)", owner, repo, err)
 	}
-
 	rendered, err := renderTemplates(data)
 	if err != nil {
 		return fmt.Errorf("render templates: %w", err)
+	}
+
+	// Validate --skip/--only tokens against the real steps and rendered
+	// paths: a typo must be an error, not a silent no-op that lets apply
+	// touch exactly what the operator meant to leave alone.
+	if unknown := steps.New(globals.SkipSteps, globals.OnlySteps).Unknown(renderedPaths(rendered)); len(unknown) > 0 {
+		return fmt.Errorf("unknown --skip/--only key(s): %s — use settings, protect-main, protect-version-tags, security, files, or an exact shipped file path", strings.Join(unknown, ", "))
 	}
 
 	// Pre-flight: check branch protection state before asking solo/team.
@@ -104,6 +123,8 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	// so dry-run does not claim it would create protection that cannot land.
 	var opts github.BranchProtectionOptions
 	opts.SkipCodeOwners = orgOwner
+	opts.StrictChecks = globals.BranchUpToDate
+	opts.StrictChecksSet = globals.BranchUpToDateSet
 	protectionUnavailable := false
 	branchPlan, err := client.PlanBranchRuleset(owner, repo, requiredChecks(pack), opts)
 	protectionUnavailable = noteProtectionUnavailable(protectionUnavailable, err)
@@ -177,6 +198,49 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	return nil
 }
 
+// RenderData assembles the template substitution data shared by apply and
+// audit: the fixed fields from flags + repo info, plus live detection —
+// README/agent-guide filenames and, for the node pack, the lint/test
+// commands from package.json scripts. A nil client (init --dry-run) skips
+// detection and takes the defaults. The same function backs audit so its
+// rendered baseline matches what apply would ship.
+func RenderData(client *github.Client, info github.Repo, pack string, orgOwner bool) (templates.RepoData, error) {
+	data := templates.RepoData{
+		Owner:              info.Owner,
+		RepoName:           info.RepoName,
+		DefaultBranch:      info.DefaultBranch,
+		Visibility:         info.Visibility,
+		CodeOwnerLine:      codeOwnerLine(info.Owner, orgOwner),
+		CIPack:             pack,
+		Octopus:            globals.Octopus,
+		CodacyInstructions: globals.CodacyInstructions,
+	}
+	if client == nil {
+		return data, nil
+	}
+	readme, agentGuide, nodeLint, nodeTest, err := templates.DetectDocData(
+		func(path string) (bool, error) {
+			return client.AnyFileExists(info.Owner, info.RepoName, []string{path})
+		},
+		func() ([]byte, bool, error) {
+			body, ok, err := client.ReadFileContents(info.Owner, info.RepoName, "package.json")
+			if err != nil {
+				err = fmt.Errorf("read package.json: %w", err)
+			}
+			return body, ok, err
+		},
+		pack,
+	)
+	if err != nil {
+		return data, err
+	}
+	data.ReadmePath = readme
+	data.AgentGuideLine = agentGuide
+	data.NodeLintCommand = nodeLint
+	data.NodeTestCommand = nodeTest
+	return data, nil
+}
+
 // PlanNewRepo prints a dry-run harden plan for a repository that does not
 // exist yet. Files, settings, and rulesets are modeled as absent — no GitHub
 // GET is issued, so init --dry-run can preview create+harden.
@@ -188,17 +252,19 @@ func PlanNewRepo(owner, repo, visibility string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	data := templates.RepoData{
-		Owner:         owner,
-		RepoName:      repo,
-		DefaultBranch: "main",
-		Visibility:    visibility,
-		CodeOwnerLine: codeOwnerLine(owner, false),
-		CIPack:        pack,
+	// A repo that does not exist yet has nothing to detect; the nil client
+	// takes the documentation defaults (README.md, AGENTS.md).
+	info := github.Repo{Owner: owner, RepoName: repo, DefaultBranch: "main", Visibility: visibility}
+	data, err := RenderData(nil, info, pack, false)
+	if err != nil {
+		return err
 	}
 	rendered, err := renderTemplates(data)
 	if err != nil {
 		return fmt.Errorf("render templates: %w", err)
+	}
+	if unknown := steps.New(globals.SkipSteps, globals.OnlySteps).Unknown(renderedPaths(rendered)); len(unknown) > 0 {
+		return fmt.Errorf("unknown --skip/--only key(s): %s — use settings, protect-main, protect-version-tags, security, files, or an exact shipped file path", strings.Join(unknown, ", "))
 	}
 	// Named presets must match a live apply: only strict / --advanced-security
 	// enable GHAS. Interactive dry-run still shows the offered plan line.
@@ -227,12 +293,19 @@ func buildItems(
 ) ([]wizard.Item, error) {
 	var items []wizard.Item
 
+	selector := steps.New(globals.SkipSteps, globals.OnlySteps)
 	aliases := templates.FileAliases()
 
 	// Files first — branch protection applied after, so direct commits are still allowed.
 	for _, f := range rendered {
 		file := f
 		action := wizard.ActionCreate
+		detail := ""
+
+		if !selector.IncludeFile(file.Path) {
+			items = append(items, optedOutFileItem(file.Path, selector))
+			continue
+		}
 
 		// Non-canonical aliases (root CODEOWNERS, octopus-review.yml, …) count
 		// as already present so we do not write a second copy. The canonical
@@ -249,48 +322,85 @@ func buildItems(
 			}
 			if action != wizard.ActionSkip {
 				var err error
-				action, err = fileItemAction(c, owner, repo, file.Path, file.Content)
+				action, detail, err = fileItemAction(c, owner, repo, file.Path, file.Content)
 				if err != nil {
 					return nil, fmt.Errorf("check status of %s: %w", file.Path, err)
 				}
 			}
 		}
 		items = append(items, wizard.Item{
-			Name:    file.Path,
-			Action:  action,
+			Name:   file.Path,
+			Action: action,
+			Detail: detail,
+			// No Apply closure: file items are applied exclusively through the
+			// client (single-commit batch, per-file fallback, or PR mode).
 			Content: []byte(file.Content),
-			Apply: func() error {
-				_, err := c.UpsertFile(owner, repo, file.Path, []byte(file.Content))
-				return err
-			},
 		})
 	}
 
-	items = append(items, generalSettingsItem(c, info, owner, repo))
-	items = append(items, branchProtectionItem(c, owner, repo, branch, visibility, branchPlan, classicExists, protectionUnavailable, opts, pack))
-	items = append(items, tagRulesetItem(c, owner, repo, tagPlan, protectionUnavailable))
+	settingsItem := generalSettingsItem(c, info, owner, repo)
+	if !selector.IncludeStep(steps.Settings) {
+		settingsItem = optedOutItem(settingsItem.Name, steps.Settings, selector)
+	}
+	items = append(items, settingsItem)
 
-	items = append(items, securityItem(c, info, owner, repo, visibility, rendered, paidSecurity))
+	protectionItem := branchProtectionItem(c, owner, repo, branch, visibility, branchPlan, classicExists, protectionUnavailable, opts, pack)
+	if !selector.IncludeStep(steps.ProtectMain) {
+		protectionItem = optedOutItem(protectionItem.Name, steps.ProtectMain, selector)
+	}
+	items = append(items, protectionItem)
+
+	tagItem := tagRulesetItem(c, owner, repo, tagPlan, protectionUnavailable)
+	if !selector.IncludeStep(steps.ProtectVersionTags) {
+		tagItem = optedOutItem(tagItem.Name, steps.ProtectVersionTags, selector)
+	}
+	items = append(items, tagItem)
+
+	secItem, err := securityItem(c, info, owner, repo, visibility, rendered, paidSecurity)
+	if err != nil {
+		return nil, err
+	}
+	if !selector.IncludeStep(steps.Security) {
+		secItem = optedOutItem(secItem.Name, steps.Security, selector)
+	}
+	items = append(items, secItem)
 
 	return items, nil
 }
 
+// optedOutItem returns a skip row for a step or file excluded by --skip /
+// --only, naming the mechanism so the plan table shows the exclusion.
+// stepKey is the canonical step key or the file's target path.
+func optedOutItem(name, stepKey string, selector steps.Selector) wizard.Item {
+	return wizard.Item{Name: name, Action: wizard.ActionSkip, OptOutReason: selector.ExcludeReason(stepKey)}
+}
+
+// optedOutFileItem is optedOutItem for file paths (the "files" key and exact
+// path entries have file-specific reason semantics).
+func optedOutFileItem(path string, selector steps.Selector) wizard.Item {
+	return wizard.Item{Name: path, Action: wizard.ActionSkip, OptOutReason: selector.ExcludeFileReason(path)}
+}
+
 func generalSettingsItem(c *github.Client, info *github.Repo, owner, repo string) wizard.Item {
 	action := wizard.ActionCreate
+	detail := ""
 	if info != nil {
 		action = wizard.ActionUpdate
+		detail = "delete_branch_on_merge=false"
 		if info.DeleteBranchOnMerge {
 			action = wizard.ActionSkip
+			detail = ""
 		}
 	}
 	return wizard.Item{
 		Name:   "General settings (auto-delete branches)",
 		Action: action,
+		Detail: detail,
 		Apply:  func() error { return c.ApplyGeneralSettings(owner, repo) },
 	}
 }
 
-func securityItem(c *github.Client, info *github.Repo, owner, repo, visibility string, rendered []templates.RenderedFile, paidSecurity bool) wizard.Item {
+func securityItem(c *github.Client, info *github.Repo, owner, repo, visibility string, rendered []templates.RenderedFile, paidSecurity bool) (wizard.Item, error) {
 	securityName := "Security (Dependabot)"
 	advancedCodeQL := false
 	for _, f := range rendered {
@@ -312,42 +422,78 @@ func securityItem(c *github.Client, info *github.Repo, owner, repo, visibility s
 	}
 
 	action := wizard.ActionCreate
+	detail := ""
 	if info != nil {
-		action = wizard.ActionUpdate
-		configured, err := securityConfigured(c, *info, owner, repo, secOpts)
-		if err == nil && configured {
+		// Fail closed: a status-check error aborts the plan instead of
+		// silently planning an update (a false "would update" once made
+		// this repo's dry run lie about already-enabled security).
+		missing, err := securityMissing(c, *info, owner, repo, secOpts)
+		if err != nil {
+			return wizard.Item{}, err
+		}
+		if len(missing) == 0 {
 			action = wizard.ActionSkip
+		} else {
+			action = wizard.ActionUpdate
+			detail = "off: " + strings.Join(missing, ", ")
 		}
 	}
 	return wizard.Item{
 		Name:     securityName,
 		Action:   action,
+		Detail:   detail,
 		Optional: true,
 		Apply:    func() error { return c.EnableSecurity(owner, repo, secOpts) },
-	}
+	}, nil
 }
 
-func securityConfigured(c *github.Client, info github.Repo, owner, repo string, opts github.SecurityOptions) (bool, error) {
+// securityMissing reports which security features are still off. An empty
+// slice means the repo is fully configured for the intended visibility.
+// The CodeQL check accepts EITHER default setup or a codeql workflow in
+// .github/workflows — an advanced-workflow repo must not be flagged.
+func securityMissing(c *github.Client, info github.Repo, owner, repo string, opts github.SecurityOptions) ([]string, error) {
+	var missing []string
+
 	alertsEnabled, err := c.DependabotAlertsEnabled(owner, repo)
 	if err != nil {
-		return false, err
+		return nil, err
+	}
+	if !alertsEnabled {
+		missing = append(missing, "dependabot alerts")
 	}
 	fixesEnabled, err := c.AutomatedSecurityFixesEnabled(owner, repo)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	if !alertsEnabled || !fixesEnabled {
-		return false, nil
+	if !fixesEnabled {
+		missing = append(missing, "automated security fixes")
 	}
 	if github.IsPublicVisibility(opts.Visibility) || opts.PaidFeatures {
-		if !info.SecretScanning || !info.SecretPushProtection {
-			return false, nil
+		if !info.SecretScanning {
+			missing = append(missing, "secret scanning")
+		}
+		if !info.SecretPushProtection {
+			missing = append(missing, "push protection")
 		}
 	}
 	if github.IsPublicVisibility(opts.Visibility) && !opts.AdvancedCodeQL {
-		return c.DefaultCodeQLSetupEnabled(owner, repo)
+		defaultSetup, err := c.DefaultCodeQLSetupEnabled(owner, repo)
+		if err != nil {
+			return nil, err
+		}
+		if !defaultSetup {
+			// An advanced CodeQL workflow also counts — CodeQL analysis
+			// exists even though default setup is not configured.
+			codeqlWorkflow, err := c.AnyFileExists(owner, repo, github.CodeQLWorkflowVariants)
+			if err != nil {
+				return nil, err
+			}
+			if !codeqlWorkflow {
+				missing = append(missing, "codeql")
+			}
+		}
 	}
-	return true, nil
+	return missing, nil
 }
 
 // branchProtectionItem returns the correct Item for branch protection based on current state:
@@ -369,6 +515,7 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 		return wizard.Item{
 			Name:   "Branch protection (reconcile protect-main)",
 			Action: wizard.ActionUpdate,
+			Detail: "drift: " + strings.Join(plan.Drift, ", "),
 			Apply: func() error {
 				return c.EnsureBranchRuleset(owner, repo, requiredChecks(pack), *opts)
 			},
@@ -419,6 +566,16 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			},
 		}
 	}
+}
+
+// renderedPaths lists the target paths of the rendered files (for --skip /
+// --only token validation).
+func renderedPaths(rendered []templates.RenderedFile) []string {
+	paths := make([]string, 0, len(rendered))
+	for _, f := range rendered {
+		paths = append(paths, f.Path)
+	}
+	return paths
 }
 
 func loadFlags() error {
@@ -498,6 +655,7 @@ func tagRulesetItem(c *github.Client, owner, repo string, plan github.RulesetPla
 		item.Action = wizard.ActionCreate
 	case len(plan.Drift) > 0:
 		item.Action = wizard.ActionUpdate
+		item.Detail = "drift: " + strings.Join(plan.Drift, ", ")
 	default:
 		item.Action = wizard.ActionSkip
 	}
@@ -515,24 +673,25 @@ func otherAliases(canonical string, variants []string) []string {
 	return out
 }
 
-// fileItemAction maps FileStatus to a wizard action, honoring --no-overwrite.
-// Status-check errors are surfaced, not defaulted: pretending "create" on a
-// failed check would misreport the plan and fail later with confusing PUTs.
-func fileItemAction(c *github.Client, owner, repo, path, content string) (wizard.Action, error) {
-	status, err := c.FileStatus(owner, repo, path, []byte(content))
+// fileItemAction maps FileStatus to a wizard action plus a drift summary,
+// honoring --no-overwrite. Status-check errors are surfaced, not defaulted:
+// pretending "create" on a failed check would misreport the plan and fail
+// later with confusing PUTs.
+func fileItemAction(c *github.Client, owner, repo, path, content string) (wizard.Action, string, error) {
+	status, detail, err := c.FileStatusDetail(owner, repo, path, []byte(content))
 	if err != nil {
-		return wizard.ActionCreate, err
+		return wizard.ActionCreate, "", err
 	}
 	switch status {
 	case "skip":
-		return wizard.ActionSkip, nil
+		return wizard.ActionSkip, "", nil
 	case "update":
 		if globals.NoOverwrite {
-			return wizard.ActionSkip, nil
+			return wizard.ActionSkip, "", nil
 		}
-		return wizard.ActionUpdate, nil
+		return wizard.ActionUpdate, "content differs (" + detail + ")", nil
 	default:
-		return wizard.ActionCreate, nil
+		return wizard.ActionCreate, "", nil
 	}
 }
 
@@ -543,14 +702,16 @@ func codeOwnerLine(owner string, org bool) string {
 	return "* @" + owner
 }
 
-// applyItems runs the item list. When viaPR is true, file items are batched
-// into a single PR instead of direct commits. If viaPR is false and a 409
-// is detected, the tool automatically falls back to PR mode for remaining
-// file items — no re-run needed.
+// applyItems runs the item list. File changes land as ONE commit on the
+// default branch (git data API) instead of one commit per file; --pr batches
+// them into a PR instead. When a direct batch is rejected by branch
+// protection (409), the remaining file changes switch to PR mode — no
+// re-run needed. If the single-commit path fails for another reason (e.g.
+// workflow-scope restrictions on the token), apply falls back to the
+// per-file Contents API, which also handles Actions-locked workflow files.
 func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Item, viaPR bool, opts *github.BranchProtectionOptions, stdout io.Writer) error {
 	var fileChanges []github.FileChange
 	var nonFileItems []wizard.Item
-	fallback := false // true after first 409 triggers auto-fallback to PR mode
 	requiredFailed := false
 	if viaPR {
 		deferRequiredChecks(opts)
@@ -560,60 +721,35 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 		if wizard.ShouldSkip(item, stdout) {
 			continue
 		}
-
-		// Check if this is a file item (has rendered content).
 		if item.Content != nil {
-			if viaPR || fallback {
-				// Collect for PR batch (explicit --pr or auto-fallback).
-				fileChanges = append(fileChanges, github.FileChange{
-					Path:    item.Name,
-					Content: item.Content,
-				})
-				continue
-			}
-
-			// Direct apply — detect 409 and auto-fallback to PR mode.
-			_, _ = fmt.Fprintf(stdout, "  %-45s  applying...", item.Name)
-			if err := item.Apply(); err != nil {
-				if github.IsWorkflowLocked(err) {
-					_, _ = fmt.Fprintf(stdout, "\r  %-45s  ⚠ workflow locked by GitHub Actions\n", item.Name)
-					continue
-				}
-				if github.IsConflict409(err) {
-					_, _ = fmt.Fprintf(stdout, "\r  %-45s  ⚠ branch protection requires PR — switching to PR mode\n", item.Name)
-					// Retry this item via PR mode.
-					fileChanges = append(fileChanges, github.FileChange{
-						Path:    item.Name,
-						Content: item.Content,
-					})
-					fallback = true
-					deferRequiredChecks(opts)
-					continue
-				}
-				_, _ = fmt.Fprint(stdout, "\r")
-				wizard.PrintItemError(stdout, item, err)
-				if itemFailedRequired(item) {
-					requiredFailed = true
-				}
-			} else {
-				_, _ = fmt.Fprintf(stdout, "\r  %-45s  ✓\n", item.Name)
-			}
-		} else {
-			nonFileItems = append(nonFileItems, item)
+			fileChanges = append(fileChanges, github.FileChange{
+				Path:    item.Name,
+				Content: item.Content,
+			})
+			continue
 		}
+		nonFileItems = append(nonFileItems, item)
 	}
 
-	// If we collected file changes for PR mode, batch them.
-	if len(fileChanges) > 0 {
-		_, _ = fmt.Fprintf(stdout, "\n  Creating PR with %d file changes...\n", len(fileChanges))
-		prNum, err := c.ApplyViaPR(owner, repo, branch, fileChanges, stdout)
-		if err != nil {
-			return fmt.Errorf("apply via PR: %w", err)
+	switch {
+	case len(fileChanges) > 0 && viaPR:
+		if err := applyFilesViaPR(c, owner, repo, branch, fileChanges, stdout); err != nil {
+			return err
 		}
-		if prNum > 0 {
-			_, _ = fmt.Fprintf(stdout, "  ✓ PR #%d created: https://github.com/%s/%s/pull/%d\n", prNum, owner, repo, prNum)
-		} else {
-			_, _ = fmt.Fprintf(stdout, "  no file changes to put in a PR\n")
+	case len(fileChanges) > 0:
+		err := c.CommitFiles(owner, repo, branch, fileChanges)
+		switch {
+		case err == nil:
+			_, _ = fmt.Fprintf(stdout, "  %-45s  ✓ committed as one commit (%d files)\n", "files", len(fileChanges))
+		case github.IsConflict409(err):
+			_, _ = fmt.Fprintf(stdout, "  %-45s  ⚠ branch protection requires PR — switching to PR mode\n", "files")
+			deferRequiredChecks(opts)
+			if err := applyFilesViaPR(c, owner, repo, branch, fileChanges, stdout); err != nil {
+				return err
+			}
+		default:
+			_, _ = fmt.Fprintf(stdout, "  %-45s  ⚠ single commit failed (%v) — applying file by file\n", "files", err)
+			requiredFailed = requiredFailed || applyFilesPerItem(c, owner, repo, branch, fileChanges, opts, stdout)
 		}
 	}
 
@@ -634,6 +770,69 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 	_, _ = fmt.Fprintf(stdout, "\n  Repo: https://github.com/%s/%s\n", owner, repo)
 	if requiredFailed {
 		return fmt.Errorf("one or more required items failed")
+	}
+	return nil
+}
+
+// applyFilesViaPR batches fileChanges into a single pull request.
+func applyFilesViaPR(c *github.Client, owner, repo, branch string, changes []github.FileChange, stdout io.Writer) error {
+	_, _ = fmt.Fprintf(stdout, "\n  Creating PR with %d file changes...\n", len(changes))
+	prNum, err := c.ApplyViaPR(owner, repo, branch, changes, stdout)
+	if err != nil {
+		return fmt.Errorf("apply via PR: %w", err)
+	}
+	if prNum > 0 {
+		_, _ = fmt.Fprintf(stdout, "  ✓ PR #%d created: https://github.com/%s/%s/pull/%d\n", prNum, owner, repo, prNum)
+	} else {
+		_, _ = fmt.Fprintf(stdout, "  no file changes to put in a PR\n")
+	}
+	return nil
+}
+
+// applyFilesPerItem is the fallback direct path: one Contents-API PUT per
+// file. It is only used when the single-commit batch failed for a non-409
+// reason (e.g. the token cannot update workflow files via the git data
+// API). Workflow files that GitHub Actions has locked are skipped, as
+// before. Returns true when a required item failed.
+func applyFilesPerItem(c *github.Client, owner, repo, branch string, changes []github.FileChange, opts *github.BranchProtectionOptions, stdout io.Writer) bool {
+	requiredFailed := false
+	for _, ch := range changes {
+		_, _ = fmt.Fprintf(stdout, "  %-45s  applying...", ch.Path)
+		action, err := c.UpsertFile(owner, repo, ch.Path, ch.Content)
+		switch {
+		case err != nil && github.IsWorkflowLocked(err):
+			_, _ = fmt.Fprintf(stdout, "\r  %-45s  ⚠ workflow locked by GitHub Actions\n", ch.Path)
+		case err != nil && github.IsConflict409(err):
+			// Protection kicked in mid-fallback — the rest goes to a PR.
+			_, _ = fmt.Fprintf(stdout, "\r  %-45s  ⚠ branch protection requires PR — switching to PR mode\n", ch.Path)
+			deferRequiredChecks(opts)
+			remaining := []github.FileChange{ch}
+			// collect the not-yet-applied remainder
+			rest := changesAfter(changes, ch.Path)
+			remaining = append(remaining, rest...)
+			if err := applyFilesViaPR(c, owner, repo, branch, remaining, stdout); err != nil {
+				_, _ = fmt.Fprintf(stdout, "  %-45s  ✗ %v\n", "files (PR fallback)", err)
+				requiredFailed = true
+			}
+			return requiredFailed
+		case err != nil:
+			_, _ = fmt.Fprint(stdout, "\r")
+			wizard.PrintItemError(stdout, wizard.Item{Name: ch.Path}, err)
+			requiredFailed = true
+		default:
+			_ = action
+			_, _ = fmt.Fprintf(stdout, "\r  %-45s  ✓\n", ch.Path)
+		}
+	}
+	return requiredFailed
+}
+
+// changesAfter returns the changes after the first entry whose Path matches.
+func changesAfter(changes []github.FileChange, path string) []github.FileChange {
+	for i, ch := range changes {
+		if ch.Path == path {
+			return changes[i+1:]
+		}
 	}
 	return nil
 }

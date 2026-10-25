@@ -55,6 +55,19 @@ type RepoData struct {
 	Visibility    string // "public" or "private"
 	CodeOwnerLine string // CODEOWNERS body line; user: "* @owner", org: comment
 	CIPack        string // go, generic, or none; empty means go (legacy Render callers)
+	// Octopus opts in to the third-party Octopus Review workflow (opt_ files).
+	Octopus bool
+	// CodacyInstructions opts in to .github/instructions/codacy.instructions.md.
+	CodacyInstructions bool
+	// ReadmePath names the repo's README file (PR-template documentation line).
+	ReadmePath string
+	// AgentGuideLine is the PR-template checklist line for the repo's AI agent
+	// guide (AGENTS.md standard, CLAUDE.md legacy). Empty omits the line.
+	AgentGuideLine string
+	// NodeLintCommand / NodeTestCommand are the run: lines for the node CI
+	// pack, generated from the repo's package.json scripts.
+	NodeLintCommand string
+	NodeTestCommand string
 }
 
 // sanitize validates owner/repo/branch without rewriting valid names and
@@ -89,14 +102,69 @@ func (d RepoData) sanitize() (RepoData, error) {
 	}
 
 	return RepoData{
-		Owner:         d.Owner,
-		RepoName:      d.RepoName,
-		DefaultBranch: d.DefaultBranch,
-		Visibility:    visibility,
-		CodeOwnerLine: codeOwnerLine,
-		CIPack:        d.CIPack,
+		Owner:              d.Owner,
+		RepoName:           d.RepoName,
+		DefaultBranch:      d.DefaultBranch,
+		Visibility:         visibility,
+		CodeOwnerLine:      codeOwnerLine,
+		CIPack:             d.CIPack,
+		Octopus:            d.Octopus,
+		CodacyInstructions: d.CodacyInstructions,
+		ReadmePath:         sanitizeFileName(d.ReadmePath, "README.md"),
+		AgentGuideLine:     sanitizeAgentGuideLine(d.AgentGuideLine),
+		NodeLintCommand:    sanitizeShellLine(d.NodeLintCommand, defaultNodeLintCommand),
+		NodeTestCommand:    sanitizeShellLine(d.NodeTestCommand, defaultNodeTestCommand),
 	}, nil
 }
+
+// sanitizeFileName keeps a doc filename to safe identifier characters,
+// falling back to def when empty. Filenames are template-fixed or detected
+// from a fixed candidate list, so the charset check is defense-in-depth.
+func sanitizeFileName(name, def string) string {
+	if !safeNameRe.MatchString(name) {
+		return def
+	}
+	return name
+}
+
+var safeNameRe = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
+
+// sanitizeAgentGuideLine validates the PR-template checklist line. The line
+// is generated internally by DetectAgentGuideLine from a fixed candidate
+// list. Empty or unknown values fall back to the AGENTS.md standard line —
+// "if there is no file, use agents.md".
+func sanitizeAgentGuideLine(line string) string {
+	for _, guide := range agentGuideCandidates {
+		if line == agentGuideLine(guide) {
+			return line
+		}
+	}
+	return agentGuideLine("AGENTS.md")
+}
+
+const agentGuidePrefix = "- [ ] Updated "
+
+// agentGuideCandidates are the agent guide filenames, standard first.
+var agentGuideCandidates = []string{"AGENTS.md", "CLAUDE.md"}
+
+// agentGuideLine renders the PR-template checklist line for guide.
+func agentGuideLine(guide string) string {
+	return agentGuidePrefix + guide + " (if applicable)"
+}
+
+// sanitizeShellLine keeps a CI run: line to a safe command charset, falling
+// back to def when empty or unsafe. Commands are generated internally.
+func sanitizeShellLine(cmd, def string) string {
+	if cmd == "" || !safeShellRe.MatchString(cmd) {
+		return def
+	}
+	return cmd
+}
+
+// safeShellRe allows letters, digits, spaces, and the common shell punctuation
+// the generated CI commands use. Slashes (paths), quotes, and :: annotations
+// are required; other metacharacters are rejected.
+var safeShellRe = regexp.MustCompile(`^[A-Za-z0-9 ./:_&|=-]+$`)
 
 // validGitBranch reports whether name is a git branch we will substitute
 // into templates. Charset is a subset of git check-ref-format --branch that
@@ -118,6 +186,8 @@ func validGitBranch(name string) bool {
 // paths (dotgithub/ → .github/, public_codacy.yml → .codacy.yml).
 // Templates with a "public_" filename prefix are only included for public repos.
 // Templates with a "private_" filename prefix are only included for private repos.
+// Templates with an "opt_" filename prefix are only included when the matching
+// RepoData opt-in is set (e.g. opt_octopus.yml → Octopus).
 func Render(data RepoData) ([]RenderedFile, error) {
 	return renderFromFS(templatefs.FS, data)
 }
@@ -135,7 +205,7 @@ func renderFromFS(fsys fs.FS, data RepoData) ([]RenderedFile, error) {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		if !shouldInclude(path, data.Visibility) || !packMatches(path, data.CIPack) {
+		if !templateIncluded(path, data) {
 			return nil
 		}
 		raw, err := fs.ReadFile(fsys, path)
@@ -163,52 +233,78 @@ func renderFromFS(fsys fs.FS, data RepoData) ([]RenderedFile, error) {
 	return files, err
 }
 
-// shouldInclude skips visibility-gated templates that don't match the repo.
-// "public_" prefix → only public repos. "private_" prefix → only private repos.
-func shouldInclude(path, visibility string) bool {
-	switch base := filepath.Base(path); {
-	case strings.HasPrefix(base, "public_"):
-		return visibility == "public"
-	case strings.HasPrefix(base, "private_"):
-		return visibility == "private"
+// templateIncluded reports whether the template at embedded path ships for
+// this repo: visibility prefixes (public_/private_), opt-in prefixes (opt_),
+// and the CI-pack mapping all gate inclusion.
+func templateIncluded(path string, data RepoData) bool {
+	base := filepath.Base(path)
+	prefixes, stem := splitPrefixes(base)
+
+	if prefixes["public_"] && data.Visibility != "public" {
+		return false
+	}
+	if prefixes["private_"] && data.Visibility != "private" {
+		return false
+	}
+	if prefixes["opt_"] && !optInAllowed(stem, data) {
+		return false
+	}
+	return packMatches(path, data.CIPack)
+}
+
+// optInAllowed reports whether the opt_-gated template's flag is set.
+// octopus.yml requires Octopus; codacy.instructions.md requires CodacyInstructions.
+func optInAllowed(stem string, data RepoData) bool {
+	switch stem {
+	case "octopus.yml":
+		return data.Octopus
+	case "codacy.instructions.md":
+		return data.CodacyInstructions
 	default:
-		return true
+		return false
+	}
+}
+
+// templatePrefixes is every known filename prefix, stripped from target names
+// and inspected for gating. Order-insensitive: public_node_codacy.yml and
+// node_public_codacy.yml both resolve to codacy.yml.
+var templatePrefixes = []string{"public_", "private_", "generic_", "node_", "python_", "rust_", "go_", "opt_"}
+
+// splitPrefixes splits a template filename into its known prefix set and the
+// remaining stem, stripping prefixes in any order.
+func splitPrefixes(base string) (map[string]bool, string) {
+	prefixes := map[string]bool{}
+	stem := base
+	for {
+		matched := false
+		for _, p := range templatePrefixes {
+			if strings.HasPrefix(stem, p) {
+				prefixes[p] = true
+				stem = strings.TrimPrefix(stem, p)
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return prefixes, stem
+		}
 	}
 }
 
 // resolveTarget converts embedded template paths to target paths.
-// "public_", "private_", and "generic_" prefixes are stripped from the filename.
+// All known filename prefixes are stripped — in any combination — from the
+// filename.
 func resolveTarget(path string) string {
 	target := strings.Replace(path, "dotgithub/", ".github/", 1)
 
 	dir, base := filepath.Split(target)
-	switch base {
-	case "public_codacy.yml":
-		// Unlike other public_ root files (public_codecov.yml → codecov.yml),
-		// the Codacy config lives at dot-prefixed .codacy.yml.
+	_, base = splitPrefixes(base)
+	if base == "codacy.yml" {
+		// Unlike other root files (codecov.yml), the Codacy config lives at
+		// the dot-prefixed .codacy.yml — for every pack variant.
 		return dir + ".codacy.yml"
-	default:
-		return dir + stripVisibilityPrefix(base)
 	}
-}
-
-func stripVisibilityPrefix(base string) string {
-	switch {
-	case strings.HasPrefix(base, "public_"):
-		return strings.TrimPrefix(base, "public_")
-	case strings.HasPrefix(base, "private_"):
-		return strings.TrimPrefix(base, "private_")
-	case strings.HasPrefix(base, "generic_"):
-		return strings.TrimPrefix(base, "generic_")
-	case strings.HasPrefix(base, "node_"):
-		return strings.TrimPrefix(base, "node_")
-	case strings.HasPrefix(base, "python_"):
-		return strings.TrimPrefix(base, "python_")
-	case strings.HasPrefix(base, "rust_"):
-		return strings.TrimPrefix(base, "rust_")
-	default:
-		return base
-	}
+	return dir + base
 }
 
 // substitute replaces {{.Field}} placeholders with sanitized values.
@@ -222,6 +318,10 @@ func substitute(tmpl string, data RepoData) string {
 		{"{{.DefaultBranch}}", data.DefaultBranch},
 		{"{{.Visibility}}", data.Visibility},
 		{"{{.CodeOwnerLine}}", data.CodeOwnerLine},
+		{"{{.ReadmePath}}", data.ReadmePath},
+		{"{{.AgentGuideLine}}", data.AgentGuideLine},
+		{"{{.NodeLintCommand}}", data.NodeLintCommand},
+		{"{{.NodeTestCommand}}", data.NodeTestCommand},
 	}
 	out := tmpl
 	for _, r := range repls {

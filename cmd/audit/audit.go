@@ -8,9 +8,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jpvelasco/fundamentum/cmd/apply"
 	"github.com/jpvelasco/fundamentum/cmd/globals"
 	"github.com/jpvelasco/fundamentum/cmd/util"
 	"github.com/jpvelasco/fundamentum/internal/github"
+	"github.com/jpvelasco/fundamentum/internal/steps"
 	"github.com/jpvelasco/fundamentum/internal/templates"
 )
 
@@ -24,19 +26,25 @@ func NewCmd() *cobra.Command {
 		Use:   "audit OWNER/REPO",
 		Short: "Verify a repo matches the Fundamentum harden baseline",
 		Long: `Compare a GitHub repository against the intended Fundamentum baseline
-without changing anything. Prints a compact PASS/FAIL report.
+without changing anything. Prints a compact PASS/FAIL/WARN/SKIP report.
 
-Core checks (always fail the run on drift):
-  protect-main, auto-delete branches, Dependabot alerts, and required
-  community/CI files.
+FAIL — required drift (missing baseline files, weakened ruleset, disabled
+       core settings). Fails the run.
+WARN — optional drift (content drift on a shipped file, optional tag
+       ruleset or secret-scanning drift). Fails only with --strict.
+SKIP — intentionally not checked (a step or file excluded via --skip /
+       --only, secret scanning on a private repo without GHAS, plan-gated
+       protection). Never fails.
 
-Optional checks (fail only with --strict):
-  protect-version-tags and secret scanning / push protection.
+A repo whose settings are STRICTER than the baseline passes: required
+status checks are judged as "at least the intended ones", and stricter
+review settings never count as drift.
 
 Examples:
   fundamentum audit OWNER/REPO
   fundamentum --preset oss audit OWNER/REPO
   fundamentum --ci generic audit OWNER/REPO
+  fundamentum --skip socket.yml audit OWNER/REPO
   fundamentum --strict audit OWNER/REPO`,
 		Args: cobra.ExactArgs(1),
 		RunE: run,
@@ -44,6 +52,9 @@ Examples:
 }
 
 func run(cmd *cobra.Command, args []string) error {
+	// Runtime errors must not dump the usage block after the report.
+	cmd.SilenceUsage = true
+
 	owner, repo, err := util.ParseOwnerRepo(args[0])
 	if err != nil {
 		return err
@@ -56,11 +67,33 @@ func run(cmd *cobra.Command, args []string) error {
 	return runWithClient(client, owner, repo, cmd.OutOrStdout())
 }
 
+// status is the audit verdict for one check.
+type status int
+
+const (
+	statusPass status = iota
+	statusFail
+	statusWarn
+	statusSkip
+)
+
+func (s status) String() string {
+	switch s {
+	case statusFail:
+		return "FAIL"
+	case statusWarn:
+		return "WARN"
+	case statusSkip:
+		return "SKIP"
+	default:
+		return "PASS"
+	}
+}
+
 type check struct {
-	Name     string
-	Pass     bool
-	Detail   string
-	Optional bool
+	Name   string
+	Status status
+	Detail string
 }
 
 func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) error {
@@ -77,7 +110,13 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 		return fmt.Errorf("get repo: %w", err)
 	}
 
-	opts := github.BranchProtectionOptions{SkipCodeOwners: strings.EqualFold(info.OwnerType, "Organization")}
+	selector := steps.New(globals.SkipSteps, globals.OnlySteps)
+
+	opts := github.BranchProtectionOptions{
+		SkipCodeOwners:  strings.EqualFold(info.OwnerType, "Organization"),
+		StrictChecks:    globals.BranchUpToDate,
+		StrictChecksSet: globals.BranchUpToDateSet,
+	}
 	m, err := templates.DetectManifests(func(path string) (bool, error) {
 		return client.AnyFileExists(owner, repo, []string{path})
 	})
@@ -91,16 +130,21 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 	checksWanted := github.ResolveRequiredChecksForPack(globals.RequireChecks, pack)
 	// On a free-tier private repo GitHub 403s both the rulesets and classic
 	// branch-protection probes with an "Upgrade to GitHub Pro" body, so plan
-	// all three absent (the report then shows "missing") rather than aborting.
+	// all three absent (the report then shows SKIP plan-gated) rather than
+	// aborting.
+	protectionUnavailable := false
 	branchPlan, err := client.PlanBranchRuleset(owner, repo, checksWanted, opts)
+	protectionUnavailable = protectionUnavailable || github.IsBranchProtectionUnavailable(err)
 	if err != nil && !github.IsBranchProtectionUnavailable(err) {
 		return fmt.Errorf("check branch ruleset: %w", err)
 	}
 	tagPlan, err := client.PlanTagRuleset(owner, repo)
+	protectionUnavailable = protectionUnavailable || github.IsBranchProtectionUnavailable(err)
 	if err != nil && !github.IsBranchProtectionUnavailable(err) {
 		return fmt.Errorf("check tag ruleset: %w", err)
 	}
 	classicExists, err := client.ClassicProtectionExists(owner, repo, info.DefaultBranch)
+	protectionUnavailable = protectionUnavailable || github.IsBranchProtectionUnavailable(err)
 	if err != nil && !github.IsBranchProtectionUnavailable(err) {
 		return fmt.Errorf("check classic protection: %w", err)
 	}
@@ -109,31 +153,38 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 		return fmt.Errorf("check dependabot: %w", err)
 	}
 
-	data := templates.RepoData{
-		Owner:         owner,
-		RepoName:      repo,
-		DefaultBranch: info.DefaultBranch,
-		Visibility:    info.Visibility,
-		CIPack:        pack,
+	data, err := apply.RenderData(client, info, pack, strings.EqualFold(info.OwnerType, "Organization"))
+	if err != nil {
+		return err
 	}
 	files, err := templates.Render(data)
 	if err != nil {
 		return fmt.Errorf("render templates: %w", err)
 	}
 
+	// Validate --skip/--only tokens the same way apply does: a typo must be
+	// an error, not a silent no-op that audits steps the operator excluded.
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		paths = append(paths, f.Path)
+	}
+	if unknown := steps.New(globals.SkipSteps, globals.OnlySteps).Unknown(paths); len(unknown) > 0 {
+		return fmt.Errorf("unknown --skip/--only key(s): %s — use settings, protect-main, protect-version-tags, security, files, or an exact shipped file path", strings.Join(unknown, ", "))
+	}
+
 	results := []check{
-		branchCheck(branchPlan, classicExists),
-		tagCheck(tagPlan),
-		boolCheck("auto-delete branches", info.DeleteBranchOnMerge, "delete_branch_on_merge is false", false),
-		boolCheck("Dependabot alerts", dependabot, "not enabled", false),
-		secretCheck(info),
+		branchCheck(branchPlan, classicExists, protectionUnavailable, selector),
+		tagCheck(tagPlan, protectionUnavailable, selector),
+		boolCheck("auto-delete branches", info.DeleteBranchOnMerge, "delete_branch_on_merge is false", steps.Settings, selector),
+		boolCheck("Dependabot alerts", dependabot, "not enabled", steps.Security, selector),
+		secretCheck(info, selector),
 	}
 	for _, f := range files {
-		exists, err := client.AnyFileExists(owner, repo, templates.FileCheckPaths(f.Path))
-		if err != nil {
-			return fmt.Errorf("check file %s: %w", f.Path, err)
+		if !selector.IncludeFile(f.Path) {
+			results = append(results, skipFileCheck(f.Path, selector))
+			continue
 		}
-		results = append(results, boolCheck(f.Path, exists, "missing", false))
+		results = append(results, fileCheck(client, owner, repo, f.Path, []byte(f.Content)))
 	}
 
 	_, _ = fmt.Fprint(stdout, formatReport(owner, repo, results))
@@ -143,62 +194,149 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 	return nil
 }
 
-func branchCheck(plan github.RulesetPlan, classicExists bool) check {
-	switch {
-	case plan.Exists && len(plan.Drift) == 0:
-		return check{Name: "protect-main", Pass: true}
-	case plan.Exists:
-		return check{Name: "protect-main", Detail: strings.Join(plan.Drift, ", ")}
-	case classicExists:
-		return check{Name: "protect-main", Detail: "classic protection only"}
-	default:
-		return check{Name: "protect-main", Detail: "missing"}
-	}
+// skipCheck is a SKIP row for a step excluded via --skip / --only.
+func skipCheck(step string, selector steps.Selector) check {
+	return check{Name: step, Status: statusSkip, Detail: "opted out (" + selector.ExcludeReason(step) + ")"}
 }
 
-func tagCheck(plan github.RulesetPlan) check {
-	c := check{Name: "protect-version-tags", Optional: true}
-	switch {
-	case plan.Exists && len(plan.Drift) == 0:
-		c.Pass = true
-	case plan.Exists:
-		c.Detail = strings.Join(plan.Drift, ", ")
-	default:
-		c.Detail = "missing"
-	}
-	return c
+// skipFileCheck is a SKIP row for a shipped file excluded via --skip / --only.
+func skipFileCheck(path string, selector steps.Selector) check {
+	return check{Name: path, Status: statusSkip, Detail: "opted out (" + selector.ExcludeFileReason(path) + ")"}
 }
 
-func secretCheck(info github.Repo) check {
-	c := check{Name: "secret scanning", Optional: true}
-	if !github.IsPublicVisibility(info.Visibility) && !globals.AdvancedSecurity {
-		c.Pass = true
-		c.Detail = "private (not required)"
+// stepSkipped returns a SKIP row when the step is opted out, otherwise ok=false.
+func stepSkipped(step string, selector steps.Selector) (check, bool) {
+	if selector.IncludeStep(step) {
+		return check{}, false
+	}
+	return skipCheck(step, selector), true
+}
+
+// branchCheck judges protect-main: existing + not-weaker = PASS (stricter
+// hand-tuned rulesets pass), drift = FAIL, classic only = FAIL, missing =
+// FAIL, plan-gated = SKIP.
+func branchCheck(plan github.RulesetPlan, classicExists, protectionUnavailable bool, selector steps.Selector) check {
+	name := "protect-main"
+	if c, ok := stepSkipped(steps.ProtectMain, selector); ok {
+		c.Name = name
 		return c
+	}
+	if protectionUnavailable && !plan.Exists && !classicExists {
+		return check{Name: name, Status: statusSkip, Detail: "unavailable on this plan — set it in Settings → Branches"}
+	}
+	switch {
+	case plan.Exists && len(plan.Drift) == 0:
+		return check{Name: name, Status: statusPass}
+	case plan.Exists:
+		return check{Name: name, Status: statusFail, Detail: "weaker than baseline: " + strings.Join(plan.Drift, ", ")}
+	case classicExists:
+		return check{Name: name, Status: statusFail, Detail: "classic protection only"}
+	default:
+		return check{Name: name, Status: statusFail, Detail: "missing"}
+	}
+}
+
+// tagCheck judges protect-version-tags as a WARN-level optional check.
+func tagCheck(plan github.RulesetPlan, protectionUnavailable bool, selector steps.Selector) check {
+	name := "protect-version-tags"
+	if c, ok := stepSkipped(steps.ProtectVersionTags, selector); ok {
+		c.Name = name
+		return c
+	}
+	if protectionUnavailable && !plan.Exists {
+		return check{Name: name, Status: statusSkip, Detail: "unavailable on this plan"}
+	}
+	switch {
+	case plan.Exists && len(plan.Drift) == 0:
+		return check{Name: name, Status: statusPass}
+	case plan.Exists:
+		return check{Name: name, Status: statusWarn, Detail: "drift: " + strings.Join(plan.Drift, ", ")}
+	default:
+		return check{Name: name, Status: statusWarn, Detail: "missing"}
+	}
+}
+
+func boolCheck(name string, pass bool, failDetail, step string, selector steps.Selector) check {
+	if c, ok := stepSkipped(step, selector); ok {
+		c.Name = name
+		return c
+	}
+	if pass {
+		return check{Name: name, Status: statusPass}
+	}
+	return check{Name: name, Status: statusFail, Detail: failDetail}
+}
+
+// secretCheck judges secret scanning: public repos need it (WARN when off —
+// free but optional per the baseline); private repos without GHAS SKIP.
+func secretCheck(info github.Repo, selector steps.Selector) check {
+	name := "secret scanning"
+	if c, ok := stepSkipped(steps.Security, selector); ok {
+		c.Name = name
+		return c
+	}
+	if !github.IsPublicVisibility(info.Visibility) && !globals.AdvancedSecurity {
+		return check{Name: name, Status: statusSkip, Detail: "private repo without GHAS (not required)"}
 	}
 	if info.SecretScanning && info.SecretPushProtection {
-		c.Pass = true
-		return c
+		return check{Name: name, Status: statusPass}
 	}
-	c.Detail = "not enabled"
-	return c
+	return check{Name: name, Status: statusWarn, Detail: "not enabled"}
 }
 
-func boolCheck(name string, pass bool, failDetail string, optional bool) check {
-	c := check{Name: name, Pass: pass, Optional: optional}
-	if !pass {
-		c.Detail = failDetail
+// fileCheck compares a shipped file: missing = FAIL, alias present = PASS
+// (legacy path), content drift = WARN with a diffstat. Content drift is
+// surfaced (not ignored) but does not hard-fail — intentional local tweaks
+// (action version bumps, custom exclude paths) escalate only with --strict.
+// Probe errors FAIL, matching the fail-closed planning in apply: an audit
+// that could not verify a file must not pass silently.
+func fileCheck(client *github.Client, owner, repo, path string, want []byte) check {
+	action, detail, err := client.FileStatusDetail(owner, repo, path, want)
+	if err != nil {
+		return check{Name: path, Status: statusFail, Detail: "status check failed: " + err.Error()}
 	}
-	return c
+	switch action {
+	case "skip":
+		return check{Name: path, Status: statusPass}
+	case "update":
+		return check{Name: path, Status: statusWarn, Detail: "content differs from template (" + detail + ")"}
+	default:
+		// Missing at the canonical path — a legacy alias still counts.
+		exists, err := client.AnyFileExists(owner, repo, otherAuditAliases(path))
+		if err != nil {
+			return check{Name: path, Status: statusFail, Detail: "alias check failed: " + err.Error()}
+		}
+		if exists {
+			return check{Name: path, Status: statusPass, Detail: "alias path in use"}
+		}
+		return check{Name: path, Status: statusFail, Detail: "missing"}
+	}
 }
 
+// otherAuditAliases returns the alias variants for a path (the canonical
+// path itself excluded — it was already checked).
+func otherAuditAliases(path string) []string {
+	variants := templates.FileCheckPaths(path)
+	var out []string
+	for _, v := range variants {
+		if v != path {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// failedRequired reports whether the run must exit non-zero: any FAIL, plus
+// any WARN when --strict escalates optional drift.
 func failedRequired(results []check) bool {
 	for _, c := range results {
-		if c.Pass {
-			continue
-		}
-		if !c.Optional || globals.Strict {
+		switch c.Status {
+		case statusFail:
 			return true
+		case statusWarn:
+			if globals.Strict {
+				return true
+			}
 		}
 	}
 	return false
@@ -209,26 +347,28 @@ func formatReport(owner, repo string, results []check) string {
 	fmt.Fprintf(&b, "fundamentum audit %s/%s\n\n", owner, repo)
 	fmt.Fprintf(&b, "%-45s  %s\n", "Check", "Result")
 	fmt.Fprintf(&b, "%-45s  %s\n", strings.Repeat("-", 45), strings.Repeat("-", 20))
-	var failed, optionalFailed int
+	var failed, warns, skipped int
 	for _, c := range results {
-		status := "PASS"
-		if !c.Pass {
-			status = "FAIL"
-			if c.Optional {
-				optionalFailed++
-				status = "FAIL (optional)"
-			} else {
-				failed++
-			}
-			if c.Detail != "" {
-				status += " — " + c.Detail
-			}
+		switch c.Status {
+		case statusFail:
+			failed++
+		case statusWarn:
+			warns++
+		case statusSkip:
+			skipped++
 		}
-		fmt.Fprintf(&b, "%-45s  %s\n", c.Name, status)
+		line := c.Status.String()
+		if c.Detail != "" {
+			line += " — " + c.Detail
+		}
+		fmt.Fprintf(&b, "%-45s  %s\n", c.Name, line)
 	}
 	fmt.Fprintf(&b, "\n  %d failed", failed)
-	if optionalFailed > 0 {
-		fmt.Fprintf(&b, ", %d optional failed", optionalFailed)
+	if warns > 0 {
+		fmt.Fprintf(&b, ", %d warn", warns)
+	}
+	if skipped > 0 {
+		fmt.Fprintf(&b, ", %d skipped", skipped)
 	}
 	fmt.Fprint(&b, ".\n")
 	return b.String()

@@ -71,10 +71,18 @@ func ConfirmDefaults(r io.Reader, w io.Writer) bool {
 }
 
 // ShouldSkip reports whether item should be skipped rather than applied
-// (already exists) and prints a "skipped" line so the user sees the decision.
+// (already exists, plan-unavailable, or opted out via --skip/--only) and
+// prints a "skipped" line so the user sees the decision.
 func ShouldSkip(item Item, w io.Writer) bool {
 	if item.IsSkip() {
-		_, _ = fmt.Fprintf(w, "  %-45s  skipped\n", item.Name)
+		switch {
+		case item.OptOutReason != "":
+			_, _ = fmt.Fprintf(w, "  %-45s  skipped (%s)\n", item.Name, item.OptOutReason)
+		case item.Detail != "":
+			_, _ = fmt.Fprintf(w, "  %-45s  skipped — %s\n", item.Name, item.Detail)
+		default:
+			_, _ = fmt.Fprintf(w, "  %-45s  skipped\n", item.Name)
+		}
 		return true
 	}
 	return false
@@ -82,18 +90,22 @@ func ShouldSkip(item Item, w io.Writer) bool {
 
 // PlanSummary returns a human-readable counts summary of the item plan,
 // e.g. "3 to create, 1 to update, 2 already exist". A skip with Detail is
-// not "already exist" — it is counted as unavailable. Returns "nothing to do"
-// when the plan is entirely ordinary skips.
+// not "already exist" — it is counted as unavailable. A skip with an
+// OptOutReason is counted separately as opted out. Returns "nothing to do"
+// when the plan is entirely skips.
 func PlanSummary(items []Item) string {
-	var toCreate, toUpdate, toUpgrade, alreadyExist, unavailable int
+	var toCreate, toUpdate, toUpgrade, alreadyExist, unavailable, optedOut int
 	for _, it := range items {
 		switch it.Action {
 		case ActionSkip:
-			if it.Detail != "" {
+			switch {
+			case it.OptOutReason != "":
+				optedOut++
+			case it.Detail != "":
 				unavailable++
-				continue
+			default:
+				alreadyExist++
 			}
-			alreadyExist++
 		case ActionUpdate:
 			toUpdate++
 		case ActionUpgrade:
@@ -118,6 +130,9 @@ func PlanSummary(items []Item) string {
 	if unavailable > 0 {
 		parts = append(parts, fmt.Sprintf("%d unavailable", unavailable))
 	}
+	if optedOut > 0 {
+		parts = append(parts, fmt.Sprintf("%d opted out", optedOut))
+	}
 	if len(parts) == 0 {
 		return "nothing to do"
 	}
@@ -130,7 +145,7 @@ func PlanSummary(items []Item) string {
 func SelectInteractive(items []Item, r io.Reader, w io.Writer) {
 	for i := range items {
 		if items[i].IsSkip() {
-			_, _ = fmt.Fprintf(w, "  %-45s  already exists — skip\n", items[i].Name)
+			_, _ = fmt.Fprintf(w, "  %-45s  %s\n", items[i].Name, items[i].LiveLabel())
 			continue
 		}
 		_, _ = fmt.Fprintf(w, "\n[%d/%d] %s (%s)\n", i+1, len(items), items[i].Name, items[i].LiveLabel())

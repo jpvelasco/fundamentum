@@ -41,9 +41,9 @@ var (
 	// ${{ secrets.CODECOV_TOKEN == '' }}. A bare ${{ ... }} blob is NOT accepted:
 	// expressions like ${{ false }} or the inverted token check would silently
 	// disable OIDC while still passing the drift gate.
-	reUseOIDC = regexp.MustCompile(`(?m)^\s*use_oidc:\s*(true|\$\{\{\s*secrets\.CODECOV_TOKEN\s*==\s*''\s*\}\})\s*(#.*)?$`)
-	reUsePyPI         = regexp.MustCompile(`(?m)^\s*use_pypi:\s*true\s*(#.*)?$`)
-	reFailCIIfError   = regexp.MustCompile(`(?m)^\s*fail_ci_if_error:\s*true\s*(#.*)?$`)
+	reUseOIDC       = regexp.MustCompile(`(?m)^\s*use_oidc:\s*(true|\$\{\{\s*secrets\.CODECOV_TOKEN\s*==\s*''\s*\}\})\s*(#.*)?$`)
+	reUsePyPI       = regexp.MustCompile(`(?m)^\s*use_pypi:\s*true\s*(#.*)?$`)
+	reFailCIIfError = regexp.MustCompile(`(?m)^\s*fail_ci_if_error:\s*true\s*(#.*)?$`)
 	// Pin to the coverage filename specifically so a two-upload workflow
 	// (coverage + test_results) can't have CoverageFiles capture ./junit.xml
 	// if the upload steps are ever reordered.

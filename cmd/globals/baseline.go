@@ -14,27 +14,46 @@ const BaselineVersion = 1
 
 // Baseline is a portable harden config that apply --from can reapply.
 type Baseline struct {
-	Version          int      `json:"version"`
-	Preset           string   `json:"preset,omitempty"`
-	CI               string   `json:"ci,omitempty"`
-	RequireChecks    []string `json:"require_checks,omitempty"`
-	AdvancedSecurity bool     `json:"advanced_security,omitempty"`
-	Strict           bool     `json:"strict,omitempty"`
-	NoOverwrite      bool     `json:"no_overwrite,omitempty"`
+	Version            int      `json:"version"`
+	Preset             string   `json:"preset,omitempty"`
+	CI                 string   `json:"ci,omitempty"`
+	RequireChecks      []string `json:"require_checks,omitempty"`
+	AdvancedSecurity   bool     `json:"advanced_security,omitempty"`
+	Strict             bool     `json:"strict,omitempty"`
+	NoOverwrite        bool     `json:"no_overwrite,omitempty"`
+	Skip               []string `json:"skip,omitempty"`
+	Only               []string `json:"only,omitempty"`
+	Octopus            bool     `json:"octopus,omitempty"`
+	CodacyInstructions bool     `json:"codacy_instructions,omitempty"`
+	// RequireBranchUpToDate is a tri-state: nil keeps the live ruleset
+	// policy on reconcile; true/false forces the policy.
+	RequireBranchUpToDate *bool `json:"require_branch_up_to_date,omitempty"`
 }
 
 // CurrentBaseline snapshots the active flags into a portable baseline.
 func CurrentBaseline() Baseline {
 	b := Baseline{
-		Version:          BaselineVersion,
-		Preset:           Preset,
-		CI:               CIPack,
-		AdvancedSecurity: AdvancedSecurity,
-		Strict:           Strict,
-		NoOverwrite:      NoOverwrite,
+		Version:            BaselineVersion,
+		Preset:             Preset,
+		CI:                 CIPack,
+		AdvancedSecurity:   AdvancedSecurity,
+		Strict:             Strict,
+		NoOverwrite:        NoOverwrite,
+		Octopus:            Octopus,
+		CodacyInstructions: CodacyInstructions,
 	}
 	if RequireChecks != nil {
 		b.RequireChecks = append([]string{}, RequireChecks...)
+	}
+	if SkipSteps != nil {
+		b.Skip = append([]string{}, SkipSteps...)
+	}
+	if OnlySteps != nil {
+		b.Only = append([]string{}, OnlySteps...)
+	}
+	if BranchUpToDateSet {
+		v := BranchUpToDate
+		b.RequireBranchUpToDate = &v
 	}
 	return b
 }
@@ -85,6 +104,16 @@ func ApplyBaseline(b Baseline) error {
 	}
 	if RequireChecks == nil && b.RequireChecks != nil {
 		RequireChecks = append([]string{}, b.RequireChecks...)
+	}
+	if SkipSteps == nil && b.Skip != nil {
+		SkipSteps = append([]string{}, b.Skip...)
+	}
+	if OnlySteps == nil && b.Only != nil {
+		OnlySteps = append([]string{}, b.Only...)
+	}
+	if b.RequireBranchUpToDate != nil && !Explicit(branchUpToDateFlag) && !BranchUpToDateSet {
+		BranchUpToDate = *b.RequireBranchUpToDate
+		BranchUpToDateSet = true
 	}
 	applyBaselineBools(b)
 	return nil

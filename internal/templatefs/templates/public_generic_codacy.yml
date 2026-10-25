@@ -1,0 +1,5 @@
+---
+exclude_paths: []
+# No language manifests were detected, so no languages are disabled — Codacy
+# cloud detects the languages itself. Repos hardened with a language pack
+# (--ci go/node/python/rust) ship a pack-specific config instead.

@@ -1,6 +1,7 @@
 package repoinit
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/jpvelasco/fundamentum/cmd/apply"
 	"github.com/jpvelasco/fundamentum/cmd/globals"
+	"github.com/jpvelasco/fundamentum/cmd/util"
 	"github.com/jpvelasco/fundamentum/internal/github"
 )
 
@@ -125,6 +127,9 @@ func TestRun_CreateRepo_Fails(t *testing.T) {
 func TestRun_MissingToken(t *testing.T) {
 	resetGlobals(t)
 	t.Setenv("GITHUB_TOKEN", "")
+	restore := util.GhAuthToken
+	util.GhAuthToken = func() (string, error) { return "", errors.New("no gh") }
+	t.Cleanup(func() { util.GhAuthToken = restore })
 	err := run("owner/repo", true, nil)
 	if err == nil || !strings.Contains(err.Error(), "GitHub token is required") {
 		t.Fatalf("expected missing-token error, got %v", err)

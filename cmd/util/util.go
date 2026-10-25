@@ -4,6 +4,7 @@ package util
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 )
@@ -35,9 +36,22 @@ func ParseOwnerRepo(arg string) (string, string, error) {
 	return owner, repo, nil
 }
 
-// RequireToken returns the GitHub token from --token or GITHUB_TOKEN.
-// An empty result is an error so commands fail locally instead of sending
-// unauthenticated API calls.
+// GhAuthToken resolves a token from the GitHub CLI's authenticated session.
+// It is the only exec.Command in this codebase — a deliberate, user-directed
+// exception: fixed argv (no shell, no user-controlled arguments), and only
+// consulted when neither --token nor GITHUB_TOKEN is available. Exported as a
+// var so tests in other packages can stub the fallback deterministically.
+var GhAuthToken = func() (string, error) {
+	out, err := exec.Command("gh", "auth", "token").Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// RequireToken returns the GitHub token from --token, GITHUB_TOKEN, or the
+// GitHub CLI's authenticated session, in that order. An empty result is an
+// error so commands fail locally instead of sending unauthenticated API calls.
 func RequireToken(flagToken string) (string, error) {
 	if flagToken != "" {
 		return flagToken, nil
@@ -45,5 +59,8 @@ func RequireToken(flagToken string) (string, error) {
 	if env := os.Getenv("GITHUB_TOKEN"); env != "" {
 		return env, nil
 	}
-	return "", fmt.Errorf("GitHub token is required: set GITHUB_TOKEN or pass --token")
+	if tok, err := GhAuthToken(); err == nil && tok != "" {
+		return tok, nil
+	}
+	return "", fmt.Errorf("GitHub token is required: set GITHUB_TOKEN, run `gh auth login`, or pass --token")
 }

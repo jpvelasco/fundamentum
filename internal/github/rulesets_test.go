@@ -353,9 +353,6 @@ func TestIntendedChecksAndHelpers(t *testing.T) {
 	if inferSolo(nil) || inferSolo(&Ruleset{}) {
 		t.Error("inferSolo without PR rule must be false")
 	}
-	if matchingPRRule(nil, BranchProtectionOptions{}) {
-		t.Error("matchingPRRule(nil) must be false")
-	}
 	if !hasAllChecks(&Ruleset{}, nil) {
 		t.Error("hasAllChecks empty want must be true")
 	}

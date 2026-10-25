@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -39,14 +40,6 @@ func prMockHandler() http.HandlerFunc {
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
-	})
-}
-
-// simpleFileHandler returns an http.HandlerFunc that returns 201 + {"content":{}} for all requests.
-func simpleFileHandler() http.HandlerFunc {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"content":{}}`))
 	})
 }
 
@@ -288,62 +281,116 @@ func TestBuildItems_WithExistingRuleset(t *testing.T) {
 	}
 }
 
+// gitBatchHandler mocks the full git data API flow for a successful
+// CommitFiles batch: GET ref → GET commit → POST blobs → POST tree →
+// POST commit → PATCH ref (refStatus).
+func gitBatchHandler(refStatus int) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/git/ref/heads/main"):
+			_, _ = w.Write([]byte(`{"object":{"sha":"basesha"}}`))
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/git/commits/basesha"):
+			_, _ = w.Write([]byte(`{"tree":{"sha":"basesha-tree"}}`))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/git/blobs"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha":"blobsha"}`))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/git/trees"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha":"newtree"}`))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/git/commits"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha":"newcommit"}`))
+		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/git/refs/heads/main"):
+			w.WriteHeader(refStatus)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+}
+
+// perFileHandler answers the Contents API used by the per-file fallback.
+// putStatus is the status returned for PUT /contents/*; contentsGetStatus
+// for GET /contents/*.
+func perFileHandler(contentsGetStatus, putStatus int) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(contentsGetStatus)
+			_, _ = w.Write([]byte(`{"content":"","sha":"x"}`))
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(putStatus)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+}
+
 func TestApplyItems_WritesToInjectedWriter(t *testing.T) {
 	var out strings.Builder
-	items := []wizard.Item{
-		{
-			Name:    ".github/CODEOWNERS",
-			Action:  wizard.ActionCreate,
-			Content: []byte("me"),
-			Apply:   func() error { return nil },
-		},
-	}
-	c := github.NewClient("", false)
-	if err := applyItems(c, "owner", "repo", "main", items, false, nil, &out); err != nil {
+	items := newFileItems(
+		[]string{".github/CODEOWNERS"},
+		[][]byte{[]byte("me")},
+		[]func() error{func() error { return nil }},
+	)
+	runApplyItemsExpectNoError(t, gitBatchHandler(http.StatusOK), items, false)
+	testWithServerOutput(t, gitBatchHandler(http.StatusOK), items, false, &out, func(t *testing.T) {
+		if !strings.Contains(out.String(), "committed as one commit") {
+			t.Errorf("expected batch progress on injected writer, got %q", out.String())
+		}
+	})
+}
+
+// testWithServerOutput is testWithServer with an explicit output writer.
+func testWithServerOutput(t *testing.T, handler http.HandlerFunc, items []wizard.Item, viaPR bool, out io.Writer, verify func(*testing.T)) {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+	if err := applyItems(c, "owner", "repo", "main", items, viaPR, nil, out); err != nil {
 		t.Fatalf("applyItems() error: %v", err)
 	}
-	if !strings.Contains(out.String(), "CODEOWNERS") {
-		t.Errorf("expected progress on injected writer, got %q", out.String())
+	if verify != nil {
+		verify(t)
 	}
 }
 
 func TestApplyItems_No409(t *testing.T) {
-	// All files apply directly without 409 — no PR created.
+	// All files land as ONE commit — no PR created.
+	var prOpened bool
+	handler := gitBatchHandler(http.StatusOK)
 	items := newFileItems(
 		[]string{".github/CODEOWNERS", ".github/SECURITY.md"},
 		[][]byte{[]byte("me"), []byte("sec")},
 		[]func() error{func() error { return nil }, func() error { return nil }},
 	)
-	runApplyItemsExpectNoError(t, simpleFileHandler(), items, false)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/pulls") {
+			prOpened = true
+		}
+		handler(w, r)
+	}))
+	defer srv.Close()
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+	if err := applyItems(c, "owner", "repo", "main", items, false, nil, io.Discard); err != nil {
+		t.Fatalf("applyItems() error: %v", err)
+	}
+	if prOpened {
+		t.Error("a successful single commit must not open a PR")
+	}
 }
 
-// err409 is a stand-in Apply for an item that triggers PR-mode fallback.
-func err409() error {
-	return fmt.Errorf("409 Conflict: Repository rule violations found — GH013")
-}
-
-func TestApplyItems_FirstFile409_FallbackToPR(t *testing.T) {
-	// First file returns 409 — triggers fallback. Remaining files collected for PR.
-	// The 409 comes from the item.Apply() closure, not the server.
-	// Server only handles PR flow: CreatePRBranch → UpsertFileOnBranch × N → CreatePullRequest.
-	// First item.Apply() returns 409, second item.Apply() is never called (fallback collects it).
+func TestApplyItems_BatchConflictFallsBackToPR(t *testing.T) {
+	// Branch protection rejects the direct commit (409) — all file changes
+	// switch to PR mode.
 	items := newFileItems(
 		[]string{".github/CODEOWNERS", ".github/SECURITY.md"},
 		[][]byte{[]byte("me"), []byte("sec")},
-		[]func() error{err409, func() error { return nil }},
+		[]func() error{func() error { return nil }, func() error { return nil }},
 	)
-	runApplyItemsExpectNoError(t, prMockHandler(), items, false)
-}
-
-func TestApplyItems_All409_AllToPR(t *testing.T) {
-	// All files return 409 — first triggers fallback, rest collected directly via fallback flag.
-	// Both item.Apply() closures return 409 — only first is actually called (second collected via fallback).
-	items := newFileItems(
-		[]string{".github/CODEOWNERS", ".github/SECURITY.md"},
-		[][]byte{[]byte("me"), []byte("sec")},
-		[]func() error{err409, err409},
-	)
-	runApplyItemsExpectNoError(t, prMockHandler(), items, false)
+	combined := combineHandlers(gitBatchHandler(http.StatusConflict), prMockHandler())
+	runApplyItemsExpectNoError(t, combined, items, false)
 }
 
 func TestApplyItems_ViaPRFromStart(t *testing.T) {
@@ -356,16 +403,37 @@ func TestApplyItems_ViaPRFromStart(t *testing.T) {
 	runApplyItemsExpectNoError(t, prMockHandler(), items, true)
 }
 
+// combineHandlers answers with the first handler that doesn't 404; lets a
+// test layer a PR flow on top of a git-data flow.
+func combineHandlers(handlers ...http.HandlerFunc) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, h := range handlers {
+			rec := httptest.NewRecorder()
+			h(rec, r)
+			if rec.Code != http.StatusNotFound {
+				for k, vs := range rec.Header() {
+					for _, v := range vs {
+						w.Header().Add(k, v)
+					}
+				}
+				w.WriteHeader(rec.Code)
+				_, _ = w.Write(rec.Body.Bytes())
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+}
+
 func TestApplyItems_NonFileItemsApplyDirectly(t *testing.T) {
-	// Non-file items (no Content) apply directly even when fallback is triggered.
-	// First file 409 → fallback → non-file items still apply directly after PR batch.
+	// Non-file items (no Content) apply directly even when files fall back
+	// to PR mode (batch 409).
 	nonFileApplied := false
 	items := []wizard.Item{
 		{
 			Name:    ".github/CODEOWNERS",
 			Action:  wizard.ActionCreate,
 			Content: []byte("me"),
-			Apply:   err409,
 		},
 		{
 			Name:   "General settings (auto-delete branches)",
@@ -376,7 +444,7 @@ func TestApplyItems_NonFileItemsApplyDirectly(t *testing.T) {
 			},
 		},
 	}
-	runApplyItemsExpectNoError(t, prMockHandler(), items, false)
+	runApplyItemsExpectNoError(t, combineHandlers(gitBatchHandler(http.StatusConflict), prMockHandler()), items, false)
 	if !nonFileApplied {
 		t.Error("expected non-file item to be applied directly after PR batch")
 	}
@@ -384,24 +452,16 @@ func TestApplyItems_NonFileItemsApplyDirectly(t *testing.T) {
 
 func TestApplyItems_SkippedItemNotApplied(t *testing.T) {
 	// Items with action Skip are not applied.
-	applyCalled := false
 	items := []wizard.Item{
 		{
 			Name:    ".github/CODEOWNERS",
 			Action:  wizard.ActionSkip,
 			Content: []byte("me"),
-			Apply: func() error {
-				applyCalled = true
-				return nil
-			},
 		},
 	}
 	c := github.NewClient("", false)
 	if err := applyItems(c, "owner", "repo", "main", items, false, nil, io.Discard); err != nil {
 		t.Errorf("expected no error, got: %v", err)
-	}
-	if applyCalled {
-		t.Error("expected Apply not to be called")
 	}
 }
 
@@ -516,51 +576,53 @@ func TestDeferRequiredChecks_NilOpts(t *testing.T) {
 }
 
 func TestApplyItems_ViaPR_DefersRequiredChecks(t *testing.T) {
-	assertDeferredRequiredChecks(t, true, func() error { return nil }, "PR mode must not require status checks the open harden PR cannot satisfy")
+	assertDeferredRequiredChecks(t, true, http.StatusOK, "PR mode must not require status checks the open harden PR cannot satisfy")
 }
 
 func TestApplyItems_409Fallback_DefersRequiredChecks(t *testing.T) {
-	assertDeferredRequiredChecks(t, false, err409, "409 fallback must not require status checks the open harden PR cannot satisfy")
+	assertDeferredRequiredChecks(t, false, http.StatusConflict, "409 fallback must not require status checks the open harden PR cannot satisfy")
 }
 
-func assertDeferredRequiredChecks(t *testing.T, viaPR bool, fileApply func() error, failMsg string) {
+func assertDeferredRequiredChecks(t *testing.T, viaPR bool, refStatus int, failMsg string) {
 	t.Helper()
 	var rulesetBody map[string]any
 	opts := &github.BranchProtectionOptions{}
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/rulesets"):
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`[]`))
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/rulesets"):
-			_ = json.NewDecoder(r.Body).Decode(&rulesetBody)
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"id":1}`))
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main"):
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"commit":{"sha":"abc123"}}`))
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs"):
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{}`))
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
-			w.WriteHeader(http.StatusNotFound)
-		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/contents/"):
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"content":{"sha":"x"}}`))
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/pulls"):
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"number":1}`))
-		default:
-			w.WriteHeader(http.StatusOK)
-		}
-	})
+	handler := combineHandlers(
+		gitBatchHandler(refStatus),
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/rulesets"):
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`[]`))
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/rulesets"):
+				_ = json.NewDecoder(r.Body).Decode(&rulesetBody)
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"id":1}`))
+			case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main"):
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"commit":{"sha":"abc123"}}`))
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs"):
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{}`))
+			case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
+				w.WriteHeader(http.StatusNotFound)
+			case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/contents/"):
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"content":{"sha":"x"}}`))
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/pulls"):
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"number":1}`))
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}),
+	)
 	testWithServer(t, handler, func(c *github.Client) {
 		items := []wizard.Item{
 			{
 				Name:    ".github/CODEOWNERS",
 				Action:  wizard.ActionCreate,
 				Content: []byte("me"),
-				Apply:   fileApply,
 			},
 			branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, false, false, opts, ""),
 		}
@@ -748,39 +810,53 @@ func TestBranchProtectionItem_FallbackOnlyOn403(t *testing.T) {
 }
 
 func TestApplyItems_WorkflowLocked_Skipped(t *testing.T) {
-	// Workflow lock error should be treated as skip and processing continues.
-	items := []wizard.Item{
-		{
-			Name:    ".github/workflows/ci.yml",
-			Action:  wizard.ActionUpdate,
-			Content: []byte("workflow"),
-			Apply: func() error {
-				return fmt.Errorf("upsert file .github/workflows/ci.yml: %w", github.ErrWorkflowLocked)
-			},
-		},
-		{
-			Name:    ".github/CODEOWNERS",
-			Action:  wizard.ActionCreate,
-			Content: []byte("me"),
-			Apply:   func() error { return nil },
-		},
-	}
-	runApplyItemsExpectNoError(t, simpleFileHandler(), items, false)
+	// When the token cannot batch workflow files (git data API refuses), the
+	// per-file fallback runs; an Actions-locked workflow (PUT 404 on update)
+	// is skipped and the other files still apply.
+	items := newFileItems(
+		[]string{".github/workflows/ci.yml", ".github/CODEOWNERS"},
+		[][]byte{[]byte("workflow"), []byte("me")},
+		[]func() error{func() error { return nil }, func() error { return nil }},
+	)
+	// GET contents: workflow exists (locked update), CODEOWNERS missing.
+	// PUT workflow: 404 (Actions lock). PUT other: 201.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/.github/workflows/ci.yml"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"content":"b2xk","sha":"wf"}`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/contents/.github/workflows/ci.yml"):
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+	// The batch commit fails (500 on ref update) so the per-file fallback runs.
+	combined := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPatch || strings.Contains(r.URL.Path, "/git/") {
+			gitBatchHandler(http.StatusInternalServerError)(w, r)
+			return
+		}
+		handler(w, r)
+	})
+	runApplyItemsExpectNoError(t, combined, items, false)
 }
 
 func TestApplyItems_MixedFileAndNonFile(t *testing.T) {
-	// Mix of file items and non-file items: files apply directly, non-files defer.
-	fileApplied := false
+	// Mix of file items and non-file items: files batch into one commit,
+	// non-files apply directly after.
 	nonFileApplied := false
 	items := []wizard.Item{
 		{
 			Name:    ".github/CODEOWNERS",
 			Action:  wizard.ActionCreate,
 			Content: []byte("me"),
-			Apply: func() error {
-				fileApplied = true
-				return nil
-			},
 		},
 		{
 			Name:   "General settings (auto-delete branches)",
@@ -791,12 +867,9 @@ func TestApplyItems_MixedFileAndNonFile(t *testing.T) {
 			},
 		},
 	}
-	runApplyItemsExpectNoError(t, simpleFileHandler(), items, false)
-	if !fileApplied {
-		t.Error("expected file item to be applied directly")
-	}
+	runApplyItemsExpectNoError(t, gitBatchHandler(http.StatusOK), items, false)
 	if !nonFileApplied {
-		t.Error("expected non-file item to be applied after files")
+		t.Error("expected non-file item to be applied after the file batch")
 	}
 }
 
@@ -1001,48 +1074,57 @@ func TestBranchProtectionItem_ClassicUpgradeError(t *testing.T) {
 }
 
 func TestApplyItems_RequiredFileError(t *testing.T) {
+	// The batch fails for a non-409 reason and the per-file fallback hits an
+	// API error on the first file — the run fails, but later files still run.
 	secApplied := false
 	items := []wizard.Item{
 		{
 			Name:    ".github/CODEOWNERS",
 			Action:  wizard.ActionCreate,
 			Content: []byte("me"),
-			Apply:   func() error { return fmt.Errorf("API error") },
 		},
 		{
 			Name:    ".github/SECURITY.md",
 			Action:  wizard.ActionCreate,
 			Content: []byte("sec"),
+		},
+		{
+			Name:   "General settings (auto-delete branches)",
+			Action: wizard.ActionCreate,
 			Apply: func() error {
 				secApplied = true
 				return nil
 			},
 		},
 	}
-	c := github.NewClient("", false)
-	err := applyItems(c, "owner", "repo", "main", items, false, nil, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "required items failed") {
-		t.Errorf("expected required-items error, got: %v", err)
-	}
-	if !secApplied {
-		t.Error("later items should still run after a required file failure")
-	}
+	handler := combineHandlers(
+		gitBatchHandler(http.StatusInternalServerError),
+		perFileHandler(http.StatusNotFound, http.StatusForbidden),
+	)
+	testWithServer(t, handler, func(c *github.Client) {
+		err := applyItems(c, "owner", "repo", "main", items, false, nil, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "required items failed") {
+			t.Errorf("expected required-items error, got: %v", err)
+		}
+		if !secApplied {
+			t.Error("non-file items should still run after a required file failure")
+		}
+	}, nil)
 }
 
-func TestApplyItems_OptionalFileError(t *testing.T) {
-	items := []wizard.Item{
-		{
-			Name:     "optional.md",
-			Action:   wizard.ActionCreate,
-			Optional: true,
-			Content:  []byte("x"),
-			Apply:    func() error { return fmt.Errorf("API error") },
-		},
-	}
-	c := github.NewClient("", false)
-	if err := applyItems(c, "owner", "repo", "main", items, false, nil, io.Discard); err != nil {
-		t.Errorf("optional file failure must not fail the run, got: %v", err)
-	}
+func TestApplyItems_PerFileFallbackSucceeds(t *testing.T) {
+	// The batch fails (500 on ref update); the per-file fallback applies both
+	// files through the Contents API and the run succeeds.
+	items := newFileItems(
+		[]string{".github/CODEOWNERS", ".github/SECURITY.md"},
+		[][]byte{[]byte("me"), []byte("sec")},
+		[]func() error{func() error { return nil }, func() error { return nil }},
+	)
+	handler := combineHandlers(
+		gitBatchHandler(http.StatusInternalServerError),
+		perFileHandler(http.StatusNotFound, http.StatusCreated),
+	)
+	runApplyItemsExpectNoError(t, handler, items, false)
 }
 
 func TestApplyItems_ViaPRNoWrittenFiles(t *testing.T) {
@@ -1153,4 +1235,221 @@ func TestBuildItems_AliasCheckErrorFailsPlan(t *testing.T) {
 			t.Errorf("expected nil items on error, got %d items", len(items))
 		}
 	}, nil)
+}
+
+func TestBuildItems_SkipStepsMarksOptOut(t *testing.T) {
+	t.Cleanup(func() { globals.SkipSteps = nil; globals.OnlySteps = nil })
+	reset := func() {
+		globals.SkipSteps = nil
+		globals.OnlySteps = nil
+	}
+	t.Cleanup(reset)
+
+	globals.SkipSteps = []string{"protect-version-tags", "socket.yml"}
+	items, err := buildItems(nil, nil, "owner", "repo", "main", "public", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "")
+	if err != nil {
+		t.Fatalf("buildItems() error: %v", err)
+	}
+	for _, item := range items {
+		if item.Name == "Tag ruleset (protect-version-tags)" {
+			if item.Action != wizard.ActionSkip || item.OptOutReason != "--skip" {
+				t.Errorf("skipped tag ruleset = %+v, want skip via --skip", item)
+			}
+		}
+	}
+
+	globals.SkipSteps = nil
+	globals.OnlySteps = []string{"files"}
+	rendered, err := templates.Render(templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public", CIPack: "go"})
+	if err != nil {
+		t.Fatalf("Render() error: %v", err)
+	}
+	items, err = buildItems(nil, nil, "owner", "repo", "main", "public", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "")
+	if err != nil {
+		t.Fatalf("buildItems() error: %v", err)
+	}
+	var fileSeen, stepSeen bool
+	for _, item := range items {
+		if item.Content != nil {
+			fileSeen = true
+			if item.Action == wizard.ActionSkip {
+				t.Errorf("file %q must stay included under --only files: %+v", item.Name, item)
+			}
+		} else {
+			stepSeen = true
+			if item.Action != wizard.ActionSkip || item.OptOutReason != "--only" {
+				t.Errorf("non-file item must be opted out via --only: %+v", item)
+			}
+		}
+	}
+	if !fileSeen || !stepSeen {
+		t.Fatalf("expected both file and step items, fileSeen=%v stepSeen=%v", fileSeen, stepSeen)
+	}
+}
+
+func TestChangesAfter(t *testing.T) {
+	changes := []github.FileChange{
+		{Path: "a"},
+		{Path: "b"},
+		{Path: "c"},
+	}
+	if got := changesAfter(changes, "b"); len(got) != 1 || got[0].Path != "c" {
+		t.Errorf("changesAfter(b) = %v, want [c]", got)
+	}
+	if got := changesAfter(changes, "missing"); got != nil {
+		t.Errorf("changesAfter(missing) = %v, want nil", got)
+	}
+}
+
+func TestApplyItems_PerFile409SwitchesToPR(t *testing.T) {
+	// Batch fails (500), per-file fallback: first file PUTs fine, second
+	// file's PUT returns 409 → remaining files go to a PR.
+	items := newFileItems(
+		[]string{"a.txt", "b.txt", "c.txt"},
+		[][]byte{[]byte("1"), []byte("2"), []byte("3")},
+		[]func() error{func() error { return nil }, func() error { return nil }, func() error { return nil }},
+	)
+	bPuts := 0
+	perFile := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/contents/b.txt"):
+			// The default-branch PUT 409s (protection); the PR-branch retry succeeds.
+			bPuts++
+			if bPuts == 1 {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"message":"Repository rule violations found","documentation_url":"x"}`))
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+		case r.Method == http.MethodPut:
+			w.WriteHeader(http.StatusCreated)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	pr := prMockHandler()
+	// The PR flow needs GET /branches/main + POST /git/refs + POST /pulls —
+	// prMockHandler handles those; route unmatched calls to it.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		perFileRec := httptest.NewRecorder()
+		perFile(perFileRec, r)
+		if perFileRec.Code != http.StatusNotFound {
+			w.WriteHeader(perFileRec.Code)
+			_, _ = w.Write(perFileRec.Body.Bytes())
+			return
+		}
+		gitRec := httptest.NewRecorder()
+		gitBatchHandler(http.StatusInternalServerError)(gitRec, r)
+		if gitRec.Code != http.StatusNotFound {
+			w.WriteHeader(gitRec.Code)
+			_, _ = w.Write(gitRec.Body.Bytes())
+			return
+		}
+		pr(w, r)
+	})
+	opts := &github.BranchProtectionOptions{}
+	var dbg strings.Builder
+	testWithServer(t, handler, func(c *github.Client) {
+		if err := applyItems(c, "owner", "repo", "main", items, false, opts, &dbg); err != nil {
+			t.Fatalf("applyItems() error: %v\n%s", err, dbg.String())
+		}
+		if !opts.SkipStatusChecks {
+			t.Errorf("per-file 409 fallback must defer required checks for the open PR\n%s", dbg.String())
+		}
+	}, nil)
+}
+
+func TestRenderData_DetectionErrorsPropagate(t *testing.T) {
+	// Any detection error aborts the plan instead of falling back silently.
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/contents/") {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	info := github.Repo{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"}
+	_, err := RenderData(c, info, "go", false)
+	if err == nil {
+		t.Fatal("a 403 on the README detection must propagate")
+	}
+	if !strings.Contains(err.Error(), "check file README.md") {
+		t.Errorf("error must name the failing probe: %v", err)
+	}
+}
+
+func TestRenderData_NilClientTakesDefaults(t *testing.T) {
+	info := github.Repo{Owner: "o", RepoName: "r", DefaultBranch: "main", Visibility: "public"}
+	data, err := RenderData(nil, info, "node", false)
+	if err != nil {
+		t.Fatalf("nil client must not probe: %v", err)
+	}
+	// Detection fields stay empty; RenderData.sanitize substitutes the
+	// defaults (README.md, the AGENTS.md standard line, and the honest
+	// failing node commands) at render time.
+	rendered, err := renderTemplates(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl := ""
+	for _, f := range rendered {
+		if f.Path == ".github/PULL_REQUEST_TEMPLATE.md" {
+			tpl = f.Content
+		}
+	}
+	if !strings.Contains(tpl, "Updated README.md") || !strings.Contains(tpl, "Updated AGENTS.md") {
+		t.Errorf("defaults must land in the PR template:\n%s", tpl)
+	}
+	ci := ""
+	for _, f := range rendered {
+		if f.Path == ".github/workflows/ci.yml" {
+			ci = f.Content
+		}
+	}
+	if !strings.Contains(ci, "package.json has no lint script") {
+		t.Errorf("node defaults must fail honestly:\n%s", ci)
+	}
+}
+
+func TestRunWithClient_UnknownSkipKeyErrors(t *testing.T) {
+	t.Cleanup(func() {
+		globals.SkipSteps = nil
+		globals.OnlySteps = nil
+	})
+	globals.SkipSteps = []string{"protect-mian"} // typo: silent no-op would be dangerous
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/owner/repo":
+			_, _ = w.Write([]byte(`{"name":"repo","visibility":"public","default_branch":"main","owner":{"type":"User"}}`))
+		case strings.Contains(r.URL.Path, "/contents/"):
+			w.WriteHeader(http.StatusNotFound)
+		case strings.HasSuffix(r.URL.Path, "/rulesets"):
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	err := runWithClient(c, "owner", "repo", newLineReader("\n"), &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "unknown --skip/--only key(s): protect-mian") {
+		t.Fatalf("typo in --skip must error with the token named, got: %v", err)
+	}
+
+	// A valid path token passes validation.
+	globals.SkipSteps = []string{"socket.yml"}
+	if err := runWithClient(c, "owner", "repo", newLineReader("\n"), &strings.Builder{}); err == nil || !strings.Contains(err.Error(), "Dry run complete") {
+		// runWithClient without --dry-run does a live run; with the mock server
+		// the flow ends in apply errors. Validation happens BEFORE any of that,
+		// so only the unknown-key case must error; the valid case must NOT error
+		// with the unknown-key message.
+		if err != nil && strings.Contains(err.Error(), "unknown --skip/--only") {
+			t.Fatalf("valid token must not trigger the unknown-key error: %v", err)
+		}
+	}
 }

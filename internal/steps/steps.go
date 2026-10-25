@@ -1,0 +1,146 @@
+// Package steps resolves the --skip / --only step opt-outs shared by apply
+// and audit. Steps are addressed by canonical key; files by target path
+// (or the "files" key for the whole file set).
+package steps
+
+import "strings"
+
+// Canonical step keys accepted by --skip and --only.
+const (
+	Settings           = "settings"             // general settings (auto-delete branches)
+	ProtectMain        = "protect-main"         // branch protection ruleset
+	ProtectVersionTags = "protect-version-tags" // tag ruleset
+	Security           = "security"             // Dependabot / secret scanning / CodeQL
+	Files              = "files"                // all community/CI file items
+)
+
+// Selector decides whether a step or file should run. An empty only-set means
+// "everything"; a non-empty only-set restricts to the listed steps/paths. The
+// skip-set then subtracts. File items respond to the "files" key and their
+// exact target path; an exact path beats the "files" key for only-selections.
+type Selector struct {
+	skip map[string]struct{}
+	only map[string]struct{}
+}
+
+// New builds a Selector from the raw --skip and --only token lists. Tokens are
+// trimmed and lowercased so --skip Protect-Main matches.
+func New(skip, only []string) Selector {
+	return Selector{skip: keySet(skip), only: keySet(only)}
+}
+
+// Len reports how many raw constraints (skip + only) are configured. Zero
+// means no filtering at all.
+func (s Selector) Len() int {
+	return len(s.skip) + len(s.only)
+}
+
+// Unknown returns the configured tokens that match no known step key and
+// none of the rendered file paths. A typo in --skip would otherwise be a
+// silent no-op that lets apply touch exactly what the operator meant to
+// preserve, so callers surface these as errors.
+func (s Selector) Unknown(renderedPaths []string) []string {
+	known := map[string]bool{
+		Settings:           true,
+		ProtectMain:        true,
+		ProtectVersionTags: true,
+		Security:           true,
+		Files:              true,
+	}
+	for _, p := range renderedPaths {
+		known[strings.ToLower(p)] = true
+	}
+	var out []string
+	for _, set := range []map[string]struct{}{s.skip, s.only} {
+		for k := range set {
+			if !known[k] {
+				out = append(out, k)
+			}
+		}
+	}
+	return out
+}
+
+// IncludeStep reports whether the canonical step should run.
+func (s Selector) IncludeStep(step string) bool {
+	if _, ok := s.skip[step]; ok {
+		return false
+	}
+	if len(s.only) == 0 {
+		return true
+	}
+	_, ok := s.only[step]
+	return ok
+}
+
+// ExcludeReason reports which opt-out mechanism excludes a canonical STEP:
+// "--skip", "--only", or "" when the step is included.
+func (s Selector) ExcludeReason(step string) string {
+	if _, ok := s.skip[step]; ok {
+		return "--skip"
+	}
+	if len(s.only) > 0 {
+		if _, ok := s.only[step]; ok {
+			return "" // listed in --only: included
+		}
+		return "--only"
+	}
+	return ""
+}
+
+// ExcludeFileReason is ExcludeReason for file paths, mirroring IncludeFile:
+// the "files" key excludes every file, and an exact path entry wins.
+func (s Selector) ExcludeFileReason(path string) string {
+	path = strings.ToLower(path)
+	if _, ok := s.skip[Files]; ok {
+		return "--skip"
+	}
+	if _, ok := s.skip[path]; ok {
+		return "--skip"
+	}
+	if len(s.only) > 0 {
+		if _, ok := s.only[Files]; ok {
+			return "" // --only files includes every file
+		}
+		if _, ok := s.only[path]; ok {
+			return ""
+		}
+		return "--only"
+	}
+	return ""
+}
+
+// IncludeFile reports whether a file at target path should ship. Tokens are
+// matched case-insensitively — keySet lowercases the flags, so the raw path
+// (which commonly has uppercase names like CODEOWNERS) is lowercased too.
+func (s Selector) IncludeFile(path string) bool {
+	path = strings.ToLower(path)
+	if _, ok := s.skip[Files]; ok {
+		return false
+	}
+	if _, ok := s.skip[path]; ok {
+		return false
+	}
+	if len(s.only) == 0 {
+		return true
+	}
+	if _, ok := s.only[Files]; ok {
+		return true
+	}
+	_, ok := s.only[path]
+	return ok
+}
+
+func keySet(tokens []string) map[string]struct{} {
+	if len(tokens) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(tokens))
+	for _, t := range tokens {
+		t = strings.ToLower(strings.TrimSpace(t))
+		if t != "" {
+			set[t] = struct{}{}
+		}
+	}
+	return set
+}

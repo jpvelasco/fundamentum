@@ -1,3 +1,6 @@
+# Dependency updates for the detected ecosystems (github-actions from the
+# generic baseline plus gomod detected from the root go.mod). Monorepos with
+# manifests in subdirectories need one entry per directory — add those by hand.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -6,5 +9,13 @@ updates:
       interval: "weekly"
     groups:
       github-actions:
+        patterns:
+          - "*"
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      gomod:
         patterns:
           - "*"

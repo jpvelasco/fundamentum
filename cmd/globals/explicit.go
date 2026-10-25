@@ -13,7 +13,24 @@ func baselineBools(file Baseline) []boolFlag {
 		{name: "advanced-security", current: &AdvancedSecurity, file: file.AdvancedSecurity},
 		{name: "strict", current: &Strict, file: file.Strict},
 		{name: "no-overwrite", current: &NoOverwrite, file: file.NoOverwrite},
+		{name: "octopus", current: &Octopus, file: file.Octopus},
+		{name: "codacy-instructions", current: &CodacyInstructions, file: file.CodacyInstructions},
 	}
+}
+
+// branchUpToDateFlag is the one bool flag with a true default, so it cannot
+// use the false-means-unset baseline-bool logic: its explicit state is
+// tracked separately, and the baseline carries it as a tri-state pointer.
+const branchUpToDateFlag = "branch-up-to-date"
+
+// trackedBoolFlags is every bool flag whose Changed state must be recorded
+// after Cobra parses the command line.
+func trackedBoolFlags() []string {
+	flags := make([]string, 0, len(baselineBools(Baseline{}))+1)
+	for _, slot := range baselineBools(Baseline{}) {
+		flags = append(flags, slot.name)
+	}
+	return append(flags, branchUpToDateFlag)
 }
 
 var explicitFlags = map[string]bool{}
@@ -37,10 +54,13 @@ func ResetExplicit() {
 // NoteExplicitBools records each baseline bool flag the operator passed.
 // changed is cmd.Flags().Changed after Cobra has parsed the command.
 func NoteExplicitBools(changed func(string) bool) {
-	for _, slot := range baselineBools(Baseline{}) {
-		if changed(slot.name) {
-			NoteExplicit(slot.name)
+	for _, name := range trackedBoolFlags() {
+		if changed(name) {
+			NoteExplicit(name)
 		}
+	}
+	if changed(branchUpToDateFlag) || Explicit(branchUpToDateFlag) {
+		BranchUpToDateSet = true
 	}
 }
 
