@@ -1,0 +1,8 @@
+---
+exclude_paths: []
+# Languages that do not apply to this repo's detected pack. The rust starter
+# ships for repos without go.mod, so Go analyzers (govet, staticcheck) only
+# produce noise. Codacy runs its default patterns for everything else.
+languages:
+  go:
+    enabled: false

@@ -35,29 +35,44 @@ type Item struct {
 	Apply    func() error
 	Optional bool   // failures show as ⚠ (plan limit) rather than ✗ (error)
 	Content  []byte // rendered file content for file items (used by PR mode)
-	// Detail overrides the dry-run skip label when Action is ActionSkip.
-	// A non-empty Detail means the skip is not "already exists" — the plan
-	// summary counts it separately so a plan-unavailable step is not a lie.
+	// Detail explains an update (field drift, diffstat) or a non-obvious skip
+	// (plan-unavailable protection). Empty on plain skips.
 	Detail string
+	// OptOutReason marks the item as excluded by --skip / --only. The reason
+	// names the mechanism ("--skip", "--only") and is shown in the plan table
+	// and apply progress instead of "already exists".
+	OptOutReason string
 }
 
 // DryRunLabel returns the human-readable action for --dry-run output.
 func (i Item) DryRunLabel() string {
-	if i.Action == ActionSkip {
+	switch {
+	case i.Action == ActionSkip && i.OptOutReason != "":
+		return "skipped (" + i.OptOutReason + ")"
+	case i.Action == ActionSkip:
 		if i.Detail != "" {
 			return i.Detail
 		}
 		return "already exists — skip"
+	case i.Detail != "":
+		return fmt.Sprintf("would %s (%s)", i.Action, i.Detail)
+	default:
+		return fmt.Sprintf("would %s", i.Action)
 	}
-	return fmt.Sprintf("would %s", i.Action)
 }
 
 // LiveLabel returns the human-readable action for live output.
 func (i Item) LiveLabel() string {
-	if i.Action == ActionSkip {
+	switch {
+	case i.Action == ActionSkip && i.OptOutReason != "":
+		return "skipped (" + i.OptOutReason + ")"
+	case i.Action == ActionSkip:
 		return "already exists — skip"
+	case i.Detail != "":
+		return fmt.Sprintf("%s (%s)", i.Action, i.Detail)
+	default:
+		return i.Action.String()
 	}
-	return i.Action.String()
 }
 
 func (i Item) IsSkip() bool { return i.Action == ActionSkip }

@@ -102,31 +102,57 @@ func normalizeCIPack(pack string) string {
 	return pack
 }
 
-func templatePack(path string) string {
+// templatePackSet returns the set of CI packs a template ships for; nil means
+// every pack. Pack prefixes (generic_, node_, python_, rust_, go_) select the
+// pack and may follow a visibility/opt prefix (public_node_codacy.yml).
+//
+// The not-CI configs (codacy + dependabot starters) are pack-aware too: the
+// generic variants also ship for --ci none, because they configure cloud
+// analysis and dependency updates rather than CI jobs.
+func templatePackSet(path string) map[string]bool {
 	base := filepath.Base(path)
+	prefixes, stem := splitPrefixes(base)
+
 	for _, p := range []struct{ prefix, pack string }{
-		{"generic_", CIPackGeneric},
-		{"node_", CIPackNode},
-		{"python_", CIPackPython},
-		{"rust_", CIPackRust},
+		{prefix: "generic_", pack: CIPackGeneric},
+		{prefix: "node_", pack: CIPackNode},
+		{prefix: "python_", pack: CIPackPython},
+		{prefix: "rust_", pack: CIPackRust},
+		{prefix: "go_", pack: CIPackGo},
 	} {
-		if strings.HasPrefix(base, p.prefix) {
-			return p.pack
+		if prefixes[p.prefix] {
+			if p.pack == CIPackGeneric && (stem == "codacy.yml" || stem == "dependabot.yml") {
+				return packSet(CIPackGeneric, CIPackNone)
+			}
+			return packSet(p.pack)
 		}
 	}
-	switch base {
-	case "public_ci.yml", "private_ci.yml", "public_codecov.yml", "private_octocov.yml",
-		"public_codeql.yml", "public_codeql-config.yml", "public_codacy-coverage.yml":
-		return CIPackGo
+
+	switch stem {
+	case "ci.yml", "codecov.yml", "octocov.yml", "codeql.yml", "codeql-config.yml",
+		"codacy-coverage.yml", "codacy.yml", "dependabot.yml":
+		// Un-prefixed legacy names are the Go pack's files. public_codacy.yml
+		// is the go-pack Codacy variant; per-pack variants carry a pack prefix.
+		return packSet(CIPackGo)
 	default:
-		return ""
+		// Community files, socket.yml, the agent instructions, and any other
+		// pack-neutral template ship for every pack.
+		return nil
 	}
 }
 
+func packSet(packs ...string) map[string]bool {
+	set := make(map[string]bool, len(packs))
+	for _, p := range packs {
+		set[p] = true
+	}
+	return set
+}
+
 func packMatches(path, pack string) bool {
-	need := templatePack(path)
-	if need == "" {
+	packs := templatePackSet(path)
+	if packs == nil {
 		return true
 	}
-	return need == normalizeCIPack(pack)
+	return packs[normalizeCIPack(pack)]
 }

@@ -132,6 +132,17 @@ func TestRepoDataSanitize(t *testing.T) {
 			if want.CodeOwnerLine == "" {
 				want.CodeOwnerLine = "* @" + want.Owner
 			}
+			// sanitize defaults the render-choke-point fields so a bare
+			// Render caller cannot produce a vacuous CI or an empty target.
+			if want.ReadmePath == "" {
+				want.ReadmePath = "README.md"
+			}
+			if want.NodeLintCommand == "" {
+				want.NodeLintCommand = defaultNodeLintCommand
+			}
+			if want.NodeTestCommand == "" {
+				want.NodeTestCommand = defaultNodeTestCommand
+			}
 			if got != want {
 				t.Errorf("sanitize() = %+v, want %+v", got, want)
 			}
@@ -371,15 +382,19 @@ func TestRenderVisibilityFiltering(t *testing.T) {
 			wantFiles: []string{
 				".github/workflows/ci.yml",
 				"codecov.yml",
-				".github/workflows/octopus.yml",
 				".github/workflows/codeql.yml",
 				".github/codeql/codeql-config.yml",
 				"socket.yml",
 				".codacy.yml",
 				".github/workflows/codacy-coverage.yml",
+			},
+			// Octopus Review and the Codacy agent instructions are OPT-IN
+			// (--octopus / --codacy-instructions) — they never ship by default.
+			excludeFiles: []string{
+				".github/workflows/octocov.yml",
+				".github/workflows/octopus.yml",
 				".github/instructions/codacy.instructions.md",
 			},
-			excludeFiles: []string{".github/workflows/octocov.yml"},
 		},
 		{
 			name:       "private repo",
@@ -487,7 +502,7 @@ func TestRenderCIPackFiltering(t *testing.T) {
 				}
 			}
 			if tt.pack == CIPackGeneric {
-				if !strings.Contains(pathSet[".github/workflows/ci.yml"], "Minimal pack for repos that are not Go") {
+				if !strings.Contains(pathSet[".github/workflows/ci.yml"], "DELIBERATELY FAILS") {
 					t.Error("generic pack must ship generic_ci.yml, not the Go workflow")
 				}
 				if strings.Contains(pathSet[".github/workflows/ci.yml"], "go-version-file") {
@@ -630,4 +645,162 @@ func TestRenderFromFS_ReadError(t *testing.T) {
 	if !strings.Contains(err.Error(), "read template") {
 		t.Errorf("expected 'read template' in error, got: %v", err)
 	}
+}
+
+func TestRenderOptInGating(t *testing.T) {
+	base := RepoData{Owner: "o", RepoName: "r", DefaultBranch: "main", Visibility: "public"}
+
+	files, err := Render(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if f.Path == ".github/workflows/octopus.yml" || f.Path == ".github/instructions/codacy.instructions.md" {
+			t.Errorf("opt-in file %q shipped without its flag", f.Path)
+		}
+	}
+
+	octopus := base
+	octopus.Octopus = true
+	files, err = Render(octopus)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPath(files, ".github/workflows/octopus.yml") {
+		t.Error("--octopus must ship the octopus workflow")
+	}
+
+	instructions := base
+	instructions.CodacyInstructions = true
+	files, err = Render(instructions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPath(files, ".github/instructions/codacy.instructions.md") {
+		t.Error("--codacy-instructions must ship the instructions file")
+	}
+
+	// Opt-in files never ship to private repos even with the flag.
+	private := base
+	private.Visibility = "private"
+	private.Octopus = true
+	private.CodacyInstructions = true
+	files, err = Render(private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsPath(files, ".github/workflows/octopus.yml") || containsPath(files, ".github/instructions/codacy.instructions.md") {
+		t.Error("opt-in files are public-only")
+	}
+}
+
+func TestRenderPerPackCodacy(t *testing.T) {
+	// The node pack must disable go analyzers; the go pack must not.
+	node, err := Render(RepoData{Owner: "o", RepoName: "r", DefaultBranch: "main", Visibility: "public", CIPack: CIPackNode})
+	if err != nil {
+		t.Fatal(err)
+	}
+	codacy := contentFor(node, ".codacy.yml")
+	if !strings.Contains(codacy, "go:\n    enabled: false") {
+		t.Errorf("node pack codacy must disable go analyzers:\n%s", codacy)
+	}
+
+	goPack, err := Render(RepoData{Owner: "o", RepoName: "r", DefaultBranch: "main", Visibility: "public", CIPack: CIPackGo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	codacy = contentFor(goPack, ".codacy.yml")
+	if strings.Contains(codacy, "enabled: false") {
+		t.Errorf("go pack codacy must not disable anything:\n%s", codacy)
+	}
+
+	// generic AND none packs ship the pack-neutral codacy config.
+	for _, pack := range []string{CIPackGeneric, CIPackNone} {
+		files, err := Render(RepoData{Owner: "o", RepoName: "r", DefaultBranch: "main", Visibility: "public", CIPack: pack})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !containsPath(files, ".codacy.yml") {
+			t.Errorf("pack %s must still ship .codacy.yml (cloud config, not CI)", pack)
+		}
+	}
+}
+
+func TestRenderPerPackDependabot(t *testing.T) {
+	deps, err := Render(RepoData{Owner: "o", RepoName: "r", DefaultBranch: "main", Visibility: "public", CIPack: CIPackGo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := contentFor(deps, ".github/dependabot.yml")
+	if !strings.Contains(got, `package-ecosystem: "gomod"`) {
+		t.Errorf("go pack dependabot must watch gomod:\n%s", got)
+	}
+	if !strings.Contains(got, `package-ecosystem: "github-actions"`) {
+		t.Errorf("dependabot must keep github-actions:\n%s", got)
+	}
+
+	node, err := Render(RepoData{Owner: "o", RepoName: "r", DefaultBranch: "main", Visibility: "public", CIPack: CIPackNode})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = contentFor(node, ".github/dependabot.yml")
+	if !strings.Contains(got, `package-ecosystem: "npm"`) {
+		t.Errorf("node pack dependabot must watch npm:\n%s", got)
+	}
+
+	// --ci none still ships the generic (actions-only) dependabot.
+	none, err := Render(RepoData{Owner: "o", RepoName: "r", DefaultBranch: "main", Visibility: "public", CIPack: CIPackNone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = contentFor(none, ".github/dependabot.yml")
+	if !strings.Contains(got, `package-ecosystem: "github-actions"`) || strings.Contains(got, "gomod") {
+		t.Errorf("--ci none must ship the actions-only dependabot:\n%s", got)
+	}
+}
+
+func TestRenderPRTemplateDocDetection(t *testing.T) {
+	files, err := Render(RepoData{Owner: "o", RepoName: "r", DefaultBranch: "main", Visibility: "public", ReadmePath: "README.rst", AgentGuideLine: DetectAgentGuideLine(true, false)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl := contentFor(files, ".github/PULL_REQUEST_TEMPLATE.md")
+	if !strings.Contains(tpl, "Updated README.rst") {
+		t.Errorf("PR template must use the detected README name:\n%s", tpl)
+	}
+	if !strings.Contains(tpl, "Updated AGENTS.md") {
+		t.Errorf("PR template must use the detected agent guide:\n%s", tpl)
+	}
+	if strings.Contains(tpl, "CLAUDE.md") {
+		t.Errorf("AGENTS.md wins over legacy CLAUDE.md:\n%s", tpl)
+	}
+}
+
+func TestRenderPRTemplateLegacyClaude(t *testing.T) {
+	files, err := Render(RepoData{Owner: "o", RepoName: "r", DefaultBranch: "main", Visibility: "public", AgentGuideLine: DetectAgentGuideLine(false, true)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl := contentFor(files, ".github/PULL_REQUEST_TEMPLATE.md")
+	if !strings.Contains(tpl, "Updated CLAUDE.md") {
+		t.Errorf("a legacy CLAUDE.md repo keeps its guide in the PR template:\n%s", tpl)
+	}
+}
+
+func containsPath(files []RenderedFile, path string) bool {
+	for _, f := range files {
+		if f.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func contentFor(files []RenderedFile, path string) string {
+	for _, f := range files {
+		if f.Path == path {
+			return f.Content
+		}
+	}
+	return ""
 }

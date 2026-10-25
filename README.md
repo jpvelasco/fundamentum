@@ -40,7 +40,7 @@ fundamentum --pr apply OWNER/REPO
 
 ## Prerequisites
 
-A GitHub personal access token with **`repo` scope** (classic) or **Contents + Metadata + Administration** permissions (fine-grained). Set it via the `GITHUB_TOKEN` environment variable or pass `--token`.
+A GitHub personal access token with **`repo` scope** (classic) or **Contents + Metadata + Administration** permissions (fine-grained). Set it via the `GITHUB_TOKEN` environment variable, pass `--token`, or be signed in to the GitHub CLI — fundamentum falls back to `gh auth token` when the first two are absent.
 
 ```bash
 export GITHUB_TOKEN=ghp_xxxxx        # Linux/macOS
@@ -51,16 +51,16 @@ $env:GITHUB_TOKEN = "ghp_xxxxx"      # PowerShell
 
 ## What it does
 
-- **Community health files**: `CONTRIBUTING.md`, `CODEOWNERS`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, pull request + issue templates, `dependabot.yml`, and more.
-- **Branch protection**: Modern `protect-main` ruleset (PRs, optional CODEOWNERS review, shipped CI status checks, no force-push/delete) + optional tag protection. Existing rulesets are reconciled on drift. Classic fallback only when GitHub says rulesets are unavailable on the plan.
-- **Security**: Dependabot alerts + updates everywhere; secret scanning + push protection on public repos, opt-in on private/internal repos via `--advanced-security` (paid GHAS); CodeQL default setup on public repos unless the advanced workflow ships.
+- **Community health files**: `CONTRIBUTING.md`, `CODEOWNERS`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, pull request + issue templates, `dependabot.yml` (per-language ecosystems detected from your manifests), and more.
+- **Branch protection**: Modern `protect-main` ruleset (PRs, optional CODEOWNERS review, shipped CI status checks, no force-push/delete) + optional tag protection. Reconcile **merges with your live ruleset** instead of replacing it: required checks keep their app identity (`integration_id`), extra checks and rules survive, and stricter settings are never weakened. Classic fallback only when GitHub says rulesets are unavailable on the plan.
+- **Security**: Dependabot alerts + updates everywhere; secret scanning + push protection on public repos, opt-in on private/internal repos via `--advanced-security` (paid GHAS); CodeQL default setup on public repos unless a `codeql*.yml` workflow (or the shipped advanced one) already provides CodeQL.
 - **Settings**: Auto-delete merged branches.
-- **Opinionated starters**: CI pack is `auto` — Go / Node / Python / Rust from `go.mod`, `package.json`, `pyproject.toml`/`requirements.txt`, or `Cargo.toml`; otherwise a generic `CI` + Trivy workflow. Override with `--ci go|node|python|rust|generic|none`. Visibility-aware coverage/CodeQL + `.codacy.yml` still ship with the Go pack.
-- **Audit**: `fundamentum audit OWNER/REPO` prints a PASS/FAIL report against that baseline.
+- **Opinionated starters**: CI pack is `auto` — Go / Node / Python / Rust from `go.mod`, `package.json`, `pyproject.toml`/`requirements.txt`, or `Cargo.toml`; otherwise a generic `CI` + Trivy workflow whose `CI` job fails with a "configure me" annotation until you give it real commands — a required check that always passes would be false confidence. The node pack runs the `lint`/`test` scripts it finds in `package.json` and fails with the same annotation when they are missing. Override with `--ci go|node|python|rust|generic|none`. `.codacy.yml` is generated from the detected pack (Go analyzers stay off non-Go repos).
+- **Audit**: `fundamentum audit OWNER/REPO` prints a PASS/FAIL/WARN/SKIP report against the baseline: FAIL fails the run, WARN (content drift, optional checks) fails only with `--strict`, SKIP covers opted-out steps and plan-gated protection. A repo whose settings are stricter than the baseline passes.
 
-`--preset oss|private|strict` skips the wizard so a scripted apply reproduces the same harden. `oss` and `private` take the solo default and do not enable paid GHAS; `strict` turns on `--strict` and `--advanced-security`. Visibility still picks the public vs private file set.
+`--preset oss|private|strict` skips the wizard so a scripted apply reproduces the same harden. `oss` and `private` take the solo default and do not enable paid GHAS; `strict` turns on `--strict` and `--advanced-security`. Visibility still picks the public vs private file set. The Octopus Review workflow is **never** part of a preset — it is a third-party data-sharing service and requires an explicit `--octopus`.
 
-`--pr` batches **file** changes into a pull request. Settings, security, and branch protection still apply immediately via the API — they are not deferred until the PR merges. Required status checks are deferred so the open harden PR cannot deadlock on jobs that only exist after merge; re-apply after it lands to require them. Tag ruleset and security steps are optional unless you pass `--strict`. Required checks default to the jobs for the resolved `--ci` pack, not Codacy (`--require-checks` overrides).
+Files land as **one commit** (the default) — no more one-commit-per-file history noise. `--pr` batches **file** changes into a pull request instead. Settings, security, and branch protection still apply immediately via the API — they are not deferred until the PR merges. Required status checks are deferred so the open harden PR cannot deadlock on jobs that only exist after merge; re-apply after it lands to require them. Tag ruleset and security steps are optional unless you pass `--strict`. Required checks default to the jobs for the resolved `--ci` pack, not Codacy (`--require-checks` overrides; existing required checks are merged, not replaced).
 
 Everything is **idempotent** — re-running is safe and fast.
 
@@ -68,27 +68,32 @@ Everything is **idempotent** — re-running is safe and fast.
 
 | Flag                | Description                                      |
 |---------------------|--------------------------------------------------|
-| `--dry-run`         | Print actions without applying them              |
+| `--dry-run`         | Print actions without applying them (update rows say exactly what drifted) |
 | `--verbose`         | Print every API call                             |
-| `--token`           | GitHub token (defaults to `GITHUB_TOKEN`)        |
+| `--token`           | GitHub token (defaults to `GITHUB_TOKEN`, then `gh auth token`) |
 | `--no-overwrite`    | Skip any file that already exists                |
-| `--pr`              | Batch file changes into a PR; settings/security/protection still apply live |
+| `--pr`              | Batch file changes into a PR (default is one direct commit); settings/security/protection still apply live |
+| `--skip`            | Leave steps alone: `settings`, `protect-main`, `protect-version-tags`, `security`, `files`, or an exact file path |
+| `--only`            | When set, apply just the listed steps/paths (same keys as `--skip`) |
 | `--advanced-security` | Enable GitHub Advanced Security (secret scanning, push protection) on private/internal repos (paid) |
 | `--strict`          | Fail the run when any core harden step fails, including optional tag/security items |
-| `--require-checks`  | Required status-check contexts for `protect-main` (comma-separated; default: jobs for the resolved `--ci` pack) |
+| `--require-checks`  | Required status-check contexts for `protect-main` (merged with existing checks; default: jobs for the resolved `--ci` pack) |
 | `--ci`              | CI pack: `auto` (detect go/node/python/rust, else generic), `go`, `node`, `python`, `rust`, `generic`, or `none` |
 | `--preset`          | Named baseline: `oss` (no prompts), `private` (solo, no GHAS prompt), `strict` (`--strict` + GHAS) |
 | `--from`            | Load a portable JSON baseline from `export` (explicit flags win, including `--flag=false`) |
+| `--octopus`         | Opt in to the third-party Octopus Review workflow (public repos; shares PR diffs with octopus-review.ai) |
+| `--codacy-instructions` | Opt in to `.github/instructions/codacy.instructions.md` (Codacy MCP rules for AI agents) |
+| `--branch-up-to-date` | `protect-main`: require branches up to date before merging (default true; unset keeps the live policy on reconcile) |
 | `--version`         | Print version and exit                           |
 
 `init` also supports `--private` (default: `true`).
 
 ## How it works
 
-1. fundamentum detects your repo's current state (existing files, branch protection, visibility).
-2. It renders opinionated templates and shows a summary table of what will change.
+1. fundamentum detects your repo's current state (existing files, branch protection, visibility, README/AGENTS.md filenames, package.json scripts).
+2. It renders opinionated templates and shows a summary table of what will change — update rows carry the exact drift (ruleset fields, security features, content diffstats).
 3. You confirm all defaults or step through items interactively.
-4. Files are created or updated directly (or via PR with `--pr`). Settings, security, and branch protection are applied via the GitHub API even in `--pr` mode — `--pr` is not a dry-run for those steps. A `--from` baseline fills flags the operator did not pass; an explicit flag wins, including `--strict=false`.
+4. Files land as one commit (or one PR with `--pr`); a 409 from branch protection switches to PR mode automatically. Settings, security, and branch protection are applied via the GitHub API even in `--pr` mode — `--pr` is not a dry-run for those steps. A `--from` baseline fills flags the operator did not pass; an explicit flag wins, including `--strict=false`.
 
 ## Install
 

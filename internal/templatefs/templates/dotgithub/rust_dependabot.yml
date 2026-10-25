@@ -1,0 +1,21 @@
+# Dependency updates for the detected ecosystems (github-actions from the
+# generic baseline plus cargo detected from the root Cargo.toml). Monorepos with
+# manifests in subdirectories need one entry per directory — add those by hand.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      cargo:
+        patterns:
+          - "*"

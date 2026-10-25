@@ -63,6 +63,14 @@ type BranchProtectionOptions struct {
 	// fallback so the open harden PR is not blocked by checks that only
 	// exist after that PR merges (Codacy, shipped CI jobs).
 	SkipStatusChecks bool
+	// StrictChecks is the intended strict_required_status_checks_policy
+	// ("branches must be up to date before merging"). Default true; a create
+	// always uses it.
+	StrictChecks bool
+	// StrictChecksSet records that StrictChecks was chosen explicitly (flag
+	// or baseline). A reconcile enforces an explicitly-chosen value; when
+	// unset it keeps the ruleset's live policy instead of forcing it back.
+	StrictChecksSet bool
 }
 
 func (o BranchProtectionOptions) requireCodeOwners() bool {
@@ -87,6 +95,8 @@ type RulesetPlan struct {
 	// Solo is inferred from the existing pull_request rule so reconcile
 	// restores enforcement/checks without flipping solo ↔ team.
 	Solo bool
+	// Live is the fetched ruleset on Exists; reconcile merges into it.
+	Live *Ruleset
 }
 
 // RulesetExists returns true if a ruleset with the given name already exists.
@@ -184,7 +194,9 @@ func nextLink(header string) string {
 	return ""
 }
 
-// PlanBranchRuleset reports whether protect-main exists and which owned fields drifted.
+// PlanBranchRuleset reports whether protect-main exists and which owned fields
+// drifted. Drift only lists fields where the live ruleset is WEAKER than the
+// intended baseline — a stricter hand-tuned ruleset passes unchanged.
 func (c *Client) PlanBranchRuleset(owner, repo string, statusChecks []string, opts BranchProtectionOptions) (RulesetPlan, error) {
 	got, err := c.GetRuleset(owner, repo, "protect-main")
 	if err != nil || got == nil {
@@ -193,7 +205,7 @@ func (c *Client) PlanBranchRuleset(owner, repo string, statusChecks []string, op
 	if !opts.SkipCodeOwners {
 		opts.Solo = inferSolo(got)
 	}
-	return RulesetPlan{Exists: true, ID: got.ID, Drift: BranchRulesetDrift(got, statusChecks, opts), Solo: opts.Solo}, nil
+	return RulesetPlan{Exists: true, ID: got.ID, Drift: BranchRulesetDrift(got, statusChecks, opts), Solo: opts.Solo, Live: got}, nil
 }
 
 // PlanTagRuleset reports whether protect-version-tags exists and which owned fields drifted.
@@ -202,10 +214,13 @@ func (c *Client) PlanTagRuleset(owner, repo string) (RulesetPlan, error) {
 	if err != nil || got == nil {
 		return RulesetPlan{}, err
 	}
-	return RulesetPlan{Exists: true, ID: got.ID, Drift: TagRulesetDrift(got)}, nil
+	return RulesetPlan{Exists: true, ID: got.ID, Drift: TagRulesetDrift(got), Live: got}, nil
 }
 
-// EnsureBranchRuleset creates protect-main, or updates it when owned fields have drifted.
+// EnsureBranchRuleset creates protect-main, or reconciles it when owned fields
+// have drifted. Reconcile MERGES: required checks already present keep their
+// integration_id, extra checks are kept, unowned rules survive, and stricter
+// live settings are never weakened.
 func (c *Client) EnsureBranchRuleset(owner, repo string, statusChecks []string, opts BranchProtectionOptions) error {
 	plan, err := c.PlanBranchRuleset(owner, repo, statusChecks, opts)
 	if err != nil {
@@ -220,7 +235,7 @@ func (c *Client) EnsureBranchRuleset(owner, repo string, statusChecks []string, 
 	if !opts.SkipCodeOwners {
 		opts.Solo = plan.Solo
 	}
-	return c.updateRuleset(owner, repo, plan.ID, branchRulesetBody(statusChecks, opts), "update branch ruleset")
+	return c.updateRuleset(owner, repo, plan.ID, mergeBranchRulesetBody(plan.Live, statusChecks, opts), "update branch ruleset")
 }
 
 // EnsureTagRuleset creates protect-version-tags, or updates it when owned fields have drifted.
@@ -235,7 +250,7 @@ func (c *Client) EnsureTagRuleset(owner, repo string) error {
 	if len(plan.Drift) == 0 {
 		return nil
 	}
-	return c.updateRuleset(owner, repo, plan.ID, tagRulesetBody(), "update tag ruleset")
+	return c.updateRuleset(owner, repo, plan.ID, mergeTagRulesetBody(plan.Live), "update tag ruleset")
 }
 
 // CreateBranchRuleset creates the protect-main branch ruleset.
@@ -269,34 +284,100 @@ func (c *Client) updateRuleset(owner, repo string, id int64, body map[string]any
 	return expectStatus(action, resp, http.StatusOK)
 }
 
+// branchRulesetBody is the create-path body: owned rules from scratch at the
+// intended (not weaker-than-live) settings.
 func branchRulesetBody(statusChecks []string, opts BranchProtectionOptions) map[string]any {
-	allChecks := intendedChecks(statusChecks, opts)
-	checks := make([]map[string]any, len(allChecks))
-	for i, name := range allChecks {
-		checks[i] = map[string]any{"context": name}
+	return baseBranchRulesetBody(statusChecks, opts)
+}
+
+// mergeBranchRulesetBody is the reconcile-path body: it starts from the live
+// ruleset, keeps unowned rules and extra checks (with their integration_id),
+// adds any intended check that is missing, and raises any weaker owned field
+// to the intended value. Stricter live values are preserved.
+func mergeBranchRulesetBody(live *Ruleset, statusChecks []string, opts BranchProtectionOptions) map[string]any {
+	if live == nil {
+		// Nothing to merge — fall back to a plain create body.
+		return branchRulesetBody(statusChecks, opts)
 	}
-	prParams := map[string]any{
-		"required_approving_review_count":   0,
-		"dismiss_stale_reviews_on_push":     !opts.Solo,
-		"require_code_owner_review":         opts.requireCodeOwners(),
-		"require_last_push_approval":        false,
-		"required_review_thread_resolution": true,
+	pr := strictestPRRule(ruleByType(live, "pull_request"), opts)
+	body := baseBranchRulesetBody(statusChecks, opts)
+	body["rules"] = mergedBranchRules(live, statusChecks, opts, pr)
+	body["conditions"] = mergedConditions(live.Conditions, "~DEFAULT_BRANCH")
+	return body
+}
+
+// mergeTagRulesetBody is the reconcile-path tag body: keep unowned rules and
+// extra condition entries; ensure the owned ones exist.
+func mergeTagRulesetBody(live *Ruleset) map[string]any {
+	if live == nil {
+		return tagRulesetBody()
 	}
-	rules := []map[string]any{
-		{"type": "deletion"},
-		{"type": "non_fast_forward"},
-		{"type": "pull_request", "parameters": prParams},
+	return map[string]any{
+		"name":        "protect-version-tags",
+		"target":      "tag",
+		"enforcement": "active",
+		"conditions":  mergedConditions(live.Conditions, "refs/tags/v*"),
+		"rules":       mergeOwnedRules(live, tagRulesetRules()),
 	}
-	if len(checks) > 0 {
-		rules = append(rules, map[string]any{
-			"type": "required_status_checks",
-			"parameters": map[string]any{
-				"strict_required_status_checks_policy": true,
-				"do_not_enforce_on_create":             false,
-				"required_status_checks":               checks,
-			},
-		})
+}
+
+// mergeOwnedRules returns live's rules with owned types replaced by the
+// intended ones (present in intended). Unowned rule types survive untouched.
+func mergeOwnedRules(live *Ruleset, owned []map[string]any) []map[string]any {
+	ownedTypes := map[string]bool{}
+	for _, rule := range owned {
+		if typ, ok := rule["type"].(string); ok {
+			ownedTypes[typ] = true
+		}
 	}
+	merged := make([]map[string]any, 0, len(live.Rules)+len(owned))
+	for _, rule := range live.Rules {
+		if typ, ok := rule["type"].(string); ok && ownedTypes[typ] {
+			continue
+		}
+		merged = append(merged, rule)
+	}
+	return append(merged, owned...)
+}
+
+// mergedConditions keeps every live ref_name entry and adds want to include
+// when missing. Other condition keys are preserved as-is. The returned
+// conditions are a copy — the live ruleset must not be mutated.
+func mergedConditions(live map[string]any, want string) map[string]any {
+	merged := map[string]any{}
+	for k, v := range live {
+		merged[k] = v
+	}
+	if includesRef(live, want) {
+		return merged
+	}
+	ref := map[string]any{}
+	for k, v := range anyMap(live["ref_name"]) {
+		ref[k] = v
+	}
+	ref["include"] = append(refIncludeStrings(ref), want)
+	merged["ref_name"] = ref
+	return merged
+}
+
+func anyMap(v any) map[string]any {
+	m, _ := v.(map[string]any)
+	return m
+}
+
+func refIncludeStrings(ref map[string]any) []string {
+	var out []string
+	for _, item := range anySlice(ref["include"]) {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// baseBranchRulesetBody is the shared branch body shape; the rules are
+// replaced by create vs merge paths before use.
+func baseBranchRulesetBody(statusChecks []string, opts BranchProtectionOptions) map[string]any {
 	return map[string]any{
 		"name":        "protect-main",
 		"target":      "branch",
@@ -307,8 +388,155 @@ func branchRulesetBody(statusChecks []string, opts BranchProtectionOptions) map[
 				"exclude": []string{},
 			},
 		},
-		"rules": rules,
+		"rules": branchRulesetRules(statusChecks, opts, prRuleParams(opts)),
 	}
+}
+
+func branchRulesetRules(statusChecks []string, opts BranchProtectionOptions, prParams map[string]any) []map[string]any {
+	rules := []map[string]any{
+		{"type": "deletion"},
+		{"type": "non_fast_forward"},
+		{"type": "pull_request", "parameters": prParams},
+	}
+	if checks := statusChecksRule(statusChecks, opts); checks != nil {
+		rules = append(rules, checks)
+	}
+	return rules
+}
+
+// prRuleParams is the intended pull_request rule for the create path.
+func prRuleParams(opts BranchProtectionOptions) map[string]any {
+	return map[string]any{
+		"required_approving_review_count":   0,
+		"dismiss_stale_reviews_on_push":     !opts.Solo,
+		"require_code_owner_review":         opts.requireCodeOwners(),
+		"require_last_push_approval":        false,
+		"required_review_thread_resolution": true,
+	}
+}
+
+// strictestPRRule merges a live pull_request rule with the intended one,
+// keeping the stricter value for every parameter. A live rule that is
+// already stricter than the baseline survives a reconcile unchanged.
+func strictestPRRule(live map[string]any, opts BranchProtectionOptions) map[string]any {
+	intended := prRuleParams(opts)
+	if live == nil {
+		return intended
+	}
+	params, _ := live["parameters"].(map[string]any)
+	if params == nil {
+		params = map[string]any{}
+	}
+	// Never weaken: keep the live (possibly higher) approval requirement
+	// and any live boolean already stricter than the intended value.
+	if n := mapInt(params, "required_approving_review_count"); n > 0 {
+		intended["required_approving_review_count"] = n
+	}
+	for _, flag := range []string{
+		"require_last_push_approval",
+		"dismiss_stale_reviews_on_push",
+		"require_code_owner_review",
+		"required_review_thread_resolution",
+	} {
+		if mapBool(params, flag) {
+			intended[flag] = true
+		}
+	}
+	return intended
+}
+
+// statusChecksRule builds the required_status_checks rule. On the create path
+// it lists the intended checks; the merge path merges the live checks (with
+// their integration_id) in statusChecksRuleMerged.
+func statusChecksRule(statusChecks []string, opts BranchProtectionOptions) map[string]any {
+	allChecks := intendedChecks(statusChecks, opts)
+	if len(allChecks) == 0 {
+		return nil
+	}
+	checks := make([]map[string]any, len(allChecks))
+	for i, name := range allChecks {
+		checks[i] = map[string]any{"context": name}
+	}
+	return statusChecksRuleWith(checks, intendedStrictChecks(opts))
+}
+
+// intendedStrictChecks is the up-to-date policy for a fresh ruleset: true
+// (the shipped baseline) unless the operator explicitly chose otherwise.
+func intendedStrictChecks(opts BranchProtectionOptions) bool {
+	if opts.StrictChecksSet {
+		return opts.StrictChecks
+	}
+	return true
+}
+
+// statusChecksRuleMerged unions the live checks (kept verbatim, preserving
+// their integration_id) with any intended check that is missing, and applies
+// the strict-policy intent: explicitly set → enforced; unset → keep live.
+func statusChecksRuleMerged(liveRule map[string]any, statusChecks []string, opts BranchProtectionOptions) map[string]any {
+	params, _ := liveRule["parameters"].(map[string]any)
+	if params == nil {
+		params = map[string]any{}
+	}
+	liveChecks := anySlice(params["required_status_checks"])
+	if liveChecks == nil {
+		liveChecks = []any{}
+	}
+	have := map[string]bool{}
+	merged := make([]any, 0, len(liveChecks)+len(statusChecks))
+	for _, item := range liveChecks {
+		if m, ok := item.(map[string]any); ok {
+			if ctx, ok := m["context"].(string); ok {
+				have[ctx] = true
+				// Keep the entry verbatim — integration_id included, so only
+				// the app that posted the check can satisfy it.
+				merged = append(merged, m)
+			}
+		}
+	}
+	for _, name := range intendedChecks(statusChecks, opts) {
+		if !have[name] {
+			merged = append(merged, map[string]any{"context": name})
+		}
+	}
+	strict := mapBool(params, "strict_required_status_checks_policy")
+	if opts.StrictChecksSet {
+		strict = opts.StrictChecks
+	}
+	rule := statusChecksRuleWith(nil, strict)
+	rule["parameters"].(map[string]any)["required_status_checks"] = merged
+	return rule
+}
+
+func statusChecksRuleWith(checks []map[string]any, strict bool) map[string]any {
+	params := map[string]any{
+		"strict_required_status_checks_policy": strict,
+		"do_not_enforce_on_create":             false,
+	}
+	if checks != nil {
+		params["required_status_checks"] = checks
+	}
+	return map[string]any{
+		"type":       "required_status_checks",
+		"parameters": params,
+	}
+}
+
+// mergeBranchRulesetBody needs the merged checks rule when the live ruleset
+// has one, so mergeOwnedRules is given the merged variant. This is assembled
+// in mergeBranchRulesetBody via mergedBranchRules.
+func mergedBranchRules(live *Ruleset, statusChecks []string, opts BranchProtectionOptions, pr map[string]any) []map[string]any {
+	owned := []map[string]any{
+		{"type": "deletion"},
+		{"type": "non_fast_forward"},
+		{"type": "pull_request", "parameters": pr},
+	}
+	liveChecksRule := ruleByType(live, "required_status_checks")
+	if liveChecksRule != nil {
+		owned = append(owned, statusChecksRuleMerged(liveChecksRule, statusChecks, opts))
+	} else if rule := statusChecksRule(statusChecks, opts); rule != nil {
+		owned = append(owned, rule)
+	}
+	return mergeOwnedRules(live, owned)
 }
 
 func tagRulesetBody() map[string]any {
@@ -322,14 +550,21 @@ func tagRulesetBody() map[string]any {
 				"exclude": []string{},
 			},
 		},
-		"rules": []map[string]any{
-			{"type": "deletion"},
-			{"type": "non_fast_forward"},
-		},
+		"rules": tagRulesetRules(),
 	}
 }
 
-// BranchRulesetDrift returns Fundamentum-owned fields that differ from the intended baseline.
+func tagRulesetRules() []map[string]any {
+	return []map[string]any{
+		{"type": "deletion"},
+		{"type": "non_fast_forward"},
+	}
+}
+
+// BranchRulesetDrift returns Fundamentum-owned fields where the live ruleset
+// is WEAKER than the intended baseline. Stricter-than-intent settings are
+// deliberate hardening by the operator and never count as drift; a reconcile
+// must not weaken them.
 func BranchRulesetDrift(got *Ruleset, statusChecks []string, opts BranchProtectionOptions) []string {
 	if got == nil {
 		return []string{"missing"}
@@ -347,16 +582,56 @@ func BranchRulesetDrift(got *Ruleset, statusChecks []string, opts BranchProtecti
 	if !hasRuleType(got, "non_fast_forward") {
 		drift = append(drift, "non_fast_forward")
 	}
-	if pr := ruleByType(got, "pull_request"); !matchingPRRule(pr, opts) {
+	if pr := ruleByType(got, "pull_request"); prRuleWeaker(pr, opts) {
 		drift = append(drift, "pull_request")
 	}
-	if !opts.SkipStatusChecks && !hasAllChecks(got, intendedChecks(statusChecks, opts)) {
-		drift = append(drift, "required_status_checks")
+	if !opts.SkipStatusChecks {
+		if !hasAllChecks(got, intendedChecks(statusChecks, opts)) {
+			drift = append(drift, "required_status_checks")
+		}
+		if strictChecksWeaker(got, opts) {
+			drift = append(drift, "up-to-date policy")
+		}
 	}
 	return drift
 }
 
-// TagRulesetDrift returns owned tag-ruleset fields that differ from the baseline.
+// prRuleWeaker reports whether the live pull_request rule is weaker than the
+// intended baseline: thread resolution off, code-owner review missing when
+// required, or stale-review dismissal missing for team mode.
+func prRuleWeaker(rule map[string]any, opts BranchProtectionOptions) bool {
+	if rule == nil {
+		return true
+	}
+	params, _ := rule["parameters"].(map[string]any)
+	if !mapBool(params, "required_review_thread_resolution") {
+		return true
+	}
+	if opts.requireCodeOwners() && !mapBool(params, "require_code_owner_review") {
+		return true
+	}
+	if !opts.Solo && !mapBool(params, "dismiss_stale_reviews_on_push") {
+		return true
+	}
+	return false
+}
+
+// strictChecksWeaker reports whether the up-to-date policy is below the
+// explicitly-intended one. An unset intent (keep-live) never drifts.
+func strictChecksWeaker(got *Ruleset, opts BranchProtectionOptions) bool {
+	if !opts.StrictChecksSet || !opts.StrictChecks {
+		return false
+	}
+	rule := ruleByType(got, "required_status_checks")
+	if rule == nil {
+		return true
+	}
+	params, _ := rule["parameters"].(map[string]any)
+	return !mapBool(params, "strict_required_status_checks_policy")
+}
+
+// TagRulesetDrift returns owned tag-ruleset fields where the live ruleset is
+// weaker than the baseline.
 func TagRulesetDrift(got *Ruleset) []string {
 	if got == nil {
 		return []string{"missing"}
@@ -437,6 +712,8 @@ func inferSolo(got *Ruleset) bool {
 	return !mapBool(params, "require_code_owner_review") && !mapBool(params, "dismiss_stale_reviews_on_push")
 }
 
+// matchingPRRule reports whether the live rule matches the intended one
+// exactly (used by tests; a reconcile only requires not-weaker).
 func matchingPRRule(rule map[string]any, opts BranchProtectionOptions) bool {
 	if rule == nil {
 		return false
@@ -527,4 +804,22 @@ func mapBool(m map[string]any, key string) bool {
 	}
 	b, _ := m[key].(bool)
 	return b
+}
+
+// mapInt reads an integer parameter that JSON may decode as float64.
+func mapInt(m map[string]any, key string) int {
+	if m == nil {
+		return 0
+	}
+	switch v := m[key].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case json.Number:
+		n, _ := v.Int64()
+		return int(n)
+	default:
+		return 0
+	}
 }

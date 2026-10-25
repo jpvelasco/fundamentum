@@ -70,6 +70,7 @@ func TestRun_MissingToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Cleanup(func() { globals.Token = "" })
 	globals.Token = ""
+	stubGhTokenFailure(t)
 	cmd := NewCmd()
 	cmd.SetArgs([]string{"owner/repo"})
 	err := cmd.Execute()
@@ -321,42 +322,55 @@ func TestBuildItems_SettingsAndSecurityActions(t *testing.T) {
 	}
 }
 
-func TestSecurityConfigured(t *testing.T) {
+func TestSecurityMissing(t *testing.T) {
 	tests := []struct {
 		name    string
 		info    github.Repo
 		opts    github.SecurityOptions
 		alerts  int
 		fixes   int
-		want    bool
+		want    []string
 		wantErr bool
 	}{
 		{
-			name:   "alerts disabled",
-			info:   github.Repo{SecretScanning: true, SecretPushProtection: true},
-			opts:   github.SecurityOptions{Visibility: "public"},
+			name: "alerts disabled",
+			info: github.Repo{SecretScanning: true, SecretPushProtection: true},
+			opts: github.SecurityOptions{Visibility: "public", AdvancedCodeQL: true},
+			// default-setup is skipped (AdvancedCodeQL), so only alerts drift
 			alerts: http.StatusNotFound,
 			fixes:  http.StatusNoContent,
+			want:   []string{"dependabot alerts"},
 		},
 		{
-			name:   "security fixes disabled",
-			info:   github.Repo{SecretScanning: true, SecretPushProtection: true},
-			opts:   github.SecurityOptions{Visibility: "public"},
+			name: "security fixes disabled",
+			info: github.Repo{SecretScanning: true, SecretPushProtection: true},
+			opts: github.SecurityOptions{Visibility: "public", AdvancedCodeQL: true},
 			alerts: http.StatusNoContent,
 			fixes:  http.StatusNotFound,
+			want:   []string{"automated security fixes"},
 		},
 		{
-			name:   "secret scanning disabled",
-			opts:   github.SecurityOptions{Visibility: "public"},
+			name: "secret scanning disabled",
+			opts: github.SecurityOptions{Visibility: "public", AdvancedCodeQL: true},
 			alerts: http.StatusNoContent,
 			fixes:  http.StatusNoContent,
+			want:   []string{"secret scanning", "push protection"},
 		},
 		{
-			name:   "private baseline configured",
-			opts:   github.SecurityOptions{Visibility: "private"},
+			name: "codeql counts via workflow when default setup is off",
+			opts: github.SecurityOptions{Visibility: "public"},
 			alerts: http.StatusNoContent,
 			fixes:  http.StatusNoContent,
-			want:   true,
+			// info has secret scanning off; default setup 404s; codeql.yml
+			// workflow exists on the mock server.
+			want: []string{"secret scanning", "push protection"},
+		},
+		{
+			name: "private baseline configured",
+			opts: github.SecurityOptions{Visibility: "private"},
+			alerts: http.StatusNoContent,
+			fixes:  http.StatusNoContent,
+			want:   nil,
 		},
 		{
 			name: "advanced CodeQL workflow configured",
@@ -367,7 +381,7 @@ func TestSecurityConfigured(t *testing.T) {
 			opts:   github.SecurityOptions{Visibility: "public", AdvancedCodeQL: true},
 			alerts: http.StatusNoContent,
 			fixes:  http.StatusNoContent,
-			want:   true,
+			want:   nil,
 		},
 		{
 			name:    "alerts status error",
@@ -392,31 +406,109 @@ func TestSecurityConfigured(t *testing.T) {
 					w.WriteHeader(tt.alerts)
 				case "/repos/owner/repo/automated-security-fixes":
 					w.WriteHeader(tt.fixes)
+				case "/repos/owner/repo/code-scanning/default-setup":
+					w.WriteHeader(http.StatusNotFound)
+				case "/repos/owner/repo/contents/.github/workflows/codeql.yml":
+					// A codeql workflow exists: CodeQL is on without default setup.
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte(`{"content":""}`))
 				default:
 					w.WriteHeader(http.StatusNotFound)
 				}
 			}), func(c *github.Client) {
-				got, err := securityConfigured(c, tt.info, "owner", "repo", tt.opts)
+				got, err := securityMissing(c, tt.info, "owner", "repo", tt.opts)
 				if (err != nil) != tt.wantErr {
 					t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 				}
-				if got != tt.want {
-					t.Errorf("configured = %v, want %v", got, tt.want)
+				if !sameStrSlices(got, tt.want) {
+					t.Errorf("missing = %v, want %v", got, tt.want)
 				}
 			}, nil)
 		})
 	}
 }
 
-func TestSecurityItem_StatusErrorPlansUpdate(t *testing.T) {
+// TestSecurityMissing_AdvancedWorkflowCountsAsCodeQL pins the fix for the
+// dry-run false positive: a repo with CodeQL via .github/workflows/codeql.yml
+// (not default setup) must NOT be flagged as missing CodeQL.
+func TestSecurityMissing_AdvancedWorkflowCountsAsCodeQL(t *testing.T) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/vulnerability-alerts":
+			w.WriteHeader(http.StatusNoContent)
+		case "/repos/owner/repo/automated-security-fixes":
+			w.WriteHeader(http.StatusNoContent)
+		case "/repos/owner/repo/code-scanning/default-setup":
+			w.WriteHeader(http.StatusNotFound)
+		case "/repos/owner/repo/contents/.github/workflows/codeql.yml":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"content":""}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}), func(c *github.Client) {
+		info := github.Repo{Visibility: "public", SecretScanning: true, SecretPushProtection: true}
+		missing, err := securityMissing(c, info, "owner", "repo", github.SecurityOptions{Visibility: "public"})
+		if err != nil {
+			t.Fatalf("securityMissing() error: %v", err)
+		}
+		if len(missing) != 0 {
+			t.Errorf("codeql workflow must satisfy the CodeQL check, missing = %v", missing)
+		}
+	}, nil)
+}
+
+func TestSecurityItem_StatusErrorFailsClosed(t *testing.T) {
 	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}), func(c *github.Client) {
-		item := securityItem(c, &github.Repo{}, "owner", "repo", "public", nil, false)
-		if item.Action != wizard.ActionUpdate {
-			t.Errorf("security action = %v, want update", item.Action)
+		item, err := securityItem(c, &github.Repo{}, "owner", "repo", "public", nil, false)
+		if err == nil {
+			t.Fatal("a status-check error must fail the plan, not plan an update")
+		}
+		if item.Action != wizard.ActionCreate {
+			t.Errorf("on error the item is not used, action = %v", item.Action)
 		}
 	}, nil)
+}
+
+func TestSecurityItem_DetailListsMissingFeatures(t *testing.T) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/vulnerability-alerts":
+			w.WriteHeader(http.StatusNoContent)
+		case "/repos/owner/repo/automated-security-fixes":
+			w.WriteHeader(http.StatusNotFound)
+		case "/repos/owner/repo/code-scanning/default-setup":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}), func(c *github.Client) {
+		info := github.Repo{Visibility: "public", SecretScanning: true, SecretPushProtection: true}
+		item, err := securityItem(c, &info, "owner", "repo", "public", nil, false)
+		if err != nil {
+			t.Fatalf("securityItem() error: %v", err)
+		}
+		if item.Action != wizard.ActionUpdate {
+			t.Errorf("action = %v, want update", item.Action)
+		}
+		if !strings.Contains(item.Detail, "automated security fixes") {
+			t.Errorf("detail must name the missing feature: %q", item.Detail)
+		}
+	}, nil)
+}
+
+func sameStrSlices(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestBuildItems_TagRulesetExists(t *testing.T) {

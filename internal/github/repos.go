@@ -100,11 +100,13 @@ func (c *Client) accountType(login string) (string, error) {
 
 // Repo is the subset of GET /repos/{owner}/{repo} that apply and audit need.
 type Repo struct {
-	Visibility           string
-	DefaultBranch        string
-	OwnerType            string // "User" or "Organization"
-	DeleteBranchOnMerge  bool
-	SecretScanning       bool
+	Owner               string
+	RepoName            string
+	Visibility          string
+	DefaultBranch       string
+	OwnerType           string // "User" or "Organization"
+	DeleteBranchOnMerge bool
+	SecretScanning      bool
 	SecretPushProtection bool
 }
 
@@ -113,11 +115,13 @@ type Repo struct {
 // An empty default_branch falls back to "main" so callers always have a ref name.
 func (c *Client) GetRepo(owner, repo string) (Repo, error) {
 	var result struct {
+		Name                string `json:"name"`
 		Visibility          string `json:"visibility"`
 		DefaultBranch       string `json:"default_branch"`
 		DeleteBranchOnMerge bool   `json:"delete_branch_on_merge"`
 		Owner               struct {
-			Type string `json:"type"`
+			Login string `json:"login"`
+			Type  string `json:"type"`
 		} `json:"owner"`
 		SecurityAndAnalysis struct {
 			SecretScanning struct {
@@ -134,7 +138,17 @@ func (c *Client) GetRepo(owner, repo string) (Repo, error) {
 	if result.DefaultBranch == "" {
 		result.DefaultBranch = "main"
 	}
+	name := result.Name
+	if name == "" {
+		name = repo
+	}
+	login := result.Owner.Login
+	if login == "" {
+		login = owner
+	}
 	return Repo{
+		Owner:                login,
+		RepoName:             name,
 		Visibility:           result.Visibility,
 		DefaultBranch:        result.DefaultBranch,
 		OwnerType:            result.Owner.Type,

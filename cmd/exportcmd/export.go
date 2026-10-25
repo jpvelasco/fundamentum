@@ -18,8 +18,9 @@ func NewCmd() *cobra.Command {
 		Short: "Write a portable harden baseline",
 		Long: `Write the current flag baseline as JSON so apply --from can
 reproduce it. Combine with --preset / --ci / --require-checks /
---advanced-security / --strict. An explicit flag on the later apply
-or audit wins over the file, including --flag=false. Does not call GitHub.
+--skip / --only / --advanced-security / --strict / --octopus /
+--codacy-instructions / --branch-up-to-date. An explicit flag on the later
+apply or audit wins over the file, including --flag=false. Does not call GitHub.
 
 Examples:
   fundamentum --preset oss export
@@ -27,6 +28,7 @@ Examples:
   fundamentum --from baseline.json apply OWNER/REPO`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			cmd.SilenceUsage = true
 			return run(outPath, cmd.OutOrStdout())
 		},
 	}

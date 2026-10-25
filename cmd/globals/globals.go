@@ -32,3 +32,30 @@ var RequireChecks []string
 
 // CIPack is the --ci value: auto, go, generic, or none. Empty means auto.
 var CIPack string
+
+// SkipSteps is the --skip list: canonical steps (settings, protect-main,
+// protect-version-tags, security, files) or exact file paths to leave alone.
+var SkipSteps []string
+
+// OnlySteps is the --only list: when non-empty, only the listed steps/paths
+// are applied; everything else is skipped.
+var OnlySteps []string
+
+// Octopus opts in to the third-party Octopus Review workflow (public repos).
+// Off by default: it shares PR diffs with an external service.
+var Octopus bool
+
+// CodacyInstructions opts in to shipping .github/instructions/codacy.instructions.md
+// (Codacy MCP rules for AI coding agents). Off by default: it assumes the
+// repo is on Codacy and an MCP server is available.
+var CodacyInstructions bool
+
+// BranchUpToDate is the intended strict_required_status_checks_policy for
+// protect-main (branches must be up to date before merging). Default true.
+// BranchUpToDateSet records that the operator (or a baseline) chose a value
+// explicitly; when unset, a reconcile keeps the ruleset's live policy instead
+// of forcing it back.
+var BranchUpToDate = true
+
+// BranchUpToDateSet records whether BranchUpToDate was explicitly chosen.
+var BranchUpToDateSet bool

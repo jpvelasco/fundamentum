@@ -28,6 +28,7 @@ Examples:
   fundamentum --preset oss apply OWNER/REPO # non-interactive public baseline
   fundamentum --preset oss export -o baseline.json
   fundamentum --from baseline.json apply OWNER/REPO
+  fundamentum --skip protect-main,security apply OWNER/REPO
   fundamentum --dry-run apply OWNER/REPO    # preview without changes
   fundamentum --version                     # show version`,
 		Version:           Version,
@@ -42,6 +43,11 @@ Examples:
 	cmd.PersistentFlags().BoolVar(&globals.Strict, "strict", false, "fail the run when any core harden step fails, including optional tag/security items")
 	cmd.PersistentFlags().StringSliceVar(&globals.RequireChecks, "require-checks", nil, "required status-check contexts for protect-main (comma-separated; default: jobs for the resolved --ci pack)")
 	cmd.PersistentFlags().StringVar(&globals.CIPack, "ci", "", "CI pack: auto (default; detect go/node/python/rust, else generic), go, node, python, rust, generic, or none")
+	cmd.PersistentFlags().StringSliceVar(&globals.SkipSteps, "skip", nil, "steps/paths to leave alone: settings, protect-main, protect-version-tags, security, files, or an exact file path (comma-separated)")
+	cmd.PersistentFlags().StringSliceVar(&globals.OnlySteps, "only", nil, "when set, apply only these steps/paths (same keys as --skip)")
+	cmd.PersistentFlags().BoolVar(&globals.Octopus, "octopus", false, "opt in to the Octopus Review workflow (public repos; shares PR diffs with octopus-review.ai)")
+	cmd.PersistentFlags().BoolVar(&globals.CodacyInstructions, "codacy-instructions", false, "opt in to shipping .github/instructions/codacy.instructions.md (Codacy MCP rules for AI agents)")
+	cmd.PersistentFlags().BoolVar(&globals.BranchUpToDate, "branch-up-to-date", true, "protect-main: require branches up to date before merging (default true; unset keeps the live policy on reconcile)")
 	cmd.PersistentFlags().StringVar(&globals.Preset, "preset", "", "named baseline: oss (public defaults, no prompts), private (solo, no GHAS prompt), strict (fail optional steps + enable GHAS)")
 	cmd.PersistentFlags().StringVar(&globals.FromFile, "from", "", "load a portable JSON baseline (export writes this; explicit flags win, including --flag=false)")
 	cmd.AddCommand(apply.NewCmd())

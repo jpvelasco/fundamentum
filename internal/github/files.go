@@ -2,9 +2,11 @@
 package github
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // contentsPath constructs a safe API path for repo content operations,
@@ -38,18 +40,77 @@ func (c *Client) AnyFileExists(owner, repo string, paths []string) (bool, error)
 
 // FileStatus returns "create", "update", or "skip" for a file without writing.
 func (c *Client) FileStatus(owner, repo, path string, content []byte) (string, error) {
-	action, _, err := c.checkExistingFile(contentsPath(owner, repo, path), path, content)
+	action, _, err := c.FileStatusDetail(owner, repo, path, content)
+	return action, err
+}
+
+// FileStatusDetail is FileStatus plus a human-readable update detail: for
+// content drift it returns the line-change summary ("+3/-5") computed
+// against the live content. Empty detail means no useful diff (create).
+func (c *Client) FileStatusDetail(owner, repo, path string, content []byte) (action, detail string, err error) {
+	// One GET decides everything: existence, drift, and (for updates) the
+	// live content the diffstat summarizes.
+	resp, err := c.get(contentsPath(owner, repo, path))
 	if err != nil {
-		return "", err
+		return "", "", fmt.Errorf("check file %s: %w", path, err)
 	}
-	switch action {
-	case fileActionUpdate:
-		return "update", nil
-	case fileActionCreate:
-		return "create", nil
-	default:
-		return "skip", nil
+	defer func() { _ = resp.Body.Close() }()
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return "create", "", nil
+	case resp.StatusCode != http.StatusOK:
+		return "", "", expectStatus("check file "+path, resp, http.StatusOK, http.StatusNotFound)
 	}
+
+	existing, err := decodeExistingContentsFile(resp, path)
+	if err != nil {
+		return "", "", err
+	}
+	if contentsUnchanged(existing.Content, content) {
+		return "skip", "", nil
+	}
+	live, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(existing.Content, "\n", ""))
+	if err != nil {
+		return "update", "", nil // drift is still drift even if the live bytes are odd
+	}
+	return "update", DiffStat(live, content), nil
+}
+
+// DiffStat summarizes the line difference between old and new content as
+// "+added/-removed". Counts are multiset-based (a line changed in place
+// counts as one added and one removed) — enough signal for a plan table
+// without a full unified diff.
+func DiffStat(old, new []byte) string {
+	oldCount := lineCount(string(old))
+	newCount := lineCount(string(new))
+	added, removed := 0, 0
+	for line, n := range newCount {
+		if d := n - oldCount[line]; d > 0 {
+			added += d
+		}
+	}
+	for line, n := range oldCount {
+		if d := n - newCount[line]; d > 0 {
+			removed += d
+		}
+	}
+	return fmt.Sprintf("+%d/-%d", added, removed)
+}
+
+// lineCount counts occurrences of each line (trailing newline ignored).
+func lineCount(content string) map[string]int {
+	counts := map[string]int{}
+	if content == "" {
+		return counts
+	}
+	lines := strings.Split(content, "\n")
+	if lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	for _, line := range lines {
+		counts[line]++
+	}
+	return counts
 }
 
 // UpsertFile creates or updates a file in the repo via the Contents API.

@@ -19,6 +19,15 @@ func IsPublicVisibility(visibility string) bool {
 	return visibility == "public"
 }
 
+// CodeQLWorkflowVariants are the workflow paths that count as "CodeQL is on"
+// when default setup is not configured — an advanced CodeQL workflow
+// analyzes the repo without the default-setup setting.
+var CodeQLWorkflowVariants = []string{
+	".github/workflows/codeql.yml",
+	".github/workflows/codeql.yaml",
+	".github/workflows/codeql-analysis.yml",
+}
+
 // DependabotAlertsEnabled reports whether Dependabot alerts are on.
 // GitHub returns 204 when enabled and 404 when disabled.
 func (c *Client) DependabotAlertsEnabled(owner, repo string) (bool, error) {

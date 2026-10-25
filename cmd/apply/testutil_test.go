@@ -1,10 +1,12 @@
 package apply
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/jpvelasco/fundamentum/cmd/util"
 	"github.com/jpvelasco/fundamentum/internal/github"
 )
 
@@ -14,6 +16,15 @@ import (
 func newTestServer(handler http.HandlerFunc) (*httptest.Server, *github.Client) {
 	srv := httptest.NewServer(handler)
 	return srv, github.NewClient("t", false).WithBaseURL(srv.URL)
+}
+
+// stubGhTokenFailure makes token resolution deterministic on dev machines
+// with an authenticated gh CLI (the fallback would otherwise provide a token).
+func stubGhTokenFailure(t *testing.T) {
+	t.Helper()
+	restore := util.GhAuthToken
+	util.GhAuthToken = func() (string, error) { return "", errors.New("no gh") }
+	t.Cleanup(func() { util.GhAuthToken = restore })
 }
 
 // newTestClient returns a github.Client pointed at the given server URL.
