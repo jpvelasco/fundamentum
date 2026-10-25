@@ -273,3 +273,15 @@ func TestIsPublicVisibility(t *testing.T) {
 		t.Error("non-public visibilities must not count as public")
 	}
 }
+
+func TestSecurityFeaturesEnabled_MalformedBodyFails(t *testing.T) {
+	// A 200 with a non-JSON body must error (fail closed), not pass silently.
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`not json`))
+	}), nil, func(c *Client) {
+		if _, err := c.AutomatedSecurityFixesEnabled("owner", "repo"); err == nil {
+			t.Fatal("malformed 200 body must error")
+		}
+	}, nil)
+}
