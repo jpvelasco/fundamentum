@@ -50,6 +50,7 @@ func (s Selector) IncludeStep(step string) bool {
 // ExcludeReason reports which opt-out mechanism excludes an item: "--skip",
 // "--only", or "" when the item is included.
 func (s Selector) ExcludeReason(stepOrPath string) string {
+	stepOrPath = strings.ToLower(stepOrPath)
 	if _, ok := s.skip[stepOrPath]; ok {
 		return "--skip"
 	}
@@ -62,8 +63,11 @@ func (s Selector) ExcludeReason(stepOrPath string) string {
 	return ""
 }
 
-// IncludeFile reports whether a file at target path should ship.
+// IncludeFile reports whether a file at target path should ship. Tokens are
+// matched case-insensitively — keySet lowercases the flags, so the raw path
+// (which commonly has uppercase names like CODEOWNERS) is lowercased too.
 func (s Selector) IncludeFile(path string) bool {
+	path = strings.ToLower(path)
 	if _, ok := s.skip[Files]; ok {
 		return false
 	}

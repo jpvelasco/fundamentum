@@ -594,3 +594,26 @@ func writeMatchingContent(t *testing.T, w http.ResponseWriter, r *http.Request, 
 	// Not a shipped file (a detection probe): report missing.
 	w.WriteHeader(http.StatusNotFound)
 }
+
+func TestAudit_FileProbeErrorFailsClosed(t *testing.T) {
+	// A file status-check error must FAIL the audit, not WARN: an audit that
+	// could not verify a baseline file must not pass silently.
+	resetAuditGlobals(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/owner/repo/contents/.github/CODEOWNERS" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		writePassingAudit(t, w, r, true, true)
+	}))
+	defer srv.Close()
+
+	var out strings.Builder
+	err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &out)
+	if err == nil {
+		t.Fatalf("a probe 403 must fail the audit:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "status check failed") {
+		t.Errorf("report must name the probe failure:\n%s", out.String())
+	}
+}

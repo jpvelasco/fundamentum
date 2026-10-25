@@ -273,10 +273,12 @@ func secretCheck(info github.Repo, selector steps.Selector) check {
 // (legacy path), content drift = WARN with a diffstat. Content drift is
 // surfaced (not ignored) but does not hard-fail — intentional local tweaks
 // (action version bumps, custom exclude paths) escalate only with --strict.
+// Probe errors FAIL, matching the fail-closed planning in apply: an audit
+// that could not verify a file must not pass silently.
 func fileCheck(client *github.Client, owner, repo, path string, want []byte) check {
 	action, detail, err := client.FileStatusDetail(owner, repo, path, want)
 	if err != nil {
-		return check{Name: path, Status: statusWarn, Detail: "status check failed: " + err.Error()}
+		return check{Name: path, Status: statusFail, Detail: "status check failed: " + err.Error()}
 	}
 	switch action {
 	case "skip":
@@ -287,7 +289,7 @@ func fileCheck(client *github.Client, owner, repo, path string, want []byte) che
 		// Missing at the canonical path — a legacy alias still counts.
 		exists, err := client.AnyFileExists(owner, repo, otherAuditAliases(path))
 		if err != nil {
-			return check{Name: path, Status: statusWarn, Detail: "alias check failed: " + err.Error()}
+			return check{Name: path, Status: statusFail, Detail: "alias check failed: " + err.Error()}
 		}
 		if exists {
 			return check{Name: path, Status: statusPass, Detail: "alias path in use"}

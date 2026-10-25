@@ -199,7 +199,7 @@ Shipped CI follows the **fabrica standard** when the resolved pack is `go` (`--c
 
 - Two import groups: stdlib first, then third-party + internal (mirrors ludus)
 - Error wrapping: `fmt.Errorf("ctx: %w", err)`
-- No `exec.Command` anywhere
+- No `exec.Command` anywhere, with one sanctioned exception: `cmd/util.GhAuthToken` runs fixed-argv `gh auth token` as the last-resort token fallback (user-directed; no shell, no caller-controlled arguments)
 - Table-driven tests; direct deps are limited to `cobra` (CLI wiring) and `gopkg.in/yaml.v3`, which is test-only (embedded-template validation)
 - golangci-lint v2 with staticcheck `-ST1005` excluded; gosec excludes G104, G204, G304, G704
 

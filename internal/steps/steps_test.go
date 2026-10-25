@@ -161,3 +161,26 @@ func TestSelector_SkipFilesKeyExcludesAll(t *testing.T) {
 		t.Error("unskipped steps stay included")
 	}
 }
+
+func TestSelector_UppercasePathsMatch(t *testing.T) {
+	// keySet lowercases flag tokens; file lookups must match the same way,
+	// or --skip .github/CODEOWNERS silently does nothing.
+	s := New([]string{".github/CODEOWNERS"}, nil)
+	if s.IncludeFile(".github/CODEOWNERS") {
+		t.Error("uppercase path in --skip must be excluded")
+	}
+	if !s.IncludeFile(".github/SECURITY.md") {
+		t.Error("other files stay included")
+	}
+	if got := s.ExcludeReason(".github/CODEOWNERS"); got != "--skip" {
+		t.Errorf("ExcludeReason = %q, want --skip", got)
+	}
+
+	only := New(nil, []string{".github/SECURITY.md"})
+	if !only.IncludeFile(".github/SECURITY.md") {
+		t.Error("uppercase path in --only must be included")
+	}
+	if only.IncludeFile(".github/CODEOWNERS") {
+		t.Error("unlisted uppercase path must be excluded by --only")
+	}
+}
