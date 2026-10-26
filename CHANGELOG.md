@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-10-26
+
+**Patch release.** The free-tier guard shipped dead-on-arrival: its merged-PR check calls an endpoint the workflow token could not use, so the guard red-Xed every push and never reverted anything. Found by the ultimate live test — a deliberate direct push that sat unreverted while the guard run failed open.
+
+### Fixed
+
+- **Guard grants `pull-requests: read` for its merged-PR check.** The detection step calls `GET /repos/{repo}/commits/{sha}/pulls` to decide whether a pushed SHA is a merged pull request's `merge_commit_sha`. The shipped workflow's `permissions:` block granted only `contents: write`, so GitHub answered that call with 403 "Resource not accessible by integration" — the check step failed, the job red-Xed (correct fail-open behavior), and the revert never ran. Every repo with a v0.4.0/v0.4.1 guard has a guard that cannot verify any push. The template now grants `pull-requests: read` alongside `contents: write`, and a render assertion pins the permission so the guard cannot ship without it again. Re-apply to update an already-shipped guard.
+
 ## [0.4.1] - 2026-10-26
 
 **Patch release.** Fixes the free-tier guard bootstrap failure found applying v0.4.0 to a private free-tier repo: GitHub refuses workflow-file writes on every API for a token without the `workflow` scope, and nothing classified the refusal on creates — so the apply hard-failed instead of shipping what it could.
@@ -309,7 +317,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.4.2
 [0.4.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.4.1
 [0.4.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.4.0
 [0.3.3]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.3.3
