@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-10-26
+
+**Patch release.** The free-tier guard's first real run exposed the rest of its latent defect stack: a detection filter that could never match a legitimate merge, an association check that races GitHub's eventual consistency, and a revert step that could never have worked. Together they cancelled into a loud no-op — every push red-Xed, nothing was ever reverted — but each defect individually is serious, and fixing detection without the revert would have made the guard revert legitimate merges.
+
+### Fixed
+
+- **Guard detection matches `merge_commit_sha`, not PR state.** The detection step filtered the commit's associated pull requests on `.state == "merged"` — but REST PR list payloads only ever carry `open` or `closed`, so the filter never matched and every push, legitimate merges included, computed `merged=0` and attempted a revert. Detection now matches `merge_commit_sha ==` the pushed SHA (null until a PR merges; equal to the pushed SHA on squash/rebase/merge commits), verified live: the fixed filter matches a squash-merge commit and returns nothing for an orphaned direct-push commit.
+- **Guard detection polls through the association grace window.** The commit→pull-request association is eventually consistent — a guard run seconds after a legitimate merge can see an empty list (observed live: empty at +6s, present a minute later). Detection now retries for ~90 seconds before concluding "direct push"; a check that never completes (persistent API errors) fails open with a red X rather than reverting.
+- **Guard reverts via the API ref update, not a local git push.** The revert step did `git init` and then `git push --force` of the previous tip — impossible from an empty repository, which has no objects and cannot push a SHA it never fetched (`fatal: bad object`); the revert never worked. The revert is now `PATCH /repos/{repo}/git/refs/heads/{branch}` with force, which needs only the `contents: write` permission the workflow already holds. With the grace window, a direct push is reverted within roughly 90–105 seconds.
+
 ## [0.4.2] - 2026-10-26
 
 **Patch release.** The free-tier guard shipped dead-on-arrival: its merged-PR check calls an endpoint the workflow token could not use, so the guard red-Xed every push and never reverted anything. Found by the ultimate live test — a deliberate direct push that sat unreverted while the guard run failed open.
@@ -317,7 +327,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.4.3
 [0.4.2]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.4.2
 [0.4.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.4.1
 [0.4.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.4.0
