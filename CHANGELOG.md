@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-25
+
+**Patch release.** Markdown is pinned to LF in `.gitattributes` so Windows checkouts cannot reintroduce content drift against the LF shipped templates, and the opt-in Codacy instructions point to Codacy's official Agent Skills pack instead of bundling it.
+
+### Documentation
+
+- **Codacy's official Agent Skills are pointed to, not bundled.** The opt-in `.github/instructions/codacy.instructions.md` ends with a short section naming github.com/codacy/codacy-skills (cloud CLI, review enrichment, configuration tuning) as optional maintainer tooling, with per-agent install instructions living in that README. fundamentum ships baselines and points to extras, so vendored copies of the fast-moving pack can never go stale in the templates; the shipped rules apply with or without the pack. AGENTS.md records the decision.
+
+### Other
+
+- **`*.md` forced to LF in `.gitattributes`.** Markdown was the one text format not covered; a CRLF-committed `.md` (GITHUB_SETTINGS.md) showed up as permanent content drift against the LF shipped template until an apply normalized it. Windows checkouts and editors can no longer reintroduce the drift.
+
 ## [0.3.0] - 2026-10-25
 
 **Feature release.** Per-step opt-outs, merge-based ruleset reconcile, honest CI starters, a PASS/FAIL/WARN/SKIP audit, and single-commit file apply — plus opt-in treatment for third-party data-sharing templates and the AI agent-instructions file.
@@ -259,7 +271,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.3.1
 [0.3.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.3.0
 [0.2.3]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.2.3
 [0.2.2]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.2.2
