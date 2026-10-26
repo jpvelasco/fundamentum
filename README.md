@@ -51,6 +51,14 @@ $env:GITHUB_TOKEN = "ghp_xxxxx"      # PowerShell
 
 **Note:** Branch protection on free-tier private repos requires GitHub Pro for the API. If rulesets are unavailable, fundamentum falls back to classic branch protection — but if that also fails (403), you'll need to set up branch protection manually via the repo Settings → Branches page.
 
+**Updating the free-tier guard.** The guard workflow is a shipped file: a routine apply with `--no-overwrite` skips it once it exists (like any other existing file), so a fundamentum release that changes the guard template leaves the installed guard stale — `audit` reports the drift as a WARN. Refresh it with a targeted apply:
+
+```bash
+fundamentum apply OWNER/REPO --only .github/workflows/protect-main-guard.yml
+```
+
+The guard's presence forces PR mode, so expect a pull request rather than a direct update.
+
 ## What it does
 
 - **Community health files**: `CONTRIBUTING.md`, `CODEOWNERS`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, pull request + issue templates, `dependabot.yml` (per-language ecosystems detected from your manifests), and more.
