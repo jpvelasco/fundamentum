@@ -838,6 +838,9 @@ func TestRenderFreeTierGuard(t *testing.T) {
 			if !strings.Contains(f.Content, "--force") {
 				t.Error("guard must force-revert direct pushes")
 			}
+			if !strings.Contains(f.Content, "pull-requests: read") {
+				t.Error("guard must grant pull-requests: read — the merged-PR check calls commits/{sha}/pulls, which 403s without it (found live on dotfiles: the guard red-Xed every push and never reverted)")
+			}
 		}
 	}
 }

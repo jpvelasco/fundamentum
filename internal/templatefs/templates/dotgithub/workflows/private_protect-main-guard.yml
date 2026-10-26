@@ -18,6 +18,11 @@ on:
 
 permissions:
   contents: write  # the revert force-pushes the previous tip back
+  pull-requests: read  # the merged-PR check reads the commit's PRs; without
+                       # this the default GITHUB_TOKEN gets 403 "Resource not
+                       # accessible by integration" and the guard can only
+                       # fail open (found live on dotfiles v0.4.0: the guard
+                       # red-Xed every push and never reverted anything)
 
 concurrency:
   group: protect-main-guard
