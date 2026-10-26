@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-25
+
+**Patch release.** The ruleset reconcile now passes through live pull_request parameters it does not own — the same fidelity rule that preserves existing checks' `integration_id` — so reconciling a hand-tuned repo no longer drops its merge posture.
+
+### Fixed
+
+- **Reconcile preserves unowned pull_request parameters.** `strictestPRRule` rebuilt the params map from the five baseline keys, so a reconcile silently dropped a hand-tuned repo's `allowed_merge_methods` (e.g. squash-only merges), `require_extra_approval_for_unattributed_changes`, and `required_reviewers` — found on fabrica, where the merge would have wiped squash-only merging. The merge now copies every live parameter first and re-merges only the owned keys with baseline-or-stricter semantics; unowned keys pass through untouched. Regression tests pin the fabrica-shaped fixture at both the unit and the full-body-merge level.
+
 ## [0.3.2] - 2026-10-25
 
 **Patch release.** Fixes two shipped-template bugs found by running fundamentum v0.3.1 against a real second repo: the CodeQL guidance in GITHUB_SETTINGS.md was wrong for repos that scan via the committed advanced workflow, and the CodeQL config template lacked a trailing newline.
@@ -280,7 +288,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.3.3
 [0.3.2]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.3.2
 [0.3.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.3.1
 [0.3.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.3.0
