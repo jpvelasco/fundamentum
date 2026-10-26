@@ -42,6 +42,8 @@ fundamentum --pr apply OWNER/REPO
 
 A GitHub personal access token with **`repo` scope** (classic) or **Contents + Metadata + Administration** permissions (fine-grained). Set it via the `GITHUB_TOKEN` environment variable, pass `--token`, or be signed in to the GitHub CLI — fundamentum falls back to `gh auth token` when the first two are absent.
 
+**Workflow files need one more scope.** GitHub refuses writes to `.github/workflows/` (CI starter, CodeQL, the free-tier guard) through any API when the token lacks the **`workflow`** scope (classic) / **Workflows** permission (fine-grained) — the write returns 404. With a repo-only token, apply still lands every non-workflow file and skips the workflow ones with a visible warning; `audit` then flags what's missing. Add the scope (`gh auth refresh -s workflow`, or update your PAT) and re-run to ship them.
+
 ```bash
 export GITHUB_TOKEN=ghp_xxxxx        # Linux/macOS
 $env:GITHUB_TOKEN = "ghp_xxxxx"      # PowerShell

@@ -17,8 +17,13 @@ type FileChange struct {
 	Content []byte
 }
 
-// ErrWorkflowLocked is returned when GitHub Actions locks a workflow file
-// and the Contents API refuses to overwrite it (PUT returns 404).
+// ErrWorkflowLocked is returned when GitHub refuses a workflow-file write
+// through the Contents API (PUT returns 404): the token lacks the `workflow`
+// scope — GitHub refuses workflow creates the same way it refuses updates to
+// locked workflows. The git data API hits the same gate: creating a tree that
+// contains a .github/workflows path 404s for a repo-scoped token (verified
+// live on a free-tier private repo), so workflow files cannot ride the
+// single-commit git data batch either.
 var ErrWorkflowLocked = fmt.Errorf("workflow file locked by GitHub Actions")
 
 // IsWorkflowLocked returns true if the error wraps ErrWorkflowLocked.
@@ -85,8 +90,17 @@ func (c *Client) CreatePullRequest(owner, repo, title, body, head, base string) 
 	return result.Number, nil
 }
 
-// ApplyViaPR creates a feature branch, pushes all file changes, and opens a PR.
-// Returns the PR number on success.
+// ApplyViaPR creates a feature branch, commits the non-workflow file changes
+// as ONE commit via the git data API, writes workflow files per-file via the
+// Contents API, and opens a PR. Returns the PR number on success.
+//
+// Workflow files (.github/workflows/…) cannot ride the git data batch:
+// GitHub refuses to create a tree containing a workflow path when the token
+// lacks the workflow scope (404, the same gate that 404s the Contents PUT).
+// They go per-file through the Contents API so a scope-refused write is
+// classified ErrWorkflowLocked and skipped with a warning instead of failing
+// the whole PR — a workflow-scoped token lands them normally, and the bulk
+// of the changes still lands as one clean commit on the PR branch.
 func (c *Client) ApplyViaPR(owner, repo, defaultBranch string, changes []FileChange, stdout io.Writer) (int, error) {
 	// UnixNano keeps consecutive runs in the same second from colliding on a
 	// branch name (POST /git/refs 422s when the branch already exists).
@@ -100,12 +114,30 @@ func (c *Client) ApplyViaPR(owner, repo, defaultBranch string, changes []FileCha
 		return 0, fmt.Errorf("create branch: %w", err)
 	}
 
-	wrote := 0
+	var batch []FileChange
+	var workflows []FileChange
 	for _, ch := range changes {
+		if IsWorkflowPath(ch.Path) {
+			workflows = append(workflows, ch)
+			continue
+		}
+		batch = append(batch, ch)
+	}
+
+	wrote := 0
+	if len(batch) > 0 {
+		if err := c.CommitFiles(owner, repo, branch, batch); err != nil {
+			_ = c.deleteBranch(owner, repo, branch)
+			return 0, fmt.Errorf("commit %d files: %w", len(batch), err)
+		}
+		wrote += len(batch)
+		_, _ = fmt.Fprintf(stdout, "  %-45s  ✓ committed as one commit (%d files)\n", "files", len(batch))
+	}
+	for _, ch := range workflows {
 		action, err := c.UpsertFileOnBranch(owner, repo, branch, ch.Path, ch.Content)
 		if err != nil {
 			if IsWorkflowLocked(err) {
-				_, _ = fmt.Fprintf(stdout, "  %-45s  ⚠ workflow locked by GitHub Actions\n", ch.Path)
+				_, _ = fmt.Fprintf(stdout, "  %-45s  ⚠ workflow write refused — token lacks workflow scope; skipped (add the scope and re-run to ship it)\n", ch.Path)
 				continue
 			}
 			_ = c.deleteBranch(owner, repo, branch)

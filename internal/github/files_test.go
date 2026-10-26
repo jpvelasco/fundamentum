@@ -59,6 +59,25 @@ func TestUpsertFile(t *testing.T) {
 			wantAction: "skipped",
 		},
 		{
+			name: "workflow 404 on create (scope gate, not a real error)",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				if r.Method == http.MethodPut {
+					w.WriteHeader(http.StatusNotFound)
+					_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+					return
+				}
+			},
+			filePath:   ".github/workflows/protect-main-guard.yml",
+			content:    []byte("name: guard"),
+			wantErr:    true,
+			wantLock:   true,
+			wantAction: "skipped",
+		},
+		{
 			name: "404 on create (real error)",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
@@ -111,6 +130,28 @@ func TestUpsertFile(t *testing.T) {
 				}
 			}, nil)
 		})
+	}
+}
+
+func TestIsWorkflowPath(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{".github/workflows/ci.yml", true},
+		{".github/workflows/protect-main-guard.yml", true},
+		{".github/workflow/ci.yml", false},   // singular — not a workflow dir
+		{".github/workflowsX/ci.yml", false}, // prefix must be exact
+		{"github/workflows/ci.yml", false},   // must start at .github
+		{".github/codeql/codeql-config.yml", false},
+		{".github/dependabot.yml", false},
+		{"README.md", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := IsWorkflowPath(tt.path); got != tt.want {
+			t.Errorf("IsWorkflowPath(%q) = %v, want %v", tt.path, got, tt.want)
+		}
 	}
 }
 

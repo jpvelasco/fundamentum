@@ -11,12 +11,6 @@ import (
 	"testing"
 )
 
-// extractFilePathFromContents extracts the file path from a GitHub API /contents/ URL.
-// For example, "/repos/owner/repo/contents/README.md" returns "README.md".
-func extractFilePathFromContents(path string) string {
-	return strings.TrimPrefix(path, "/repos/owner/repo/contents/")
-}
-
 func TestCreatePRBranch(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -435,17 +429,28 @@ func TestApplyViaPR_UniqueBranchNames(t *testing.T) {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/"):
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]any{"commit": map[string]any{"sha": "aaaa1111"}})
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs"):
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs") && !strings.Contains(r.URL.Path, "/heads/"):
 			var body struct {
 				Ref string `json:"ref"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			refs = append(refs, body.Ref)
 			w.WriteHeader(http.StatusCreated)
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
-			w.WriteHeader(http.StatusNotFound)
-		case r.Method == http.MethodPut:
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/git/ref/heads/harden-"):
+			_, _ = w.Write([]byte(`{"object":{"sha":"basesha"}}`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/git/commits/"):
+			_, _ = w.Write([]byte(`{"tree":{"sha":"basesha-tree"}}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/blobs"):
 			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha":"blobsha"}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/trees"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha":"newtree"}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/commits"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha":"newcommit"}`))
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/git/refs/heads/harden-"):
+			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{}`))
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/pulls"):
 			w.WriteHeader(http.StatusCreated)
@@ -547,6 +552,60 @@ func TestDeleteBranch_Errors(t *testing.T) {
 }
 
 func TestApplyViaPR(t *testing.T) {
+	// gitDataPRHandler mocks the full single-commit PR flow:
+	// CreatePRBranch (GET /branches/{base}, POST /git/refs) ->
+	// CommitFiles on the harden branch for non-workflow files (GET
+	// /git/ref, GET /git/commits, POST /git/blobs, /git/trees,
+	// /git/commits, PATCH /git/refs/heads) -> per-file Contents upsert
+	// for workflow files (GET/PUT /contents) -> POST /pulls.
+	// failStage aborts one named stage with failStatus.
+	gitDataPRHandler := func(t *testing.T, failStage string, failStatus int) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == failMethod(failStage) && failPathMatch(failStage, r.URL.Path) {
+				w.WriteHeader(failStatus)
+				_, _ = w.Write([]byte(`{}`))
+				return
+			}
+			switch {
+			case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main"):
+				_, _ = w.Write([]byte(`{"commit":{"sha":"basesha"}}`))
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs") && !strings.Contains(r.URL.Path, "/heads/"):
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{}`))
+			case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/git/ref/heads/harden-"):
+				_, _ = w.Write([]byte(`{"object":{"sha":"basesha"}}`))
+			case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/git/commits/"):
+				_, _ = w.Write([]byte(`{"tree":{"sha":"basesha-tree"}}`))
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/blobs"):
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"sha":"blobsha"}`))
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/trees"):
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"sha":"newtree"}`))
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/commits"):
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"sha":"newcommit"}`))
+			case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/git/refs/heads/harden-"):
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{}`))
+			case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
+				// Workflow file does not exist on the harden branch.
+				w.WriteHeader(http.StatusNotFound)
+			case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/contents/"):
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{}`))
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/pulls"):
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"number":7}`))
+			case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/git/refs/heads/harden-"):
+				w.WriteHeader(http.StatusNoContent)
+			default:
+				t.Errorf("unexpected call: %s %s", r.Method, r.URL.Path)
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}
+	}
+
 	tests := []struct {
 		name       string
 		handler    http.HandlerFunc
@@ -556,175 +615,97 @@ func TestApplyViaPR(t *testing.T) {
 		wantZeroPR bool
 	}{
 		{
-			name: "happy path with 2 files",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				switch r.Method {
-				case http.MethodGet:
-					// branch info or file check
-					if strings.Contains(r.URL.Path, "/branches/") {
-						w.WriteHeader(http.StatusOK)
-						_ = json.NewEncoder(w).Encode(map[string]any{
-							"commit": map[string]any{"sha": "aaaa1111"},
-						})
-					} else {
-						// file does not exist
-						w.WriteHeader(http.StatusNotFound)
-					}
-				case http.MethodPost:
-					// create branch ref or create PR
-					if strings.Contains(r.URL.Path, "/git/refs") {
-						w.WriteHeader(http.StatusCreated)
-					} else {
-						w.WriteHeader(http.StatusCreated)
-						_ = json.NewEncoder(w).Encode(map[string]any{"number": 7})
-					}
-				case http.MethodPut:
-					w.WriteHeader(http.StatusCreated)
-					_ = json.NewEncoder(w).Encode(map[string]any{})
-				}
-			},
+			name:    "happy path with 2 files incl a workflow",
+			handler: gitDataPRHandler(t, "", 0),
 			changes: []FileChange{
 				{Path: "README.md", Content: []byte("hello")},
-				{Path: "LICENSE", Content: []byte("MIT")},
+				{Path: ".github/workflows/ci.yml", Content: []byte("name: CI")},
 			},
 		},
 		{
-			name: "branch create fails",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				switch r.Method {
-				case http.MethodGet:
-					w.WriteHeader(http.StatusOK)
-					_ = json.NewEncoder(w).Encode(map[string]any{
-						"commit": map[string]any{"sha": "aaaa1111"},
-					})
-				case http.MethodPost:
-					w.WriteHeader(http.StatusUnprocessableEntity)
-					_, _ = w.Write([]byte(`{"message":"invalid"}`))
-				}
-			},
+			// The workflow-scope gate 404s the Contents PUT; the workflow
+			// file is skipped with a warning and the PR still opens with
+			// the batched files.
+			name:    "refused workflow write skipped, PR opens with the rest",
+			handler: gitDataPRHandler(t, "contents-put", http.StatusNotFound),
 			changes: []FileChange{
 				{Path: "README.md", Content: []byte("hello")},
+				{Path: ".github/workflows/ci.yml", Content: []byte("name: CI")},
+			},
+		},
+		{
+			// Only workflow files and every write refused: nothing to put
+			// in a PR — the harden branch is deleted and no PR opens.
+			name:       "all workflow writes refused means no PR",
+			handler:    gitDataPRHandler(t, "contents-put", http.StatusNotFound),
+			changes:    []FileChange{{Path: ".github/workflows/ci.yml", Content: []byte("name: CI")}},
+			wantZeroPR: true,
+		},
+		{
+			// A workflow file already identical on the branch is not a
+			// write — with nothing else to change, no PR opens.
+			name: "workflow file identical on branch counts as no write",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/") {
+					_, _ = w.Write([]byte(`{"content":"bmFtZTogQ0k=","sha":"x"}`)) // "name: CI"
+					return
+				}
+				gitDataPRHandler(t, "", 0)(w, r)
+			},
+			changes:    []FileChange{{Path: ".github/workflows/ci.yml", Content: []byte("name: CI")}},
+			wantZeroPR: true,
+		},
+		{
+			// A non-locked workflow failure (e.g. 500) is a real error:
+			// branch deleted, run fails.
+			name:    "workflow upsert non-locked error fails the run",
+			handler: gitDataPRHandler(t, "contents-put", http.StatusInternalServerError),
+			changes: []FileChange{
+				{Path: "README.md", Content: []byte("hello")},
+				{Path: ".github/workflows/ci.yml", Content: []byte("name: CI")},
 			},
 			wantErr: true,
-			errMsg:  "create branch",
+			errMsg:  "upsert .github/workflows/ci.yml",
 		},
 		{
-			name: "workflow locked continues",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				// Track which file is being upserted
-				path := ""
-				if (r.Method == http.MethodGet || r.Method == http.MethodPut) && strings.Contains(r.URL.Path, "/contents/") {
-					path = extractFilePathFromContents(r.URL.Path)
-				}
-				switch r.Method {
-				case http.MethodGet:
-					switch {
-					case strings.Contains(r.URL.Path, "/branches/"):
-						w.WriteHeader(http.StatusOK)
-						_ = json.NewEncoder(w).Encode(map[string]any{
-							"commit": map[string]any{"sha": "aaaa1111"},
-						})
-					case path == ".github/workflows/ci.yml":
-						// existing workflow file
-						w.WriteHeader(http.StatusOK)
-						_ = json.NewEncoder(w).Encode(map[string]any{
-							"content": "b2xk",
-							"sha":     "abc123",
-						})
-					default:
-						// other file does not exist
-						w.WriteHeader(http.StatusNotFound)
-					}
-				case http.MethodPost:
-					if strings.Contains(r.URL.Path, "/git/refs") {
-						w.WriteHeader(http.StatusCreated)
-					} else {
-						w.WriteHeader(http.StatusCreated)
-						_ = json.NewEncoder(w).Encode(map[string]any{"number": 9})
-					}
-				case http.MethodPut:
-					if path == ".github/workflows/ci.yml" {
-						// workflow locked
-						w.WriteHeader(http.StatusNotFound)
-					} else {
-						w.WriteHeader(http.StatusCreated)
-					}
-				}
-			},
-			changes: []FileChange{
-				{Path: "README.md", Content: []byte("hello")},
-				{Path: ".github/workflows/ci.yml", Content: []byte("new workflow")},
-			},
-		},
-		{
-			name: "upsert error returns immediately",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				path := ""
-				if (r.Method == http.MethodGet || r.Method == http.MethodPut) && strings.Contains(r.URL.Path, "/contents/") {
-					path = extractFilePathFromContents(r.URL.Path)
-				}
-				switch r.Method {
-				case http.MethodGet:
-					if strings.Contains(r.URL.Path, "/branches/") {
-						w.WriteHeader(http.StatusOK)
-						_ = json.NewEncoder(w).Encode(map[string]any{
-							"commit": map[string]any{"sha": "aaaa1111"},
-						})
-					} else {
-						w.WriteHeader(http.StatusNotFound)
-					}
-				case http.MethodPost:
-					w.WriteHeader(http.StatusCreated)
-				case http.MethodPut:
-					if path == "README.md" {
-						w.WriteHeader(http.StatusCreated)
-					} else {
-						// non-workflow error on second file
-						w.WriteHeader(http.StatusConflict)
-						_, _ = w.Write([]byte(`{"message":"conflict"}`))
-					}
-				}
-			},
-			changes: []FileChange{
-				{Path: "README.md", Content: []byte("hello")},
-				{Path: "bad.md", Content: []byte("bad")},
-			},
+			name:    "git ref read fails",
+			handler: gitDataPRHandler(t, "ref-head", http.StatusForbidden),
+			changes: []FileChange{{Path: "README.md", Content: []byte("hello")}},
 			wantErr: true,
-			errMsg:  "upsert bad.md",
+			errMsg:  "commit 1 files",
 		},
 		{
-			name: "PR create fails",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				switch r.Method {
-				case http.MethodGet:
-					if strings.Contains(r.URL.Path, "/branches/") {
-						w.WriteHeader(http.StatusOK)
-						_ = json.NewEncoder(w).Encode(map[string]any{
-							"commit": map[string]any{"sha": "aaaa1111"},
-						})
-					} else {
-						w.WriteHeader(http.StatusNotFound)
-					}
-				case http.MethodPost:
-					if strings.Contains(r.URL.Path, "/git/refs") {
-						w.WriteHeader(http.StatusCreated)
-					} else {
-						// PR creation fails
-						w.WriteHeader(http.StatusUnprocessableEntity)
-						_, _ = w.Write([]byte(`{"message":"invalid"}`))
-					}
-				case http.MethodPut:
-					w.WriteHeader(http.StatusCreated)
-				case http.MethodDelete:
-					if !strings.Contains(r.URL.Path, "/git/refs/heads/harden-") {
-						t.Errorf("unexpected DELETE %s", r.URL.Path)
-					}
-					w.WriteHeader(http.StatusNoContent)
-				}
-			},
-			changes: []FileChange{
-				{Path: "README.md", Content: []byte("hello")},
-			},
+			name:    "blob create fails",
+			handler: gitDataPRHandler(t, "blob", http.StatusForbidden),
+			changes: []FileChange{{Path: "README.md", Content: []byte("hello")}},
+			wantErr: true,
+			errMsg:  "commit 1 files",
+		},
+		{
+			name:    "tree create fails",
+			handler: gitDataPRHandler(t, "tree", http.StatusInternalServerError),
+			changes: []FileChange{{Path: "README.md", Content: []byte("hello")}},
+			wantErr: true,
+			errMsg:  "commit 1 files",
+		},
+		{
+			name:    "commit create fails",
+			handler: gitDataPRHandler(t, "commit", http.StatusInternalServerError),
+			changes: []FileChange{{Path: "README.md", Content: []byte("hello")}},
+			wantErr: true,
+			errMsg:  "commit 1 files",
+		},
+		{
+			name:    "ref update fails",
+			handler: gitDataPRHandler(t, "ref-update", http.StatusUnprocessableEntity),
+			changes: []FileChange{{Path: "README.md", Content: []byte("hello")}},
+			wantErr: true,
+			errMsg:  "commit 1 files",
+		},
+		{
+			name:    "PR create fails and deletes the branch",
+			handler: gitDataPRHandler(t, "pulls", http.StatusUnprocessableEntity),
+			changes: []FileChange{{Path: "README.md", Content: []byte("hello")}},
 			wantErr: true,
 			errMsg:  "create PR",
 		},
@@ -735,108 +716,6 @@ func TestApplyViaPR(t *testing.T) {
 			},
 			changes:    nil,
 			wantZeroPR: true,
-		},
-		{
-			name: "all files skipped",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				switch r.Method {
-				case http.MethodGet:
-					if strings.Contains(r.URL.Path, "/branches/") {
-						w.WriteHeader(http.StatusOK)
-						_ = json.NewEncoder(w).Encode(map[string]any{
-							"commit": map[string]any{"sha": "aaaa1111"},
-						})
-						return
-					}
-					w.WriteHeader(http.StatusOK)
-					_ = json.NewEncoder(w).Encode(map[string]any{
-						"content": "aGVsbG8=",
-						"sha":     "abc123",
-					})
-				case http.MethodPost:
-					if strings.Contains(r.URL.Path, "/pulls") {
-						t.Error("must not open a PR when every file is skipped")
-					}
-					w.WriteHeader(http.StatusCreated)
-				case http.MethodDelete:
-					if !strings.Contains(r.URL.Path, "/git/refs/heads/harden-") {
-						t.Errorf("unexpected DELETE %s", r.URL.Path)
-					}
-					w.WriteHeader(http.StatusNoContent)
-				}
-			},
-			changes:    []FileChange{{Path: "README.md", Content: []byte("hello")}},
-			wantZeroPR: true,
-		},
-		{
-			name: "skipped file no print",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				path := ""
-				if (r.Method == http.MethodGet || r.Method == http.MethodPut) && strings.Contains(r.URL.Path, "/contents/") {
-					path = extractFilePathFromContents(r.URL.Path)
-				}
-				switch r.Method {
-				case http.MethodGet:
-					switch {
-					case strings.Contains(r.URL.Path, "/branches/"):
-						w.WriteHeader(http.StatusOK)
-						_ = json.NewEncoder(w).Encode(map[string]any{
-							"commit": map[string]any{"sha": "aaaa1111"},
-						})
-					case path == "README.md":
-						// file exists with same content
-						w.WriteHeader(http.StatusOK)
-						_ = json.NewEncoder(w).Encode(map[string]any{
-							"content": "aGVsbG8=", // "hello" base64
-							"sha":     "abc123",
-						})
-					default:
-						w.WriteHeader(http.StatusNotFound)
-					}
-				case http.MethodPost:
-					if strings.Contains(r.URL.Path, "/git/refs") {
-						w.WriteHeader(http.StatusCreated)
-					} else {
-						w.WriteHeader(http.StatusCreated)
-						_ = json.NewEncoder(w).Encode(map[string]any{"number": 5})
-					}
-				case http.MethodPut:
-					w.WriteHeader(http.StatusCreated)
-				}
-			},
-			changes: []FileChange{
-				{Path: "README.md", Content: []byte("hello")},
-				{Path: "LICENSE", Content: []byte("MIT")},
-			},
-		},
-		{
-			name: "upsert error deletes branch",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				switch r.Method {
-				case http.MethodGet:
-					if strings.Contains(r.URL.Path, "/branches/") {
-						w.WriteHeader(http.StatusOK)
-						_ = json.NewEncoder(w).Encode(map[string]any{
-							"commit": map[string]any{"sha": "aaaa1111"},
-						})
-						return
-					}
-					w.WriteHeader(http.StatusNotFound)
-				case http.MethodPost:
-					w.WriteHeader(http.StatusCreated)
-				case http.MethodPut:
-					w.WriteHeader(http.StatusUnprocessableEntity)
-					_, _ = w.Write([]byte(`{"message":"invalid"}`))
-				case http.MethodDelete:
-					if !strings.Contains(r.URL.Path, "/git/refs/heads/harden-") {
-						t.Errorf("unexpected DELETE %s", r.URL.Path)
-					}
-					w.WriteHeader(http.StatusNoContent)
-				}
-			},
-			changes: []FileChange{{Path: "README.md", Content: []byte("hello")}},
-			wantErr: true,
-			errMsg:  "upsert",
 		},
 	}
 
@@ -865,5 +744,45 @@ func TestApplyViaPR(t *testing.T) {
 				}
 			}, nil)
 		})
+	}
+}
+
+// failMethod / failPathMatch map a git-data stage name to the HTTP method
+// and URL shape whose failure that stage simulates.
+func failMethod(stage string) string {
+	switch stage {
+	case "ref-head":
+		return http.MethodGet
+	case "blob", "tree", "commit":
+		return http.MethodPost
+	case "ref-update":
+		return http.MethodPatch
+	case "contents-put":
+		return http.MethodPut
+	case "pulls":
+		return http.MethodPost
+	default:
+		return "" // no stage: never matches
+	}
+}
+
+func failPathMatch(stage, p string) bool {
+	switch stage {
+	case "ref-head":
+		return strings.Contains(p, "/git/ref/heads/harden-")
+	case "blob":
+		return strings.Contains(p, "/git/blobs")
+	case "tree":
+		return strings.Contains(p, "/git/trees")
+	case "commit":
+		return strings.Contains(p, "/git/commits")
+	case "ref-update":
+		return strings.Contains(p, "/git/refs/heads/harden-")
+	case "contents-put":
+		return strings.Contains(p, "/contents/")
+	case "pulls":
+		return strings.Contains(p, "/pulls")
+	default:
+		return false
 	}
 }

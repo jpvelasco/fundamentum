@@ -726,8 +726,9 @@ func codeOwnerLine(owner string, org bool) string {
 // them into a PR instead. When a direct batch is rejected by branch
 // protection (409), the remaining file changes switch to PR mode — no
 // re-run needed. If the single-commit path fails for another reason (e.g.
-// workflow-scope restrictions on the token), apply falls back to the
-// per-file Contents API, which also handles Actions-locked workflow files.
+// the batch contains a workflow path the git data API refuses without the
+// workflow token scope), apply falls back to the per-file Contents API,
+// which skips scope-refused workflow files with a warning.
 func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Item, viaPR bool, opts *github.BranchProtectionOptions, stdout io.Writer) error {
 	var fileChanges []github.FileChange
 	var nonFileItems []wizard.Item
@@ -810,9 +811,10 @@ func applyFilesViaPR(c *github.Client, owner, repo, branch string, changes []git
 
 // applyFilesPerItem is the fallback direct path: one Contents-API PUT per
 // file. It is only used when the single-commit batch failed for a non-409
-// reason (e.g. the token cannot update workflow files via the git data
-// API). Workflow files that GitHub Actions has locked are skipped, as
-// before. Returns true when a required item failed.
+// reason (e.g. the batch contains a workflow path, which the git data API
+// refuses for a token without the workflow scope). Workflow writes refused
+// by the scope gate are skipped with a warning — creates as well as updates.
+// Returns true when a required item failed.
 func applyFilesPerItem(c *github.Client, owner, repo, branch string, changes []github.FileChange, opts *github.BranchProtectionOptions, stdout io.Writer) bool {
 	requiredFailed := false
 	for _, ch := range changes {
@@ -820,7 +822,7 @@ func applyFilesPerItem(c *github.Client, owner, repo, branch string, changes []g
 		action, err := c.UpsertFile(owner, repo, ch.Path, ch.Content)
 		switch {
 		case err != nil && github.IsWorkflowLocked(err):
-			_, _ = fmt.Fprintf(stdout, "\r  %-45s  ⚠ workflow locked by GitHub Actions\n", ch.Path)
+			_, _ = fmt.Fprintf(stdout, "\r  %-45s  ⚠ workflow write refused — token lacks workflow scope; skipped (add the scope and re-run to ship it)\n", ch.Path)
 		case err != nil && github.IsConflict409(err):
 			// Protection kicked in mid-fallback — the rest goes to a PR.
 			_, _ = fmt.Fprintf(stdout, "\r  %-45s  ⚠ branch protection requires PR — switching to PR mode\n", ch.Path)
