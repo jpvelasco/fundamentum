@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-26
+
+**Feature release.** The free-tier Actions guard enforces PR discipline on private repos where GitHub's plan refuses branch protection — plus the PR-rule param pass-through fix found on fabrica.
+
+### Added
+
+- **Free-tier Actions guard.** GitHub Free private repositories cannot have protected branches (the ruleset and classic-protection APIs both 403 "Upgrade to GitHub Pro"; per GitHub's docs, protected branches are a Pro feature for private repos). Fundamentum now ships a guard workflow to every private repo that enforces the same discipline via Actions: a push to the default branch whose SHA is not a merged pull request's `merge_commit_sha` (checked via the API) is force-reverted to the previous tip within seconds, with a red X on the offending commit. The initial branch push and `github-actions[bot]` pushes are excluded, and the check fails open with a loud signal on transient API errors so a hiccup never reverts a legitimate merge. Public repos never ship the guard (they get real rulesets); private Pro repos get it dormant behind their ruleset. When the guard is shipped or present, apply forces PR mode for file changes — including the bootstrap commit, which a direct push would otherwise revert seconds after landing — and audit judges plan-gated protection by the guard: PASS via the guard when present, FAIL with re-apply guidance when missing.
+
+### Fixed
+
+- **Reconcile preserves unowned pull_request parameters.** `strictestPRRule` rebuilt the params map from the five baseline keys, so a reconcile silently dropped a hand-tuned repo's `allowed_merge_methods` (e.g. squash-only merges), `require_extra_approval_for_unattributed_changes`, and `required_reviewers` — found on fabrica, where the merge would have wiped squash-only merging. The merge now copies every live parameter first and re-merges only the owned keys with baseline-or-stricter semantics; unowned keys pass through untouched, the same fidelity rule that keeps existing checks' `integration_id`.
+
 ## [0.3.3] - 2026-10-25
 
 **Patch release.** The ruleset reconcile now passes through live pull_request parameters it does not own — the same fidelity rule that preserves existing checks' `integration_id` — so reconciling a hand-tuned repo no longer drops its merge posture.
@@ -288,7 +300,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.4.0
 [0.3.3]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.3.3
 [0.3.2]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.3.2
 [0.3.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.3.1
