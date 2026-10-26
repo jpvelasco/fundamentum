@@ -608,46 +608,25 @@ func assertDeferredRequiredChecks(t *testing.T, viaPR bool, refStatus int, failM
 	t.Helper()
 	var rulesetBody map[string]any
 	opts := &github.BranchProtectionOptions{}
+	// rulesetsCapture answers the ruleset probes and captures the created
+	// body; prMockHandler (combined after) answers the PR flow.
+	rulesetsCapture := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/rulesets"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/rulesets"):
+			_ = json.NewDecoder(r.Body).Decode(&rulesetBody)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":1}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
 	handler := combineHandlers(
 		gitBatchHandler(refStatus),
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/rulesets"):
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`[]`))
-			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/rulesets"):
-				_ = json.NewDecoder(r.Body).Decode(&rulesetBody)
-				w.WriteHeader(http.StatusCreated)
-				_, _ = w.Write([]byte(`{"id":1}`))
-			case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main"):
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`{"commit":{"sha":"abc123"}}`))
-			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs") && !strings.Contains(r.URL.Path, "/heads/"):
-				w.WriteHeader(http.StatusCreated)
-				_, _ = w.Write([]byte(`{}`))
-			case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/git/ref/heads/harden-"):
-				_, _ = w.Write([]byte(`{"object":{"sha":"abc123"}}`))
-			case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/git/commits/"):
-				_, _ = w.Write([]byte(`{"tree":{"sha":"treesha"}}`))
-			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/blobs"):
-				w.WriteHeader(http.StatusCreated)
-				_, _ = w.Write([]byte(`{"sha":"blobsha"}`))
-			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/trees"):
-				w.WriteHeader(http.StatusCreated)
-				_, _ = w.Write([]byte(`{"sha":"newtree"}`))
-			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/commits"):
-				w.WriteHeader(http.StatusCreated)
-				_, _ = w.Write([]byte(`{"sha":"newcommit"}`))
-			case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/git/refs/heads/harden-"):
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`{}`))
-			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/pulls"):
-				w.WriteHeader(http.StatusCreated)
-				_, _ = w.Write([]byte(`{"number":1}`))
-			default:
-				w.WriteHeader(http.StatusNotFound)
-			}
-		}),
+		rulesetsCapture,
+		prMockHandler(),
 	)
 	testWithServer(t, handler, func(c *github.Client) {
 		items := []wizard.Item{
