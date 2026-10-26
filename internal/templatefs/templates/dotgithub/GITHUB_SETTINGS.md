@@ -36,7 +36,12 @@ gh api repos/OWNER/REPO \
 }
 EOF
 
-# CodeQL default setup
+# CodeQL — advanced workflow OR default setup, never both
+# If this repo scans via .github/workflows/codeql.yml (the shipped advanced
+# workflow), keep default setup DISABLED — GitHub refuses to run both for the
+# same languages and the committed workflow's uploads fail with "CodeQL
+# analyses from advanced configurations cannot be processed when the default
+# setup is enabled". If the repo relies on default setup instead, enable it:
 gh api repos/OWNER/REPO/code-scanning/default-setup \
   --method PATCH \
   --input - <<'EOF'
@@ -160,6 +165,6 @@ main dashboard update via the integration webhook; coverage via
 ### Security & Analysis
 - Secret scanning: enabled
 - Push protection: enabled
-- CodeQL (default setup): enabled
+- CodeQL: enabled — via the committed `.github/workflows/codeql.yml` (advanced) OR default setup, never both at once
 - Dependabot alerts: enabled
 - Dependabot security updates: enabled
