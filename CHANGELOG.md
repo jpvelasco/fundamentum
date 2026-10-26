@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-25
+
+**Patch release.** Fixes two shipped-template bugs found by running fundamentum v0.3.1 against a real second repo: the CodeQL guidance in GITHUB_SETTINGS.md was wrong for repos that scan via the committed advanced workflow, and the CodeQL config template lacked a trailing newline.
+
+### Fixed
+
+- **CodeQL guidance covers advanced workflows, not just default setup.** GITHUB_SETTINGS.md told maintainers to enable CodeQL default setup unconditionally — wrong for repos that scan via the committed `codeql.yml` advanced workflow, because GitHub refuses to run both for the same languages and the workflow's uploads fail ("CodeQL analyses from advanced configurations cannot be processed when the default setup is enabled"). The guidance now covers both cases: advanced workflow OR default setup, never both.
+- **CodeQL config template ends with a trailing newline.** `public_codeql-config.yml` was missing its final newline, so apply/audit reported `+0/-0` content drift — a byte diff with zero line changes — on every repo whose live copy ended with a newline.
+
 ## [0.3.1] - 2026-10-25
 
 **Patch release.** Markdown is pinned to LF in `.gitattributes` so Windows checkouts cannot reintroduce content drift against the LF shipped templates, and the opt-in Codacy instructions point to Codacy's official Agent Skills pack instead of bundling it.
@@ -271,7 +280,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.3.2
 [0.3.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.3.1
 [0.3.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.3.0
 [0.2.3]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.2.3
