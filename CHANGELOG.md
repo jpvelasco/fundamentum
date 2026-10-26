@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-26
+
+**Patch release.** Fixes the free-tier guard bootstrap failure found applying v0.4.0 to a private free-tier repo: GitHub refuses workflow-file writes on every API for a token without the `workflow` scope, and nothing classified the refusal on creates — so the apply hard-failed instead of shipping what it could.
+
+### Fixed
+
+- **Workflow-create 404 is the scope gate, not a hard failure.** GitHub gates every write to `.github/workflows/` behind the `workflow` token scope (classic) / Workflows permission (fine-grained): the Contents API PUT returns 404 on workflow creates as well as updates, and the git data API refuses to create a tree containing a workflow path with the same 404 (verified live against a free-tier private repo with a repo-scoped token — the assumption that the git data API bypasses the gate is false). `ErrWorkflowLocked` previously covered updates only, so the guard bootstrap — a workflow-file create — hard-failed the whole PR-mode apply. A 404 on a workflow path is now classified as the scope refusal for creates too: apply skips the file with a visible "add the workflow scope and re-run" warning, lands everything else, and `audit` FAILs the missing file as the honest follow-up. The README now documents the scope requirement.
+- **PR-mode file changes land as one commit.** `ApplyViaPR` no longer writes one Contents-API commit per file on the harden branch: non-workflow files are batched into ONE commit via the git data API (blobs → tree → commit → ref update), and workflow files — which cannot ride the batch, per the tree gate above — go per-file through the Contents API, where a scope-refused write is skipped with the same warning instead of failing the PR. Nothing written at all means no PR. Direct mode keeps its fallback: a batch containing workflow paths fails at tree creation for scope-less tokens and falls back to per-file upserts, which now skip refused workflow writes (creates included) instead of failing the run.
+
 ## [0.4.0] - 2026-10-26
 
 **Feature release.** The free-tier Actions guard enforces PR discipline on private repos where GitHub's plan refuses branch protection — plus the PR-rule param pass-through fix found on fabrica.
@@ -300,7 +309,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.4.1
 [0.4.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.4.0
 [0.3.3]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.3.3
 [0.3.2]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.3.2
