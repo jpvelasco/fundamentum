@@ -108,6 +108,15 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 		return fmt.Errorf("render templates: %w", err)
 	}
 
+	// Free-tier guard: the shipped workflow reverts direct pushes to the
+	// default branch, so file changes must go through a PR — including the
+	// bootstrap commit that ships the guard itself (a direct commit would be
+	// reverted seconds after landing).
+	guardPR := guardShipped(client, owner, repo, rendered)
+	if guardPR && !globals.ViaPR {
+		_, _ = fmt.Fprint(stdout, prGuardNotice)
+	}
+
 	// Validate --skip/--only tokens against the real steps and rendered
 	// paths: a typo must be an error, not a silent no-op that lets apply
 	// touch exactly what the operator meant to leave alone.
@@ -191,7 +200,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	if globals.Preset == "" && !wizard.ConfirmDefaults(stdin, stdout) {
 		wizard.SelectInteractive(items, stdin, stdout)
 	}
-	if err := applyItems(client, owner, repo, branch, items, globals.ViaPR, &opts, stdout); err != nil {
+	if err := applyItems(client, owner, repo, branch, items, globals.ViaPR || guardPR, &opts, stdout); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(stdout, "\n  ✓ Done — https://github.com/%s/%s\n", owner, repo)
@@ -344,7 +353,7 @@ func buildItems(
 	}
 	items = append(items, settingsItem)
 
-	protectionItem := branchProtectionItem(c, owner, repo, branch, visibility, branchPlan, classicExists, protectionUnavailable, opts, pack)
+	protectionItem := branchProtectionItem(c, owner, repo, branch, visibility, branchPlan, classicExists, protectionUnavailable, opts, pack, guardShipped(c, owner, repo, rendered))
 	if !selector.IncludeStep(steps.ProtectMain) {
 		protectionItem = optedOutItem(protectionItem.Name, steps.ProtectMain, selector)
 	}
@@ -501,9 +510,19 @@ func securityMissing(c *github.Client, info github.Repo, owner, repo string, opt
 //   - drifted ruleset → update in place
 //   - classic exists → upgrade (create ruleset + remove classic)
 //   - neither exists → ruleset for public repos; try ruleset then fall back to classic for private
-func branchProtectionItem(c *github.Client, owner, repo, branch, visibility string, plan github.RulesetPlan, classicExists, protectionUnavailable bool, opts *github.BranchProtectionOptions, pack string) wizard.Item {
+func branchProtectionItem(c *github.Client, owner, repo, branch, visibility string, plan github.RulesetPlan, classicExists, protectionUnavailable bool, opts *github.BranchProtectionOptions, pack string, guardPresent bool) wizard.Item {
 	if opts == nil {
 		opts = &github.BranchProtectionOptions{}
+	}
+	// Free-tier guard shipped or already present: the Actions workflow is
+	// the enforcement (it reverts non-PR pushes), so this item points at
+	// the file batch instead of trying a ruleset the plan refuses.
+	if protectionUnavailable && guardPresent {
+		return wizard.Item{
+			Name:   "Branch protection (free-tier Actions guard)",
+			Action: wizard.ActionSkip,
+			Detail: "enforced via " + github.FreeTierGuardPath + " — the guard reverts direct pushes",
+		}
 	}
 	switch {
 	case plan.Exists && len(plan.Drift) == 0:
@@ -849,4 +868,38 @@ func deferRequiredChecks(opts *github.BranchProtectionOptions) {
 // --strict treats optional core steps (tag ruleset, security) as required.
 func itemFailedRequired(item wizard.Item) bool {
 	return !item.Optional || globals.Strict
+}
+
+// prGuardNotice explains why file changes go via a PR without --pr.
+const prGuardNotice = "--free-tier-guard: the protect-main Actions guard reverts direct pushes to the default branch, so file changes go in a pull request (settings and security still apply live).\n"
+
+// guardShipped reports whether the free-tier Actions guard is being shipped
+// in this apply (rendered) or already exists on the repo. Either way the
+// repo's direct-commit path is guarded: any push to the default branch that
+// is not a merged pull request gets force-reverted.
+func guardShipped(c *github.Client, owner, repo string, rendered []templates.RenderedFile) bool {
+	if containsPath(rendered, github.FreeTierGuardPath) {
+		return true
+	}
+	if c == nil {
+		return false
+	}
+	exists, err := c.AnyFileExists(owner, repo, []string{github.FreeTierGuardPath})
+	if err != nil {
+		// A probe failure must not silently pick direct mode; the apply's
+		// fail-closed pre-flight will surface the same error on the file
+		// status checks anyway.
+		return false
+	}
+	return exists
+}
+
+// containsPath reports whether the rendered set includes the target path.
+func containsPath(rendered []templates.RenderedFile, path string) bool {
+	for _, f := range rendered {
+		if f.Path == path {
+			return true
+		}
+	}
+	return false
 }

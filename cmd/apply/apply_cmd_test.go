@@ -98,7 +98,7 @@ func TestRun_NoArg(t *testing.T) {
 }
 
 func TestBranchProtectionItem_RulesetExists(t *testing.T) {
-	item := branchProtectionItem(nil, "owner", "repo", "main", "public", github.RulesetPlan{Exists: true}, false, false, &github.BranchProtectionOptions{}, "")
+	item := branchProtectionItem(nil, "owner", "repo", "main", "public", github.RulesetPlan{Exists: true}, false, false, &github.BranchProtectionOptions{}, "", false)
 	if item.Action != wizard.ActionSkip {
 		t.Errorf("expected ActionSkip when matching ruleset exists, got %v", item.Action)
 	}
@@ -123,7 +123,7 @@ func TestTagRulesetItem_Drift(t *testing.T) {
 }
 
 func TestBranchProtectionItem_RulesetDrift(t *testing.T) {
-	item := branchProtectionItem(nil, "owner", "repo", "main", "public", github.RulesetPlan{Exists: true, Drift: []string{"enforcement"}}, false, false, &github.BranchProtectionOptions{}, "")
+	item := branchProtectionItem(nil, "owner", "repo", "main", "public", github.RulesetPlan{Exists: true, Drift: []string{"enforcement"}}, false, false, &github.BranchProtectionOptions{}, "", false)
 	if item.Action != wizard.ActionUpdate {
 		t.Errorf("expected ActionUpdate on ruleset drift, got %v", item.Action)
 	}
@@ -176,7 +176,7 @@ func TestBranchProtectionItem_Creation(t *testing.T) {
 				w.WriteHeader(http.StatusCreated)
 				_, _ = w.Write([]byte(`{"id":1}`))
 			}), func(c *github.Client) {
-				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, existsPlan(tt.rulesetExists), tt.classicExists, false, &github.BranchProtectionOptions{}, "")
+				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, existsPlan(tt.rulesetExists), tt.classicExists, false, &github.BranchProtectionOptions{}, "", false)
 				if item.Action != tt.wantAction {
 					t.Errorf("expected action %v, got %v", tt.wantAction, item.Action)
 				}
@@ -712,6 +712,19 @@ func newRunFlowServer() *httptest.Server {
 			_, _ = w.Write([]byte(`[]`))
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main/protection"):
 			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main"):
+			// PR-mode flow: CreatePRBranch reads the branch head SHA
+			// (ordered AFTER the protection probe — the probe's longer path
+			// must match first).
+			_, _ = w.Write([]byte(`{"commit":{"sha":"abc123"}}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs"):
+			// PR-mode flow: CreatePRBranch creates the harden branch.
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/pulls"):
+			// PR-mode flow: the batch PR is opened.
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"number":42}`))
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
 			w.WriteHeader(http.StatusNotFound)
 		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/contents/"):
@@ -1203,7 +1216,7 @@ func rulesetsUnavailableHandler(w http.ResponseWriter, r *http.Request) {
 // GitHub Pro" on the ruleset pre-flight still builds the rest of the plan,
 // but does not claim dry-run would create protection that cannot land.
 func TestRunWithClient_RulesetsUnavailableOnFreeTier(t *testing.T) {
-	t.Cleanup(func() { globals.DryRun = false })
+	t.Cleanup(func() { globals.DryRun = false; globals.ViaPR = false })
 	globals.DryRun = true
 
 	srv := httptest.NewServer(http.HandlerFunc(rulesetsUnavailableHandler))
@@ -1218,20 +1231,23 @@ func TestRunWithClient_RulesetsUnavailableOnFreeTier(t *testing.T) {
 	if !strings.Contains(got, "Dry run complete — ") {
 		t.Errorf("expected dry-run summary, got:\n%s", got)
 	}
-	for _, name := range []string{
-		"Branch protection (protect-main)",
-		"Tag ruleset (protect-version-tags)",
-	} {
-		row := summaryRow(t, got, name)
-		if strings.Contains(row, "would create") {
-			t.Errorf("%s row must not say would create, got %q", name, row)
-		}
-		if strings.Contains(row, "already exists") {
-			t.Errorf("%s row must not say already exists, got %q", name, row)
-		}
-		if !strings.Contains(row, "unavailable") || !strings.Contains(row, "Settings → Branches") {
-			t.Errorf("%s row = %q, want unavailable and Settings → Branches", name, row)
-		}
+	// The free-tier guard ships to private repos, so plan-gated protection
+	// points at the Actions guard instead of an impossible ruleset create.
+	row := summaryRow(t, got, "Branch protection (free-tier Actions guard)")
+	if !strings.Contains(row, github.FreeTierGuardPath) {
+		t.Errorf("guard row must name the guard workflow, got %q", row)
+	}
+	tagRow := summaryRow(t, got, "Tag ruleset (protect-version-tags)")
+	if strings.Contains(tagRow, "would create") || strings.Contains(tagRow, "already exists") {
+		t.Errorf("tag ruleset row must not create or claim existing, got %q", tagRow)
+	}
+	if !strings.Contains(tagRow, "unavailable") {
+		t.Errorf("tag ruleset row = %q, want unavailable", tagRow)
+	}
+	// The guard reverts direct pushes, so the plan forces PR mode with the
+	// guard notice — even without --pr.
+	if !strings.Contains(got, "--free-tier-guard") {
+		t.Errorf("expected the free-tier guard PR-mode notice, got:\n%s", got)
 	}
 	if strings.Contains(got, "already exist") {
 		t.Errorf("summary must not count unavailable protection as already exist:\n%s", got)

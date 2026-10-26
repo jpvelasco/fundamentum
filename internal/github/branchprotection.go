@@ -73,3 +73,10 @@ func (c *Client) RemoveClassicBranchProtection(owner, repo, branch string) error
 	defer func() { _ = resp.Body.Close() }()
 	return expectStatus("remove classic branch protection", resp, http.StatusNoContent)
 }
+
+// FreeTierGuardPath is the Actions workflow that enforces PR discipline on
+// free-tier private repositories, where branch protection is plan-gated
+// (GitHub Free private repos cannot have protected branches; Pro is
+// required). The guard reverts direct pushes to the default branch that are
+// not merged pull requests.
+const FreeTierGuardPath = ".github/workflows/protect-main-guard.yml"

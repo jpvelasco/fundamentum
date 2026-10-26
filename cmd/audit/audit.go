@@ -148,6 +148,14 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 	if err != nil && !github.IsBranchProtectionUnavailable(err) {
 		return fmt.Errorf("check classic protection: %w", err)
 	}
+
+	// Free-tier guard: the shipped Actions workflow enforces PR discipline
+	// where the platform plan refuses branch protection (GitHub Free private
+	// repos cannot have protected branches; the guard reverts direct pushes).
+	guardExists, err := client.AnyFileExists(owner, repo, []string{github.FreeTierGuardPath})
+	if err != nil {
+		return fmt.Errorf("check free-tier guard: %w", err)
+	}
 	dependabot, err := client.DependabotAlertsEnabled(owner, repo)
 	if err != nil {
 		return fmt.Errorf("check dependabot: %w", err)
@@ -173,7 +181,7 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 	}
 
 	results := []check{
-		branchCheck(branchPlan, classicExists, protectionUnavailable, selector),
+		branchCheck(branchPlan, classicExists, protectionUnavailable, guardExists, selector),
 		tagCheck(tagPlan, protectionUnavailable, selector),
 		boolCheck("auto-delete branches", info.DeleteBranchOnMerge, "delete_branch_on_merge is false", steps.Settings, selector),
 		boolCheck("Dependabot alerts", dependabot, "not enabled", steps.Security, selector),
@@ -214,15 +222,19 @@ func stepSkipped(step string, selector steps.Selector) (check, bool) {
 
 // branchCheck judges protect-main: existing + not-weaker = PASS (stricter
 // hand-tuned rulesets pass), drift = FAIL, classic only = FAIL, missing =
-// FAIL, plan-gated = SKIP.
-func branchCheck(plan github.RulesetPlan, classicExists, protectionUnavailable bool, selector steps.Selector) check {
+// FAIL, plan-gated = judged by the free-tier Actions guard (PASS when the
+// guard is present; FAIL with re-apply guidance when it is not).
+func branchCheck(plan github.RulesetPlan, classicExists, protectionUnavailable, guardExists bool, selector steps.Selector) check {
 	name := "protect-main"
 	if c, ok := stepSkipped(steps.ProtectMain, selector); ok {
 		c.Name = name
 		return c
 	}
 	if protectionUnavailable && !plan.Exists && !classicExists {
-		return check{Name: name, Status: statusSkip, Detail: "unavailable on this plan — set it in Settings → Branches"}
+		if guardExists {
+			return check{Name: name, Status: statusPass, Detail: "enforced via free-tier Actions guard (" + github.FreeTierGuardPath + ")"}
+		}
+		return check{Name: name, Status: statusFail, Detail: "missing — branch protection is plan-gated and the free-tier guard is not installed; re-apply to ship it, upgrade to GitHub Pro, or use Settings → Branches"}
 	}
 	switch {
 	case plan.Exists && len(plan.Drift) == 0:
