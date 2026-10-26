@@ -807,3 +807,37 @@ func contentFor(files []RenderedFile, path string) string {
 	}
 	return ""
 }
+
+func TestRenderFreeTierGuard(t *testing.T) {
+	// The free-tier Actions guard ships to private repos only — the platform
+	// plan-gates branch protection there, so the guard is the enforcement.
+	private, err := Render(RepoData{Owner: "o", RepoName: "r", DefaultBranch: "main", Visibility: "private"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPath(private, ".github/workflows/protect-main-guard.yml") {
+		t.Error("private repos must ship the free-tier guard")
+	}
+
+	public, err := Render(RepoData{Owner: "o", RepoName: "r", DefaultBranch: "main", Visibility: "public"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsPath(public, ".github/workflows/protect-main-guard.yml") {
+		t.Error("public repos have real rulesets and must not ship the guard")
+	}
+
+	for _, f := range private {
+		if f.Path == ".github/workflows/protect-main-guard.yml" {
+			if !strings.Contains(f.Content, `branches: ["main"]`) {
+				t.Errorf("guard must target the rendered default branch:\n%s", f.Content)
+			}
+			if !strings.Contains(f.Content, "merge_commit_sha") {
+				t.Error("guard must verify merged-PR association via the API")
+			}
+			if !strings.Contains(f.Content, "--force") {
+				t.Error("guard must force-revert direct pushes")
+			}
+		}
+	}
+}

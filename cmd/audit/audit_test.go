@@ -333,6 +333,12 @@ func TestAudit_RulesetsUnavailableOnFreeTier(t *testing.T) {
 			_, _ = w.Write([]byte(`{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature.","status":"403"}`))
 			return
 		}
+		if r.URL.Path == "/repos/owner/repo/contents/"+github.FreeTierGuardPath {
+			// The free-tier guard is present on this repo.
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"content":"","sha":"g"}`))
+			return
+		}
 		writePassingAudit(t, w, r, true, true)
 	}))
 	defer srv.Close()
@@ -344,11 +350,17 @@ func TestAudit_RulesetsUnavailableOnFreeTier(t *testing.T) {
 	if !strings.Contains(got, "protect-main") || !strings.Contains(got, "protect-version-tags") {
 		t.Errorf("expected report with both ruleset rows, got:\n%s", got)
 	}
+	// Plan-gated protection is judged by the free-tier Actions guard: with
+	// the guard present (the mock serves it), protect-main PASSes via the
+	// guard and the tag ruleset SKIPs as plan-unavailable.
+	if !strings.Contains(got, "enforced via free-tier Actions guard") {
+		t.Errorf("plan-gated protection must PASS via the guard, got:\n%s", got)
+	}
 	if !strings.Contains(got, "SKIP") {
-		t.Errorf("plan-gated protection must report SKIP, got:\n%s", got)
+		t.Errorf("tag ruleset must report SKIP, got:\n%s", got)
 	}
 	if err != nil {
-		t.Fatalf("plan-gated protection must not fail the audit: %v", err)
+		t.Fatalf("plan-gated protection with the guard must not fail the audit: %v", err)
 	}
 }
 
@@ -425,23 +437,28 @@ func TestAudit_SecretScanningPrivateSkips(t *testing.T) {
 
 func TestBranchCheck(t *testing.T) {
 	selector := steps.New(nil, nil)
-	if got := branchCheck(github.RulesetPlan{Exists: true}, false, false, selector); got.Status != statusPass {
+	if got := branchCheck(github.RulesetPlan{Exists: true}, false, false, false, selector); got.Status != statusPass {
 		t.Errorf("at-intent ruleset = %+v, want PASS", got)
 	}
-	if got := branchCheck(github.RulesetPlan{Exists: true, Drift: []string{"enforcement"}}, false, false, selector); got.Status != statusFail || got.Detail == "" {
+	if got := branchCheck(github.RulesetPlan{Exists: true, Drift: []string{"enforcement"}}, false, false, false, selector); got.Status != statusFail || got.Detail == "" {
 		t.Errorf("weaker ruleset = %+v, want FAIL with detail", got)
 	}
-	if got := branchCheck(github.RulesetPlan{}, true, false, selector); got.Status != statusFail || got.Detail != "classic protection only" {
+	if got := branchCheck(github.RulesetPlan{}, true, false, false, selector); got.Status != statusFail || got.Detail != "classic protection only" {
 		t.Errorf("classic = %+v, want FAIL classic protection only", got)
 	}
-	if got := branchCheck(github.RulesetPlan{}, false, false, selector); got.Status != statusFail || got.Detail != "missing" {
+	if got := branchCheck(github.RulesetPlan{}, false, false, false, selector); got.Status != statusFail || got.Detail != "missing" {
 		t.Errorf("missing = %+v, want FAIL missing", got)
 	}
-	if got := branchCheck(github.RulesetPlan{}, false, true, selector); got.Status != statusSkip {
-		t.Errorf("plan-gated = %+v, want SKIP", got)
+	// Plan-gated + guard = PASS via the Actions guard.
+	if got := branchCheck(github.RulesetPlan{}, false, true, true, selector); got.Status != statusPass || !strings.Contains(got.Detail, "free-tier Actions guard") {
+		t.Errorf("plan-gated with guard = %+v, want PASS via guard", got)
+	}
+	// Plan-gated without the guard = FAIL with re-apply guidance.
+	if got := branchCheck(github.RulesetPlan{}, false, true, false, selector); got.Status != statusFail || !strings.Contains(got.Detail, "re-apply") {
+		t.Errorf("plan-gated without guard = %+v, want FAIL with guidance", got)
 	}
 	skipSel := steps.New([]string{"protect-main"}, nil)
-	if got := branchCheck(github.RulesetPlan{}, false, false, skipSel); got.Status != statusSkip {
+	if got := branchCheck(github.RulesetPlan{}, false, false, false, skipSel); got.Status != statusSkip {
 		t.Errorf("opted out = %+v, want SKIP", got)
 	}
 }

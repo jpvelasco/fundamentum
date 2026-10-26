@@ -1,0 +1,64 @@
+# Free-tier branch protection guard.
+# Branch protection is plan-gated on free private repositories (GitHub Free:
+# protected branches require GitHub Pro; the ruleset and classic-protection
+# APIs both return "Upgrade to GitHub Pro"). This workflow enforces the same
+# discipline via Actions instead: any commit landing on the default branch
+# without coming from a merged pull request is auto-reverted.
+#
+# Allowed pushes: squash/rebase/merge commits whose SHA matches a merged
+# PR's merge_commit_sha (checked via the API), and pushes by
+# github-actions[bot] (this guard's own reverts and repo automation).
+# Everything else — direct commits, history rewrites — is force-reverted to
+# the previous tip within seconds, with a red X on the offending commit.
+name: protect-main guard (free tier)
+
+on:
+  push:
+    branches: ["{{.DefaultBranch}}"]
+
+permissions:
+  contents: write  # the revert force-pushes the previous tip back
+
+concurrency:
+  group: protect-main-guard
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    # Skip the initial branch push (no previous tip to revert to) and the
+    # guard's own reverts / repo automation (github-actions[bot]).
+    if: >-
+      github.event.before != '0000000000000000000000000000000000000000' &&
+      github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Did this commit come from a merged pull request?
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.head_commit.id }}
+        run: |
+          set -euo pipefail
+          # A squash/rebase/merge commit is associated with its PR and the
+          # PR's merge_commit_sha matches the pushed SHA; a direct push
+          # matches neither.
+          # Fail open with a loud red X when the check itself errors — a
+          # transient API failure must not revert a legitimate merge.
+          pr_json="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/pulls")"
+          merged="$(jq -r --arg sha "${SHA}" \
+            '[.[] | select(.state == "merged" and .merge_commit_sha == $sha)] | length' <<<"${pr_json}")"
+          echo "merged=${merged}" >> "$GITHUB_OUTPUT"
+
+      - name: Revert the direct push
+        if: steps.check.outputs.merged == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          echo "::error::Direct push to ${{ github.ref_name }} is not a merged pull request — reverting to ${BEFORE}. Open a pull request instead (protect-main baseline)."
+          git init -q guard
+          cd guard
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin "${BEFORE}:${{ github.ref }}"
+          exit 1

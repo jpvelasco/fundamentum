@@ -265,7 +265,10 @@ func TestBuildItems(t *testing.T) {
 }
 
 func TestBuildItems_WithExistingRuleset(t *testing.T) {
-	c := &github.Client{}
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
 	items, err := buildItems(c, nil, "owner", "repo", "main", "public", nil, existsPlan(true), existsPlan(true), false, false, &github.BranchProtectionOptions{}, false, "")
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
@@ -565,7 +568,7 @@ func TestApplyItems_BranchProtectionFailureFailsRun(t *testing.T) {
 }
 
 func TestBranchProtectionItem_NilOpts(t *testing.T) {
-	item := branchProtectionItem(nil, "owner", "repo", "main", "public", existsPlan(true), false, false, nil, "")
+	item := branchProtectionItem(nil, "owner", "repo", "main", "public", existsPlan(true), false, false, nil, "", false)
 	if item.Action != wizard.ActionSkip {
 		t.Errorf("Action = %v, want skip", item.Action)
 	}
@@ -624,7 +627,7 @@ func assertDeferredRequiredChecks(t *testing.T, viaPR bool, refStatus int, failM
 				Action:  wizard.ActionCreate,
 				Content: []byte("me"),
 			},
-			branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, false, false, opts, ""),
+			branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, false, false, opts, "", false),
 		}
 		if err := applyItems(c, "owner", "repo", "main", items, viaPR, opts, io.Discard); err != nil {
 			t.Fatalf("applyItems() error: %v", err)
@@ -786,7 +789,7 @@ func TestBranchProtectionItem_FallbackOnlyOn403(t *testing.T) {
 					w.WriteHeader(http.StatusNoContent)
 				}
 			}), func(c *github.Client) {
-				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, "")
+				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, "", false)
 				err := item.Apply()
 				if tt.wantErr && err == nil {
 					t.Error("expected error, got nil")
@@ -1035,7 +1038,7 @@ func TestBranchProtectionItem_ClassicUpgradeApply(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}), func(c *github.Client) {
-		item := branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, true, false, &github.BranchProtectionOptions{}, "")
+		item := branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, true, false, &github.BranchProtectionOptions{}, "", false)
 		if item.Action != wizard.ActionUpgrade {
 			t.Fatalf("expected ActionUpgrade, got %v", item.Action)
 		}
@@ -1062,7 +1065,7 @@ func TestBranchProtectionItem_ClassicUpgradeError(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}), func(c *github.Client) {
-		item := branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, true, false, &github.BranchProtectionOptions{}, "")
+		item := branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, true, false, &github.BranchProtectionOptions{}, "", false)
 		if err := item.Apply(); err == nil {
 			t.Fatal("expected error when ruleset creation fails")
 		}
@@ -1452,4 +1455,80 @@ func TestRunWithClient_UnknownSkipKeyErrors(t *testing.T) {
 			t.Fatalf("valid token must not trigger the unknown-key error: %v", err)
 		}
 	}
+}
+
+func TestGuardShipped(t *testing.T) {
+	rendered := []templates.RenderedFile{{Path: github.FreeTierGuardPath}}
+	if !guardShipped(nil, "owner", "repo", rendered) {
+		t.Error("guard in the rendered set must force PR mode")
+	}
+	if guardShipped(nil, "owner", "repo", nil) {
+		t.Error("nil client with no rendered guard must not force PR mode")
+	}
+
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/contents/.github/workflows/protect-main-guard.yml"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"content":""}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	if !guardShipped(c, "owner", "repo", nil) {
+		t.Error("existing guard on the repo must force PR mode")
+	}
+}
+
+func TestBuildItems_PlanGatedWithGuardSkipsViaGuard(t *testing.T) {
+	// A free-tier private repo with the guard rendered: the branch-protection
+	// item points at the guard instead of planning an impossible ruleset.
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"}
+	rendered, err := templates.Render(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := buildItems(c, nil, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, true, &github.BranchProtectionOptions{}, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if strings.Contains(item.Name, "free-tier Actions guard") {
+			if item.Action != wizard.ActionSkip {
+				t.Errorf("guard item action = %v, want skip", item.Action)
+			}
+			if !strings.Contains(item.Detail, github.FreeTierGuardPath) {
+				t.Errorf("guard item detail must name the workflow: %q", item.Detail)
+			}
+			return
+		}
+	}
+	t.Fatal("expected the free-tier guard item in the plan")
+}
+
+func TestBuildItems_PlanGatedWithoutGuardKeepsManualPath(t *testing.T) {
+	// Plan-gated + the guard file skipped: keep the honest manual-message
+	// path (an operator who opts out of the guard gets the Settings pointer).
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	items, err := buildItems(c, nil, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, true, &github.BranchProtectionOptions{}, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if item.Name == "Branch protection (protect-main)" {
+			if item.Action != wizard.ActionCreate {
+				t.Errorf("without the guard, plan-gated protection stays create: %v", item.Action)
+			}
+			return
+		}
+	}
+	t.Fatal("expected the branch protection item")
 }
