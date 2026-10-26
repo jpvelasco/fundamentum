@@ -17,8 +17,10 @@ import (
 )
 
 // prMockHandler returns an http.HandlerFunc that mocks the full PR workflow:
-// CreatePRBranch (GET /branches/main, POST /git/refs),
-// UpsertFileOnBranch (GET /contents/*, PUT /contents/*),
+// CreatePRBranch (GET /branches/main, POST /git/refs), CommitFiles on the
+// harden branch for non-workflow files (GET /git/ref, GET /git/commits,
+// POST /git/blobs, /git/trees, /git/commits, PATCH /git/refs/heads),
+// per-file Contents upsert for workflow files (GET/PUT /contents),
 // CreatePullRequest (POST /pulls).
 func prMockHandler() http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -26,8 +28,24 @@ func prMockHandler() http.HandlerFunc {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main"):
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"commit":{"sha":"abc123"}}`))
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs"):
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs") && !strings.Contains(r.URL.Path, "/heads/"):
 			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/git/ref/heads/harden-"):
+			_, _ = w.Write([]byte(`{"object":{"sha":"abc123"}}`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/git/commits/"):
+			_, _ = w.Write([]byte(`{"tree":{"sha":"treesha"}}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/blobs"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha":"blobsha"}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/trees"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha":"newtree"}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/commits"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha":"newcommit"}`))
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/git/refs/heads/harden-"):
+			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{}`))
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
 			w.WriteHeader(http.StatusNotFound)
@@ -590,35 +608,25 @@ func assertDeferredRequiredChecks(t *testing.T, viaPR bool, refStatus int, failM
 	t.Helper()
 	var rulesetBody map[string]any
 	opts := &github.BranchProtectionOptions{}
+	// rulesetsCapture answers the ruleset probes and captures the created
+	// body; prMockHandler (combined after) answers the PR flow.
+	rulesetsCapture := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/rulesets"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/rulesets"):
+			_ = json.NewDecoder(r.Body).Decode(&rulesetBody)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":1}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
 	handler := combineHandlers(
 		gitBatchHandler(refStatus),
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/rulesets"):
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`[]`))
-			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/rulesets"):
-				_ = json.NewDecoder(r.Body).Decode(&rulesetBody)
-				w.WriteHeader(http.StatusCreated)
-				_, _ = w.Write([]byte(`{"id":1}`))
-			case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main"):
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`{"commit":{"sha":"abc123"}}`))
-			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs"):
-				w.WriteHeader(http.StatusCreated)
-				_, _ = w.Write([]byte(`{}`))
-			case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
-				w.WriteHeader(http.StatusNotFound)
-			case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/contents/"):
-				w.WriteHeader(http.StatusCreated)
-				_, _ = w.Write([]byte(`{"content":{"sha":"x"}}`))
-			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/pulls"):
-				w.WriteHeader(http.StatusCreated)
-				_, _ = w.Write([]byte(`{"number":1}`))
-			default:
-				w.WriteHeader(http.StatusNotFound)
-			}
-		}),
+		rulesetsCapture,
+		prMockHandler(),
 	)
 	testWithServer(t, handler, func(c *github.Client) {
 		items := []wizard.Item{
@@ -1131,30 +1139,21 @@ func TestApplyItems_PerFileFallbackSucceeds(t *testing.T) {
 }
 
 func TestApplyItems_ViaPRNoWrittenFiles(t *testing.T) {
-	items := newFileItems(
-		[]string{"README.md"},
-		[][]byte{[]byte("hello")},
-		[]func() error{func() error { return nil }},
-	)
+	// Planning excludes content-identical files (FileStatusDetail reports
+	// "skip"), so when every file item is a skip, PR mode must not touch
+	// GitHub at all — no branch, no Contents calls, no PR.
+	items := []wizard.Item{
+		{
+			Name:    "README.md",
+			Action:  wizard.ActionSkip,
+			Content: []byte("hello"),
+		},
+	}
 	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/"):
-			_, _ = w.Write([]byte(`{"commit":{"sha":"abc"}}`))
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
-			_, _ = w.Write([]byte(`{"content":"aGVsbG8=","sha":"x"}`))
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs"):
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{}`))
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/pulls"):
-			t.Error("must not open a PR when every file is skipped")
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"number":1}`))
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
+		t.Errorf("must not call GitHub when every file is skipped: %s %s", r.Method, r.URL.Path)
 	}), func(c *github.Client) {
 		if err := applyItems(c, "owner", "repo", "main", items, true, nil, io.Discard); err != nil {
-			t.Errorf("expected no error when PR has no file changes, got: %v", err)
+			t.Errorf("expected no error when every file is skipped, got: %v", err)
 		}
 	}, nil)
 }
@@ -1318,7 +1317,8 @@ func TestApplyItems_PerFile409SwitchesToPR(t *testing.T) {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
 			w.WriteHeader(http.StatusNotFound)
 		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/contents/b.txt"):
-			// The default-branch PUT 409s (protection); the PR-branch retry succeeds.
+			// The default-branch PUT 409s (protection); the PR fallback
+			// then carries b.txt through the git data batch instead.
 			bPuts++
 			if bPuts == 1 {
 				w.WriteHeader(http.StatusConflict)
@@ -1333,8 +1333,9 @@ func TestApplyItems_PerFile409SwitchesToPR(t *testing.T) {
 		}
 	})
 	pr := prMockHandler()
-	// The PR flow needs GET /branches/main + POST /git/refs + POST /pulls —
-	// prMockHandler handles those; route unmatched calls to it.
+	// The PR flow needs GET /branches/main + POST /git/refs + the git data
+	// batch on the harden branch + POST /pulls — prMockHandler handles
+	// those; route unmatched calls to it.
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		perFileRec := httptest.NewRecorder()
 		perFile(perFileRec, r)

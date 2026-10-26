@@ -16,6 +16,16 @@ func contentsPath(owner, repo, path string) string {
 		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(path))
 }
 
+// IsWorkflowPath reports whether path targets a GitHub Actions workflow
+// file. GitHub gates writes to these paths behind the `workflow` token
+// scope: with a repo-scoped token the Contents API PUT returns 404 — on
+// workflow creates just like on updates — and the git data API refuses
+// to create a tree containing such a path the same way. Both refusals
+// are classified ErrWorkflowLocked so callers can skip with a warning.
+func IsWorkflowPath(path string) bool {
+	return strings.HasPrefix(path, ".github/workflows/")
+}
+
 // AnyFileExists checks whether any of the given paths exists in the repo.
 // Use this to detect case-variant or path-variant duplicates before writing.
 // Only 404 counts as "missing" — any other non-200 status (401/403/500) is
@@ -146,5 +156,5 @@ func (c *Client) upsertFile(owner, repo, branch, path string, content []byte) (s
 	}
 
 	// PUT doesn't support ?ref= — always target the root Contents path.
-	return c.putFileContents(contentsPath(owner, repo, path), body, wasUpdate, describe)
+	return c.putFileContents(contentsPath(owner, repo, path), body, wasUpdate, IsWorkflowPath(path), describe)
 }

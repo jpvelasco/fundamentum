@@ -332,19 +332,24 @@ func upsertBody(path string, content []byte, sha string, wasUpdate bool) map[str
 
 // putFileContents PUTs body to putPath and interprets the result as an
 // upsert outcome ("created"/"updated"/"skipped"), given wasUpdate (whether
-// the caller determined this is an update rather than a create) and a
-// describe function for error messages (e.g. "upsert file %s" or
-// "upsert file %s on %s").
-func (c *Client) putFileContents(putPath string, body map[string]any, wasUpdate bool, describe func() string) (string, error) {
+// the caller determined this is an update rather than a create), isWorkflow
+// (whether the target is a .github/workflows path), and a describe function
+// for error messages (e.g. "upsert file %s" or "upsert file %s on %s").
+func (c *Client) putFileContents(putPath string, body map[string]any, wasUpdate, isWorkflow bool, describe func() string) (string, error) {
 	putResp, err := c.do(http.MethodPut, putPath, body)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", describe(), err)
 	}
 	defer func() { _ = putResp.Body.Close() }()
 
-	// GitHub Actions locks workflow files — PUT returns 404 when trying to
-	// overwrite an existing workflow via the Contents API.
-	if putResp.StatusCode == http.StatusNotFound && wasUpdate {
+	// GitHub refuses workflow-file writes through the Contents API when
+	// the token lacks the workflow scope (PUT 404) — on creates as well
+	// as updates, and regardless of the Actions lock that guards some
+	// existing workflows. A 404 on a workflow path therefore means
+	// "this token cannot write this file", which callers treat as a
+	// skip with a warning, not a hard failure. Non-workflow 404s on
+	// updates keep the legacy Actions-lock meaning.
+	if putResp.StatusCode == http.StatusNotFound && (wasUpdate || isWorkflow) {
 		return "skipped", fmt.Errorf("%s: %w", describe(), ErrWorkflowLocked)
 	}
 	if err := expectStatus(describe(), putResp, http.StatusCreated, http.StatusOK); err != nil {

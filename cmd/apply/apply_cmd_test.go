@@ -717,9 +717,29 @@ func newRunFlowServer() *httptest.Server {
 			// (ordered AFTER the protection probe — the probe's longer path
 			// must match first).
 			_, _ = w.Write([]byte(`{"commit":{"sha":"abc123"}}`))
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs"):
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs") && !strings.Contains(r.URL.Path, "/heads/"):
 			// PR-mode flow: CreatePRBranch creates the harden branch.
 			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/git/ref/heads/harden-"):
+			// PR-mode flow: CommitFiles reads the harden branch head.
+			_, _ = w.Write([]byte(`{"object":{"sha":"abc123"}}`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/git/commits/"):
+			// PR-mode flow: CommitFiles reads the base commit's tree.
+			_, _ = w.Write([]byte(`{"tree":{"sha":"treesha"}}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/blobs"):
+			// PR-mode flow: CommitFiles uploads blobs for non-workflow files.
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha":"blobsha"}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/trees"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha":"newtree"}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/commits"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha":"newcommit"}`))
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/git/refs/heads/harden-"):
+			// PR-mode flow: CommitFiles fast-forwards the harden branch.
+			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{}`))
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/pulls"):
 			// PR-mode flow: the batch PR is opened.
@@ -852,9 +872,22 @@ func TestRunWithClient_InteractiveViaPR(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main"):
 			_, _ = w.Write([]byte(`{"commit":{"sha":"abc123"}}`))
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs"):
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs") && !strings.Contains(r.URL.Path, "/heads/"):
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/git/ref/heads/harden-"):
+			_, _ = w.Write([]byte(`{"object":{"sha":"abc123"}}`))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/git/commits/"):
+			_, _ = w.Write([]byte(`{"tree":{"sha":"treesha"}}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/blobs"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha":"blobsha"}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/trees"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha":"newtree"}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/commits"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha":"newcommit"}`))
 		case r.Method == http.MethodPut:
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{}`))
