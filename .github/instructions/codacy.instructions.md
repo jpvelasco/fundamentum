@@ -66,3 +66,14 @@ Before any Codacy step, check whether Codacy MCP tools (for example
 - Offer to run `codacy_setup_repository` (only when Codacy MCP is available),
   and only with the user's consent. Do not run it unprompted.
 - After setup, retry the failed action once.
+
+## Optional: Codacy's official Agent Skills
+
+Codacy publishes a skill pack (https://github.com/codacy/codacy-skills) that
+teaches coding agents to drive Codacy through its cloud CLI — querying issues
+and coverage, enriching code reviews, and tuning repository configuration
+(tools and patterns). Installing it is optional maintainer tooling, not part
+of this repository's rules: follow that README's instructions for the
+specific agent (Claude, Codex, Copilot, Gemini, or any harness supporting the
+Agent Skills standard, agentskills.io). The rules in this file apply with or
+without the pack installed.
