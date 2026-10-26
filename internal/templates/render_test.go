@@ -835,8 +835,26 @@ func TestRenderFreeTierGuard(t *testing.T) {
 			if !strings.Contains(f.Content, "merge_commit_sha") {
 				t.Error("guard must verify merged-PR association via the API")
 			}
-			if !strings.Contains(f.Content, "--force") {
-				t.Error("guard must force-revert direct pushes")
+			// REST list payloads only carry state open|closed; the
+			// association must be matched on merge_commit_sha (found live:
+			// the .state == "merged" filter was vacuous, every push looked
+			// like a direct push).
+			if strings.Contains(f.Content, `.state == "merged"`) {
+				t.Error("guard must not filter on .state == \"merged\" — REST list payloads only carry open|closed; the filter never matches")
+			}
+			// The commit→PR association is eventually consistent (found
+			// live: empty seconds after a legitimate squash merge).
+			if !strings.Contains(f.Content, "GRACE=90") {
+				t.Error("guard must poll the association through a grace window — the commit→PR association is eventually consistent")
+			}
+			// A local git push cannot revert: a fresh git init has no
+			// objects and pushes a SHA it never fetched ("bad object",
+			// found live). The revert must be the API ref update.
+			if !strings.Contains(f.Content, "git/refs/heads") {
+				t.Error("guard must revert via the API ref update — the git init + push revert never worked")
+			}
+			if !strings.Contains(f.Content, "failing open") {
+				t.Error("guard must fail open with a loud signal when the check itself errors")
 			}
 			if !strings.Contains(f.Content, "pull-requests: read") {
 				t.Error("guard must grant pull-requests: read — the merged-PR check calls commits/{sha}/pulls, which 403s without it (found live: a shipped guard red-Xed every push and never reverted)")

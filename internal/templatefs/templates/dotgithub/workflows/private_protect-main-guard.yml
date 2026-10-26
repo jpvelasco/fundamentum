@@ -9,7 +9,10 @@
 # PR's merge_commit_sha (checked via the API), and pushes by
 # github-actions[bot] (this guard's own reverts and repo automation).
 # Everything else — direct commits, history rewrites — is force-reverted to
-# the previous tip within seconds, with a red X on the offending commit.
+# the previous tip, with a red X on the offending commit. The revert happens
+# after the association-grace window (about 90 seconds), because the
+# commit→PR association is eventually consistent: a run seconds after a
+# legitimate merge can see an empty list and must not revert it.
 name: protect-main guard (free tier)
 
 on:
@@ -17,7 +20,7 @@ on:
     branches: ["{{.DefaultBranch}}"]
 
 permissions:
-  contents: write  # the revert force-pushes the previous tip back
+  contents: write  # the revert force-updates the branch ref via the API
   pull-requests: read  # the merged-PR check reads the commit's PRs; without
                        # this the default GITHUB_TOKEN gets 403 "Resource not
                        # accessible by integration" and the guard can only
@@ -44,26 +47,55 @@ jobs:
           SHA: ${{ github.event.head_commit.id }}
         run: |
           set -euo pipefail
-          # A squash/rebase/merge commit is associated with its PR and the
-          # PR's merge_commit_sha matches the pushed SHA; a direct push
-          # matches neither.
-          # Fail open with a loud red X when the check itself errors — a
-          # transient API failure must not revert a legitimate merge.
-          pr_json="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/pulls")"
-          merged="$(jq -r --arg sha "${SHA}" \
-            '[.[] | select(.state == "merged" and .merge_commit_sha == $sha)] | length' <<<"${pr_json}")"
-          echo "merged=${merged}" >> "$GITHUB_OUTPUT"
+          # A squash/rebase/merge commit's PR carries merge_commit_sha equal
+          # to the pushed SHA; a direct push matches no PR. REST list
+          # payloads only ever carry state open|closed (never "merged") —
+          # match on merge_commit_sha, which is null until the PR merges.
+          check_association() {
+            pr_json="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/pulls" 2>/dev/null)" || return 2
+            matched="$(jq -r --arg sha "${SHA}" \
+              '[.[]? | select(.merge_commit_sha == $sha)] | length' <<<"${pr_json}")"
+            [ "${matched}" != "0" ]
+          }
+          # The commit→PR association is eventually consistent — poll for
+          # GRACE seconds before concluding "direct push".
+          GRACE=90
+          deadline=$((SECONDS + GRACE))
+          while [ "${SECONDS}" -lt "${deadline}" ]; do
+            if check_association; then
+              echo "merged=1" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 5
+          done
+          # The final check decides: found → a merged pull request; not
+          # found → a direct push; an API error fails open with a red X —
+          # a failed check must never revert a legitimate merge.
+          if check_association; then
+            echo "merged=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          else
+            rc=$?
+            if [ "${rc}" -eq 2 ]; then
+              echo "merged=1" >> "$GITHUB_OUTPUT"
+              echo "::error::Merged-PR check failed (API error) — failing open, not reverting."
+              exit 1
+            fi
+          fi
+          echo "merged=0" >> "$GITHUB_OUTPUT"
 
       - name: Revert the direct push
         if: steps.check.outputs.merged == '0'
         env:
           GH_TOKEN: ${{ github.token }}
           BEFORE: ${{ github.event.before }}
+          BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          echo "::error::Direct push to ${{ github.ref_name }} is not a merged pull request — reverting to ${BEFORE}. Open a pull request instead (protect-main baseline)."
-          git init -q guard
-          cd guard
-          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push --force origin "${BEFORE}:${{ github.ref }}"
+          echo "::error::Direct push to ${BRANCH} is not a merged pull request — reverting to ${BEFORE}. Open a pull request instead (protect-main baseline)."
+          # Update the ref server-side. A local git push cannot work here:
+          # a fresh git init has no objects and cannot push a SHA it never
+          # fetched ("bad object"). The API ref update needs only the
+          # contents:write permission this workflow already holds.
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/heads/${BRANCH}" -f sha="${BEFORE}" -F force=true > /dev/null
           exit 1
