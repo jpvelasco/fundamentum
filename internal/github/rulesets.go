@@ -416,8 +416,16 @@ func prRuleParams(opts BranchProtectionOptions) map[string]any {
 }
 
 // strictestPRRule merges a live pull_request rule with the intended one,
-// keeping the stricter value for every parameter. A live rule that is
+// keeping the stricter value for every owned parameter. A live rule that is
 // already stricter than the baseline survives a reconcile unchanged.
+//
+// Fidelity rule: parameters the merge does NOT own — hand-tuned keys like
+// allowed_merge_methods, require_extra_approval_for_unattributed_changes,
+// or required_reviewers — are passed through untouched, exactly like an
+// existing required check keeps its integration_id. Rebuilding the params
+// map from the baseline five alone silently strips a hand-tuned repo's
+// merge posture (found on fabrica: allowed_merge_methods ["squash"] and
+// extra-approval were dropped by an earlier version).
 func strictestPRRule(live map[string]any, opts BranchProtectionOptions) map[string]any {
 	intended := prRuleParams(opts)
 	if live == nil {
@@ -427,22 +435,35 @@ func strictestPRRule(live map[string]any, opts BranchProtectionOptions) map[stri
 	if params == nil {
 		params = map[string]any{}
 	}
-	// Never weaken: keep the live (possibly higher) approval requirement
-	// and any live boolean already stricter than the intended value.
-	if n := mapInt(params, "required_approving_review_count"); n > 0 {
-		intended["required_approving_review_count"] = n
+
+	// Copy every live parameter first — owned keys are re-merged below with
+	// baseline-or-stricter semantics; everything else passes through.
+	merged := make(map[string]any, len(params)+len(intended))
+	for k, v := range params {
+		merged[k] = v
 	}
-	for _, flag := range []string{
-		"require_last_push_approval",
-		"dismiss_stale_reviews_on_push",
-		"require_code_owner_review",
-		"required_review_thread_resolution",
-	} {
-		if mapBool(params, flag) {
-			intended[flag] = true
+	for k, v := range intended {
+		// Owned booleans: stricter of live and intent. (The copy already
+		// holds the live value; OR in the intent.)
+		if b, isBool := v.(bool); isBool {
+			if b || mapBool(params, k) {
+				merged[k] = true
+			} else {
+				merged[k] = false
+			}
+			continue
 		}
+		// Owned count: the live value already sits in the copy, and the
+		// baseline count is 0, so the copy is the max — nothing to do.
+		if k == "required_approving_review_count" {
+			if _, present := merged[k]; !present {
+				merged[k] = v
+			}
+			continue
+		}
+		merged[k] = v
 	}
-	return intended
+	return merged
 }
 
 // statusChecksRule builds the required_status_checks rule. On the create path

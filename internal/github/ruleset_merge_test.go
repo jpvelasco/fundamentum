@@ -535,3 +535,83 @@ func TestInferSoloHybridRule(t *testing.T) {
 		}
 	}
 }
+
+// TestStrictestPRRule_PreservesLiveParams pins the fabrica case: a
+// hand-tuned live pull_request rule carries params beyond the baseline five
+// (allowed_merge_methods, require_extra_approval_for_unattributed_changes,
+// required_reviewers). A reconcile must pass them through untouched — the
+// same fidelity rule that keeps existing checks' integration_id.
+func TestStrictestPRRule_PreservesLiveParams(t *testing.T) {
+	live := &Ruleset{
+		Enforcement: "active",
+		Conditions:  map[string]any{"ref_name": map[string]any{"include": []any{"~DEFAULT_BRANCH"}}},
+		Rules: []map[string]any{
+			{"type": "pull_request", "parameters": map[string]any{
+				"allowed_merge_methods":                                []any{"squash"},
+				"require_extra_approval_for_unattributed_changes":      true,
+				"required_reviewers":                                   []any{"jpvelasco"},
+				"dismiss_stale_reviews_on_push":                        false,
+				"require_code_owner_review":                            false,
+				"require_last_push_approval":                           false,
+				"required_review_thread_resolution":                    false,
+			}},
+		},
+	}
+	got := strictestPRRule(ruleByType(live, "pull_request"), BranchProtectionOptions{Solo: true})
+
+	if methods, ok := got["allowed_merge_methods"].([]any); !ok || len(methods) != 1 || methods[0] != "squash" {
+		t.Errorf("allowed_merge_methods must survive the merge, got %v", got["allowed_merge_methods"])
+	}
+	if !mapBool(got, "require_extra_approval_for_unattributed_changes") {
+		t.Error("require_extra_approval_for_unattributed_changes must survive the merge")
+	}
+	if reviewers, ok := got["required_reviewers"].([]any); !ok || len(reviewers) != 1 || reviewers[0] != "jpvelasco" {
+		t.Errorf("required_reviewers must survive the merge, got %v", got["required_reviewers"])
+	}
+	// Owned keys still get baseline-or-stricter treatment: thread resolution
+	// was off (weaker than baseline true) and must be raised.
+	if !mapBool(got, "required_review_thread_resolution") {
+		t.Error("thread resolution must be raised to the baseline true")
+	}
+	// The owned solo keys keep their intent.
+	if mapBool(got, "dismiss_stale_reviews_on_push") {
+		t.Error("solo intent keeps dismiss_stale off")
+	}
+}
+
+// TestMergeBranchRulesetBody_PreservesLivePRParams runs the full body merge
+// against a fabrica-shaped live ruleset and asserts the pass-through end to end.
+func TestMergeBranchRulesetBody_PreservesLivePRParams(t *testing.T) {
+	live := &Ruleset{
+		ID:          42,
+		Name:        "protect-main",
+		Target:      "branch",
+		Enforcement: "active",
+		Conditions:  map[string]any{"ref_name": map[string]any{"include": []any{"~DEFAULT_BRANCH"}}},
+		Rules: []map[string]any{
+			{"type": "deletion"},
+			{"type": "pull_request", "parameters": map[string]any{
+				"allowed_merge_methods":                                []any{"squash"},
+				"require_extra_approval_for_unattributed_changes":      true,
+				"required_approving_review_count":                      float64(1),
+				"required_review_thread_resolution":                    false,
+			}},
+		},
+	}
+	body := mergeBranchRulesetBody(live, []string{"Lint"}, BranchProtectionOptions{Solo: true})
+	pr := ruleFromBody(body, "pull_request")
+	params, _ := pr["parameters"].(map[string]any)
+
+	if methods, ok := params["allowed_merge_methods"].([]any); !ok || len(methods) != 1 || methods[0] != "squash" {
+		t.Errorf("allowed_merge_methods lost in full merge: %v", params["allowed_merge_methods"])
+	}
+	if !mapBool(params, "require_extra_approval_for_unattributed_changes") {
+		t.Error("require_extra_approval_for_unattributed_changes lost in full merge")
+	}
+	if got := mapInt(params, "required_approving_review_count"); got != 1 {
+		t.Errorf("live approving count must survive, got %d", got)
+	}
+	if !mapBool(params, "required_review_thread_resolution") {
+		t.Error("weaker live thread resolution must be raised to baseline")
+	}
+}
