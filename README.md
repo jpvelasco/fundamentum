@@ -74,6 +74,22 @@ Files land as **one commit** (the default) — no more one-commit-per-file histo
 
 Everything is **idempotent** — re-running is safe and fast.
 
+## Bot-managed repos (`--bot-managed`)
+
+`--bot-managed` is an opt-in profile for repos where **automation opens the pull requests** (a dependency updater, a release bot, a codegen pipeline). Those repos need a tighter posture than a human-driven one, because the thing opening PRs is itself software holding a token. Pass the flag (or set `bot_managed: true` in a baseline) to harden for it:
+
+- **Settings:** squash-merge only (merge commits and rebase merges off), auto-delete merged branches.
+- **Actions default token:** the default `GITHUB_TOKEN` is locked to **read-only** and **cannot approve pull requests** (`actions/permissions/workflow`), so a compromised workflow can't write to the repo or self-approve an automation PR. The step always prints the before/after.
+- **Branch ruleset:** solo-shaped PR params plus `allowed_merge_methods: ["squash"]`; shipped checks are pinned to the GitHub Actions app; no standing bypass actors (the reconcile sends an explicit empty list and prints any it removes).
+- **Templates:** no `workflow_run` or `pull_request_target` triggers, no third-party review workflow (`--octopus` is refused), and private repos drop octocov's `pull-requests: write`. `codeql.yml` stays — its `security-events: write` on the analyze job is the one write scope the profile accepts, because CodeQL cannot report without it.
+- **External policy checks:** a baseline can require external review checks via `bot_policy_checks` (`[{context, integration_id}]`). The `integration_id` is **required** — a check is never required without pinning which app must post it, so a same-named check from another app can't satisfy it.
+- **Keep list:** a baseline `keep` list names shipped files apply must never overwrite, so a hand-tuned workflow survives a re-apply.
+- **Audit:** `audit --bot-managed` reports (never deletes) the Actions token posture, repo secret count, environment branch policies, a workflow scan (privileged triggers, local `./` actions, write scopes outside a default-branch-only environment), and leftover workflows the profile wouldn't ship.
+
+Two guardrails apply: the run **refuses a bot or app token** (it must be driven by a human operator, not the automation it's about to restrict), and it **refuses `--octopus`**.
+
+> **Scope:** the profile hardens repository **settings and shipped templates**. It does **not** vet the code that automation writes — a bot-managed repo still needs review of what its bots merge, exactly as any repo does.
+
 ## Flags
 
 | Flag                | Description                                      |
@@ -93,6 +109,7 @@ Everything is **idempotent** — re-running is safe and fast.
 | `--from`            | Load a portable JSON baseline from `export` (explicit flags win, including `--flag=false`) |
 | `--octopus`         | Opt in to the third-party Octopus Review workflow (public repos; shares PR diffs with octopus-review.ai) |
 | `--codacy-instructions` | Opt in to `.github/instructions/codacy.instructions.md` (Codacy MCP rules for AI agents) |
+| `--bot-managed`      | Opt in to the bot-managed profile: harden repos whose PRs are opened by automation (squash-only merges, read-only default Actions token, no privileged workflow triggers, pinned required checks) |
 | `--branch-up-to-date` | `protect-main`: require branches up to date before merging (default true; unset keeps the live policy on reconcile) |
 | `--version`         | Print version and exit                           |
 

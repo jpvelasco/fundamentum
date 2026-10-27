@@ -37,6 +37,8 @@ func resetAuditGlobals(t *testing.T) {
 		globals.AdvancedSecurity = false
 		globals.Preset = ""
 		globals.FromFile = ""
+		globals.BotManaged = false
+		globals.PolicyChecks = nil
 	})
 }
 
@@ -642,5 +644,124 @@ func TestAudit_UnknownSkipKeyErrors(t *testing.T) {
 	err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "unknown --skip/--only key(s): octopus.yml") {
 		t.Fatalf("a token that matches nothing must error, got: %v", err)
+	}
+}
+
+// botManagedProbe is the configurable payload set for the bot-managed audit
+// probe endpoints, so the compliant and gaps handlers share one router.
+type botManagedProbe struct {
+	perms   string
+	countBlob   string
+	envs         string
+	envDetail    string
+	workflowList string
+	workflowFile string // path → served for the single workflow file, empty for none
+	workflowBody string // base64 content for workflowFile
+}
+
+// botManagedHandler routes the bot-managed audit probe endpoints from p.
+func botManagedHandler(p botManagedProbe) http.HandlerFunc {
+	write := func(w http.ResponseWriter, body string) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(body))
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/actions/permissions/workflow"):
+			write(w, p.perms)
+		case strings.Contains(r.URL.Path, "/actions/secrets"):
+			write(w, p.countBlob)
+		case r.URL.Path == "/repos/owner/repo/environments":
+			write(w, p.envs)
+		case strings.Contains(r.URL.Path, "/environments/"):
+			write(w, p.envDetail)
+		case p.workflowFile != "" && strings.Contains(r.URL.Path, "/contents/"+p.workflowFile):
+			write(w, `{"content":"`+p.workflowBody+`"}`)
+		case strings.Contains(r.URL.Path, "/contents/.github/workflows"):
+			write(w, p.workflowList)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+}
+
+// compliantBotManagedProbe is a fully-hardened repo: read-only token, no
+// secrets, one default-branch-only environment, no workflows.
+var compliantBotManagedProbe = botManagedProbe{
+	perms:   `{"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}`,
+	countBlob:  `{"total_count":0,"secrets":[]}`,
+	envs:         `{"environments":[{"name":"codacy"}]}`,
+	envDetail:    `{"protection_rules":[{"type":"branch_policy","branch_name_pattern_policy":[{"name":"main"}]}]}`,
+	workflowList: `[]`,
+}
+
+// gapBotManagedProbe is an unhardened repo: writable self-approving token,
+// four secrets, no environments, one pull_request_target workflow.
+var gapBotManagedProbe = botManagedProbe{
+	perms:   `{"default_workflow_permissions":"write","can_approve_pull_request_reviews":true}`,
+	countBlob:  `{"total_count":4,"secrets":[]}`,
+	envs:         `{"environments":[]}`,
+	workflowList: `[{"type":"file","path":".github/workflows/bad.yml"}]`,
+	workflowFile: ".github/workflows/bad.yml",
+	// base64 of "on:\n  pull_request_target:\n"
+	workflowBody: "b246CiAgcHVsbF9yZXF1ZXN0X3RhcmdldDoK",
+}
+
+func TestBotManagedChecks_Compliant(t *testing.T) {
+	srv := httptest.NewServer(botManagedHandler(compliantBotManagedProbe))
+	defer srv.Close()
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+	results := botManagedChecks(c, "owner", "repo", "main")
+	byName := map[string]check{}
+	for _, r := range results {
+		byName[r.Name] = r
+	}
+	if byName["actions default token"].Status != statusPass {
+		t.Errorf("compliant actions token must PASS: %+v", byName["actions default token"])
+	}
+	if byName["repo secrets"].Status != statusPass {
+		t.Errorf("zero secrets must PASS: %+v", byName["repo secrets"])
+	}
+	if byName["environment codacy"].Status != statusPass {
+		t.Errorf("default-branch-only env must PASS: %+v", byName["environment codacy"])
+	}
+	if byName["workflow scan"].Status != statusPass {
+		t.Errorf("clean workflow scan must PASS: %+v", byName["workflow scan"])
+	}
+}
+
+func TestBotManagedChecks_Gaps(t *testing.T) {
+	srv := httptest.NewServer(botManagedHandler(gapBotManagedProbe))
+	defer srv.Close()
+	c := github.NewClient("t", false).WithBaseURL(srv.URL)
+	results := botManagedChecks(c, "owner", "repo", "main")
+	byName := map[string]check{}
+	for _, r := range results {
+		byName[r.Name] = r
+	}
+	if byName["actions default token"].Status != statusWarn {
+		t.Errorf("write+approve token must WARN: %+v", byName["actions default token"])
+	}
+	if byName["repo secrets"].Status != statusWarn {
+		t.Errorf("4 secrets must WARN: %+v", byName["repo secrets"])
+	}
+	if byName["environments"].Status != statusSkip {
+		t.Errorf("no environments must SKIP: %+v", byName["environments"])
+	}
+	// The pull_request_target workflow must surface as a WARN finding.
+	found := false
+	for _, r := range results {
+		if r.Name == "workflow .github/workflows/bad.yml" && r.Status == statusWarn {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("pull_request_target workflow must WARN: %+v", results)
+	}
+	// Report-only: nothing in the bot-managed section FAILs the run.
+	for _, r := range results {
+		if r.Status == statusFail {
+			t.Errorf("bot-managed audit is report-only; %q must not FAIL", r.Name)
+		}
 	}
 }
