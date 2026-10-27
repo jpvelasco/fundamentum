@@ -112,17 +112,15 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 
 	selector := steps.New(globals.SkipTokens(), globals.OnlySteps)
 
+	if err := apply.ValidateBotManagedFlags(); err != nil {
+		return err
+	}
 	opts := github.BranchProtectionOptions{
 		SkipCodeOwners:  strings.EqualFold(info.OwnerType, "Organization"),
 		StrictChecks:    globals.BranchUpToDate,
 		StrictChecksSet: globals.BranchUpToDateSet,
 		BotManaged:      globals.BotManaged,
 		PolicyChecks:    globals.PolicyChecks,
-	}
-	if globals.BotManaged {
-		if err := github.ValidatePolicyChecks(globals.PolicyChecks); err != nil {
-			return err
-		}
 	}
 	m, err := templates.DetectManifests(func(path string) (bool, error) {
 		return client.AnyFileExists(owner, repo, []string{path})

@@ -265,7 +265,7 @@ func PlanNewRepo(owner, repo, visibility string, stdout io.Writer) error {
 	}
 	// init --dry-run has no client for the token guardrail, but the flag
 	// guardrails (--octopus, unpinned policy checks) still apply.
-	if err := validateBotManagedFlags(); err != nil {
+	if err := ValidateBotManagedFlags(); err != nil {
 		return err
 	}
 	pack, err := resolveCIPack(nil, owner, repo)
@@ -691,11 +691,11 @@ func loadFlags() error {
 	return globals.ApplyPreset(globals.Preset)
 }
 
-// validateBotManagedFlags enforces the profile's flag-only guardrails (no
+// ValidateBotManagedFlags enforces the profile's flag-only guardrails (no
 // client needed): --octopus is refused outright, and every policy check must
-// pin its app. init --dry-run runs this too (it has no client for the token
-// check).
-func validateBotManagedFlags() error {
+// pin its app. apply, audit, and init --dry-run all run this (the latter two
+// have no client for the token guardrail).
+func ValidateBotManagedFlags() error {
 	if !globals.BotManaged {
 		return nil
 	}
@@ -710,7 +710,7 @@ func validateBotManagedFlags() error {
 // token must belong to a human, not a bot or app — the profile's guardrails
 // assume a human operator is hardening the automation's repo.
 func validateBotManaged(client *github.Client) error {
-	if err := validateBotManagedFlags(); err != nil {
+	if err := ValidateBotManagedFlags(); err != nil {
 		return err
 	}
 	if !globals.BotManaged {
