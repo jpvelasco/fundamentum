@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Coverage uploads no longer run in privileged contexts reachable by PRs.** Two related defaults are tightened for every hardened repo:
+  - **Codacy coverage moved out of the privileged `workflow_run` forwarder into a push-only CI job.** The `codacy-coverage.yml` `workflow_run` workflow consumed a test-job artifact in a privileged context. It is deleted; the Codacy upload now runs as a `codacy-upload` job inside `ci.yml` that runs only on the default-branch push (`needs: test`) and reads `CODACY_REPOSITORY_API_TOKEN` from a `codacy` **environment** restricted to the default branch instead of a repository secret, so a pull request can never reach the token. `GITHUB_SETTINGS.md` now walks through creating that environment and secret.
+  - **`id-token: write` moved out of the test job.** The Codecov OIDC grant now lives on a separate push-only `coverage-upload` job (`needs: test`); the test job — which runs untrusted PR code — no longer holds an OIDC token. Per-OS coverage and Test Analytics still upload, only on the trusted default-branch push. PR coverage diffs are still computed by Codecov against the base report.
+- **`protect-version-tags` gains a creation rule.** Only bypass actors (the repository admin role) can create matching `v*` tags, so a leaked write token cannot push a malicious version tag that a release workflow would then build and publish. Repository admins keep the ability via a `RepositoryRole` bypass actor.
+- **Octopus Review template runs on `pull_request`, not `pull_request_target`.** The opt-in workflow no longer requests the privileged `pull_request_target` trigger; `pull-requests: write` is scoped to the review job only and the header documents the remaining risk of running third-party code with a PR-write token.
+
+### Changed
+
+- **Shipped required checks are pinned to the GitHub Actions app.** When Fundamentum adds one of its own shipped CI checks (Lint, Test, gosec, Trivy, …) to `protect-main`, it now sets that check's `integration_id` to the GitHub Actions app (id `15368`, overridable via `github.GitHubActionsAppID`), so only a real GitHub Actions check run with that exact name can satisfy it — a third-party app posting an identically-named green check cannot. Checks Fundamentum did not ship (custom `--require-checks`) are never pinned, and checks already present on a repo keep their existing `integration_id` untouched.
+
 ## [0.4.3] - 2026-10-26
 
 **Patch release.** The free-tier guard's first real run exposed the rest of its latent defect stack: a detection filter that could never match a legitimate merge, an association check that races GitHub's eventual consistency, and a revert step that could never have worked. Together they cancelled into a loud no-op — every push red-Xed, nothing was ever reverted — but each defect individually is serious, and fixing detection without the revert would have made the guard revert legitimate merges.

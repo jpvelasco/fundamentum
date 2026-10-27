@@ -389,7 +389,6 @@ func TestRenderVisibilityFiltering(t *testing.T) {
 				".github/codeql/codeql-config.yml",
 				"socket.yml",
 				".codacy.yml",
-				".github/workflows/codacy-coverage.yml",
 			},
 			// Octopus Review and the Codacy agent instructions are OPT-IN
 			// (--octopus / --codacy-instructions) — they never ship by default.
@@ -407,14 +406,13 @@ func TestRenderVisibilityFiltering(t *testing.T) {
 				".github/workflows/octocov.yml",
 				"socket.yml",
 			},
-			// Codacy's free (Open Source) plan is public-only; its three files
+			// Codacy's free (Open Source) plan is public-only; its files
 			// must not ship to private repos.
 			excludeFiles: []string{
 				"codecov.yml",
 				".github/workflows/octopus.yml",
 				".github/workflows/codeql.yml",
 				".codacy.yml",
-				".github/workflows/codacy-coverage.yml",
 				".github/instructions/codacy.instructions.md",
 			},
 		},
@@ -461,7 +459,7 @@ func TestRenderCIPackFiltering(t *testing.T) {
 		{
 			pack:    CIPackGeneric,
 			want:    []string{".github/workflows/ci.yml", "socket.yml", ".github/CODEOWNERS"},
-			exclude: []string{"codecov.yml", ".github/workflows/codeql.yml", ".github/workflows/codacy-coverage.yml"},
+			exclude: []string{"codecov.yml", ".github/workflows/codeql.yml"},
 		},
 		{
 			pack:    CIPackNone,

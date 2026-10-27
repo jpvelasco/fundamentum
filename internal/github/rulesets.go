@@ -51,6 +51,52 @@ var LanguageStatusChecks = []string{
 	"Trivy",
 }
 
+// GitHubActionsAppID is the integration_id of the GitHub Actions app — the
+// app that posts the check runs produced by a repository's own workflows.
+// Pinning a required status check to this app means only a GitHub Actions
+// check run with that exact context satisfies it; a third-party app posting
+// an identically-named check cannot. It is a var (not a const) so operators
+// embedding fundamentum can override it if GitHub ever changes the id.
+var GitHubActionsAppID = 15368
+
+// RepositoryRoleAdminID is the bypass-actor actor_id for the repository
+// "admin" role in a ruleset (actor_type "RepositoryRole"). The tag ruleset's
+// creation rule restricts tag creation to bypass actors; granting the admin
+// role lets repository admins still cut version tags while everyone else is
+// blocked. It is a var so operators can override it if their GitHub
+// deployment reports a different role id.
+var RepositoryRoleAdminID = 5
+
+// shippedCheckContexts is the set of status-check contexts produced by
+// Fundamentum's own shipped CI workflows (DefaultStatusChecks for the Go
+// pack, GenericStatusChecks for generic, LanguageStatusChecks for
+// node/python/rust). Only these are eligible for an integration_id pin —
+// checks from any other app are never pinned.
+func shippedCheckContexts() map[string]bool {
+	set := make(map[string]bool, len(DefaultStatusChecks)+len(GenericStatusChecks)+len(LanguageStatusChecks))
+	for _, name := range DefaultStatusChecks {
+		set[name] = true
+	}
+	for _, name := range GenericStatusChecks {
+		set[name] = true
+	}
+	for _, name := range LanguageStatusChecks {
+		set[name] = true
+	}
+	return set
+}
+
+// newStatusCheck builds one required_status_checks entry for a check being
+// ADDED (not already present live). When the context is one Fundamentum's
+// shipped workflows produce, it is pinned to the GitHub Actions app so only
+// that app can satisfy it; any other (third-party) context is left unpinned.
+func newStatusCheck(context string) map[string]any {
+	if shippedCheckContexts()[context] {
+		return map[string]any{"context": context, "integration_id": GitHubActionsAppID}
+	}
+	return map[string]any{"context": context}
+}
+
 // BranchProtectionOptions controls how strictly the branch ruleset is configured.
 type BranchProtectionOptions struct {
 	// Solo disables CODEOWNERS review requirement and stale review dismissal,
@@ -85,6 +131,17 @@ type Ruleset struct {
 	Enforcement string           `json:"enforcement"`
 	Conditions  map[string]any   `json:"conditions"`
 	Rules       []map[string]any `json:"rules"`
+	// BypassActors are the actors allowed to bypass the ruleset. GitHub only
+	// returns this when the caller has write access to the ruleset, so it may
+	// be nil on read.
+	BypassActors []BypassActor `json:"bypass_actors"`
+}
+
+// BypassActor is one ruleset bypass actor.
+type BypassActor struct {
+	ActorID    *int64 `json:"actor_id,omitempty"`
+	ActorType  string `json:"actor_type"`
+	BypassMode string `json:"bypass_mode,omitempty"`
 }
 
 // RulesetPlan is the apply/audit view of a managed ruleset.
@@ -318,6 +375,7 @@ func mergeTagRulesetBody(live *Ruleset) map[string]any {
 		"enforcement": "active",
 		"conditions":  mergedConditions(live.Conditions, "refs/tags/v*"),
 		"rules":       mergeOwnedRules(live, tagRulesetRules()),
+		"bypass_actors": mergedTagBypassActors(live),
 	}
 }
 
@@ -476,7 +534,7 @@ func statusChecksRule(statusChecks []string, opts BranchProtectionOptions) map[s
 	}
 	checks := make([]map[string]any, len(allChecks))
 	for i, name := range allChecks {
-		checks[i] = map[string]any{"context": name}
+		checks[i] = newStatusCheck(name)
 	}
 	return statusChecksRuleWith(checks, intendedStrictChecks(opts))
 }
@@ -516,7 +574,7 @@ func statusChecksRuleMerged(liveRule map[string]any, statusChecks []string, opts
 	}
 	for _, name := range intendedChecks(statusChecks, opts) {
 		if !have[name] {
-			merged = append(merged, map[string]any{"context": name})
+			merged = append(merged, newStatusCheck(name))
 		}
 	}
 	strict := mapBool(params, "strict_required_status_checks_policy")
@@ -571,15 +629,62 @@ func tagRulesetBody() map[string]any {
 				"exclude": []string{},
 			},
 		},
-		"rules": tagRulesetRules(),
+		"rules":         tagRulesetRules(),
+		"bypass_actors": tagRulesetBypassActors(),
 	}
 }
 
+// tagRulesetRules are the owned tag rules. The creation rule restricts tag
+// creation to bypass actors (the admin role below), so version tags can only
+// be cut by a repository admin — a leaked write token can no longer push a
+// malicious v* tag that a release workflow would then build and publish.
 func tagRulesetRules() []map[string]any {
 	return []map[string]any{
+		{"type": "creation"},
 		{"type": "deletion"},
 		{"type": "non_fast_forward"},
 	}
+}
+
+// tagRulesetBypassActors grants the repository admin role bypass so admins
+// can still create version tags under the creation rule.
+func tagRulesetBypassActors() []map[string]any {
+	id := int64(RepositoryRoleAdminID)
+	return []map[string]any{
+		{"actor_id": id, "actor_type": "RepositoryRole", "bypass_mode": "always"},
+	}
+}
+
+// hasTagAdminBypass reports whether the live ruleset already grants bypass to
+// the repository admin role, so a reconcile does not add a duplicate.
+func hasTagAdminBypass(live *Ruleset) bool {
+	for _, a := range live.BypassActors {
+		if a.ActorType == "RepositoryRole" && a.ActorID != nil && *a.ActorID == int64(RepositoryRoleAdminID) {
+			return true
+		}
+	}
+	return false
+}
+
+// mergedTagBypassActors preserves every existing bypass actor and adds the
+// admin role when it is not already present. Normal reconciles never remove
+// an actor — only the bot-managed profile sends an explicit empty list.
+func mergedTagBypassActors(live *Ruleset) []map[string]any {
+	merged := make([]map[string]any, 0, len(live.BypassActors)+1)
+	for _, a := range live.BypassActors {
+		entry := map[string]any{"actor_type": a.ActorType}
+		if a.ActorID != nil {
+			entry["actor_id"] = *a.ActorID
+		}
+		if a.BypassMode != "" {
+			entry["bypass_mode"] = a.BypassMode
+		}
+		merged = append(merged, entry)
+	}
+	if !hasTagAdminBypass(live) {
+		merged = append(merged, tagRulesetBypassActors()...)
+	}
+	return merged
 }
 
 // BranchRulesetDrift returns Fundamentum-owned fields where the live ruleset
@@ -663,6 +768,9 @@ func TagRulesetDrift(got *Ruleset) []string {
 	}
 	if !includesRef(got.Conditions, "refs/tags/v*") {
 		drift = append(drift, "conditions")
+	}
+	if !hasRuleType(got, "creation") {
+		drift = append(drift, "creation")
 	}
 	if !hasRuleType(got, "deletion") {
 		drift = append(drift, "deletion")

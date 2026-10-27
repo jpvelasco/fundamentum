@@ -160,10 +160,17 @@ func TestTagRulesetDrift(t *testing.T) {
 		Conditions: map[string]any{
 			"ref_name": map[string]any{"include": []any{"refs/tags/v*"}, "exclude": []any{}},
 		},
-		Rules: []map[string]any{{"type": "deletion"}, {"type": "non_fast_forward"}},
+		Rules: []map[string]any{{"type": "creation"}, {"type": "deletion"}, {"type": "non_fast_forward"}},
 	}
 	if got := TagRulesetDrift(ok); len(got) != 0 {
 		t.Errorf("TagRulesetDrift(ok) = %v, want none", got)
+	}
+	// A tag ruleset without the creation rule is weaker: anyone with push can
+	// create a v* tag.
+	noCreation := cloneRuleset(ok)
+	noCreation.Rules = []map[string]any{{"type": "deletion"}, {"type": "non_fast_forward"}}
+	if got := TagRulesetDrift(noCreation); !sameStrings(got, []string{"creation"}) {
+		t.Errorf("TagRulesetDrift(no creation) = %v, want [creation]", got)
 	}
 	ok.Enforcement = "disabled"
 	if got := TagRulesetDrift(ok); !sameStrings(got, []string{"enforcement"}) {
@@ -224,7 +231,7 @@ func TestBranchRulesetDrift_AllOwnedFields(t *testing.T) {
 
 func TestTagRulesetDrift_Emptied(t *testing.T) {
 	got := TagRulesetDrift(&Ruleset{Name: "protect-version-tags", Enforcement: "active"})
-	for _, field := range []string{"conditions", "deletion", "non_fast_forward"} {
+	for _, field := range []string{"conditions", "creation", "deletion", "non_fast_forward"} {
 		if !containsString(got, field) {
 			t.Errorf("emptied tag ruleset missing drift %q: %v", field, got)
 		}
@@ -543,6 +550,170 @@ func TestRulesetID_Paginates(t *testing.T) {
 			t.Errorf("pages fetched = %d, want 2", pages)
 		}
 	})
+}
+
+func TestNewStatusCheck_PinsShippedChecksOnly(t *testing.T) {
+	// Shipped CI checks (Go, generic, and language packs) are pinned to the
+	// GitHub Actions app so only that app can satisfy them.
+	for _, ctx := range []string{"Lint", "Vulnerability scan", "Build (ubuntu-latest)", "Test (windows-latest)", "gosec", "Trivy", "CI", "Test", "Lint (Windows)"} {
+		got := newStatusCheck(ctx)
+		if ctx == "Lint (Windows)" {
+			// Lint (Windows) is not currently in any shipped required-check list;
+			// it must NOT be pinned.
+			if _, pinned := got["integration_id"]; pinned {
+				t.Errorf("newStatusCheck(%q) must not pin integration_id", ctx)
+			}
+			continue
+		}
+		id, pinned := got["integration_id"]
+		if !pinned {
+			t.Errorf("newStatusCheck(%q) missing integration_id pin", ctx)
+			continue
+		}
+		if id != GitHubActionsAppID {
+			t.Errorf("newStatusCheck(%q) integration_id = %v, want %d", ctx, id, GitHubActionsAppID)
+		}
+	}
+	// A third-party check (custom --require-checks) is never pinned.
+	for _, ctx := range []string{"Codacy Static Code Analysis", "Socket Security", "my-custom-check"} {
+		if _, pinned := newStatusCheck(ctx)["integration_id"]; pinned {
+			t.Errorf("newStatusCheck(%q) must not pin a third-party check", ctx)
+		}
+	}
+}
+
+func TestStatusChecksRule_PinsNewShippedChecks(t *testing.T) {
+	rule := statusChecksRule([]string{"Lint", "Codacy Static Code Analysis"}, BranchProtectionOptions{Solo: true})
+	params, _ := rule["parameters"].(map[string]any)
+	raw, _ := params["required_status_checks"].([]map[string]any)
+	byContext := map[string]map[string]any{}
+	for _, c := range raw {
+		byContext[c["context"].(string)] = c
+	}
+	if byContext["Lint"]["integration_id"] != GitHubActionsAppID {
+		t.Errorf("Lint must be pinned to the GitHub Actions app: %v", byContext["Lint"])
+	}
+	if _, pinned := byContext["Codacy Static Code Analysis"]["integration_id"]; pinned {
+		t.Errorf("third-party Codacy check must not be pinned: %v", byContext["Codacy Static Code Analysis"])
+	}
+}
+
+func TestStatusChecksRuleMerged_KeepsLivePinsAddsNewPins(t *testing.T) {
+	// A live ruleset with an existing Lint pinned to a DIFFERENT integration
+	// (e.g. hand-tuned) and an unpinned custom check. The merge must keep both
+	// verbatim, and pin only the newly-added shipped check (gosec).
+	liveRule := map[string]any{
+		"type": "required_status_checks",
+		"parameters": map[string]any{
+			"strict_required_status_checks_policy": true,
+			"required_status_checks": []any{
+				map[string]any{"context": "Lint", "integration_id": 999},
+				map[string]any{"context": "my-custom-check"},
+			},
+		},
+	}
+	rule := statusChecksRuleMerged(liveRule, []string{"Lint", "gosec"}, BranchProtectionOptions{Solo: true})
+	params, _ := rule["parameters"].(map[string]any)
+	raw := anySlice(params["required_status_checks"])
+	byContext := map[string]map[string]any{}
+	for _, item := range raw {
+		m, _ := item.(map[string]any)
+		byContext[m["context"].(string)] = m
+	}
+	// Live Lint pin is preserved verbatim (999), not rewritten to the Actions app.
+	if byContext["Lint"]["integration_id"] != 999 {
+		t.Errorf("live Lint pin must be kept untouched: %v", byContext["Lint"])
+	}
+	// Live custom check stays unpinned.
+	if _, pinned := byContext["my-custom-check"]["integration_id"]; pinned {
+		t.Errorf("live custom check must stay unpinned: %v", byContext["my-custom-check"])
+	}
+	// Newly-added shipped check (gosec) is pinned to the Actions app.
+	if byContext["gosec"]["integration_id"] != GitHubActionsAppID {
+		t.Errorf("new gosec check must be pinned to the GitHub Actions app: %v", byContext["gosec"])
+	}
+}
+
+func TestTagRulesetBody_CreationRuleAndAdminBypass(t *testing.T) {
+	body := tagRulesetBody()
+	rules := rulesFromBody(body)
+	var hasCreation bool
+	for _, r := range rules {
+		if r["type"] == "creation" {
+			hasCreation = true
+		}
+	}
+	if !hasCreation {
+		t.Error("tag ruleset body must include a creation rule")
+	}
+	actors, _ := body["bypass_actors"].([]map[string]any)
+	if len(actors) != 1 {
+		t.Fatalf("tag ruleset bypass_actors = %v, want exactly the admin role", actors)
+	}
+	a := actors[0]
+	if a["actor_type"] != "RepositoryRole" || a["actor_id"] != int64(RepositoryRoleAdminID) || a["bypass_mode"] != "always" {
+		t.Errorf("admin bypass actor = %v, want RepositoryRole id %d always", a, RepositoryRoleAdminID)
+	}
+}
+
+func TestMergeTagRulesetBody_MergesBypassActors(t *testing.T) {
+	// A live ruleset missing the creation rule but with a hand-tuned Team
+	// bypass actor. The merge must add the creation rule, keep the Team actor,
+	// and add the admin role — never removing existing actors.
+	teamID := int64(12345)
+	live := &Ruleset{
+		Name:        "protect-version-tags",
+		Target:      "tag",
+		Enforcement: "active",
+		Conditions:  map[string]any{"ref_name": map[string]any{"include": []any{"refs/tags/v*"}}},
+		Rules:       []map[string]any{{"type": "deletion"}, {"type": "non_fast_forward"}},
+		BypassActors: []BypassActor{
+			{ActorID: &teamID, ActorType: "Team", BypassMode: "always"},
+		},
+	}
+	body := mergeTagRulesetBody(live)
+	rules := rulesFromBody(body)
+	var hasCreation bool
+	for _, r := range rules {
+		if r["type"] == "creation" {
+			hasCreation = true
+		}
+	}
+	if !hasCreation {
+		t.Error("merged tag ruleset must add the creation rule")
+	}
+	actors, _ := body["bypass_actors"].([]map[string]any)
+	var sawTeam, sawAdmin bool
+	for _, a := range actors {
+		if a["actor_type"] == "Team" && a["actor_id"] == teamID {
+			sawTeam = true
+		}
+		if a["actor_type"] == "RepositoryRole" && a["actor_id"] == int64(RepositoryRoleAdminID) {
+			sawAdmin = true
+		}
+	}
+	if !sawTeam {
+		t.Error("merged bypass actors must keep the existing Team actor")
+	}
+	if !sawAdmin {
+		t.Error("merged bypass actors must add the admin role")
+	}
+
+	// Idempotent: a live ruleset that already grants the admin role must not
+	// get a duplicate.
+	adminID := int64(RepositoryRoleAdminID)
+	live.BypassActors = append(live.BypassActors, BypassActor{ActorID: &adminID, ActorType: "RepositoryRole", BypassMode: "always"})
+	body = mergeTagRulesetBody(live)
+	actors, _ = body["bypass_actors"].([]map[string]any)
+	adminCount := 0
+	for _, a := range actors {
+		if a["actor_type"] == "RepositoryRole" && a["actor_id"] == int64(RepositoryRoleAdminID) {
+			adminCount++
+		}
+	}
+	if adminCount != 1 {
+		t.Errorf("admin role must appear exactly once after merge, got %d", adminCount)
+	}
 }
 
 func TestRequireCodeOwners(t *testing.T) {
