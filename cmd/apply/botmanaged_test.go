@@ -8,6 +8,7 @@ import (
 
 	"github.com/jpvelasco/fundamentum/cmd/globals"
 	"github.com/jpvelasco/fundamentum/internal/github"
+	"github.com/jpvelasco/fundamentum/internal/steps"
 	"github.com/jpvelasco/fundamentum/internal/templates"
 	"github.com/jpvelasco/fundamentum/internal/wizard"
 )
@@ -135,6 +136,91 @@ func TestKeepListProtectsHandTunedFile(t *testing.T) {
 		}
 	}
 	t.Error(".github/workflows/ci.yml not found in plan")
+}
+
+// TestActionsPermissionsItemApply exercises the actions step's Apply: it
+// prints before/after and PUTs the read-only lockdown.
+func TestActionsPermissionsItemApply(t *testing.T) {
+	resetBotManagedGlobals(t)
+	putBody := ""
+	locked := false
+	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/actions/permissions/workflow"):
+			w.WriteHeader(http.StatusOK)
+			if locked {
+				_, _ = w.Write([]byte(`{"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}`))
+			} else {
+				_, _ = w.Write([]byte(`{"default_workflow_permissions":"write","can_approve_pull_request_reviews":true}`))
+			}
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/actions/permissions/workflow"):
+			body, _ := io.ReadAll(r.Body)
+			putBody = string(body)
+			locked = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	var out strings.Builder
+	item := actionsPermissionsItem(c, "owner", "repo", steps.New(nil, nil), &out)
+	if item.Apply == nil {
+		t.Fatal("live actions item must have an Apply closure")
+	}
+	if err := item.Apply(); err != nil {
+		t.Fatalf("Apply() error: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "before: default_workflow_permissions=write can_approve_pull_request_reviews=true") {
+		t.Errorf("missing before state:\n%s", got)
+	}
+	if !strings.Contains(got, "after:  default_workflow_permissions=read can_approve_pull_request_reviews=false") {
+		t.Errorf("missing after state:\n%s", got)
+	}
+	if !strings.Contains(putBody, `"default_workflow_permissions":"read"`) || !strings.Contains(putBody, `"can_approve_pull_request_reviews":false`) {
+		t.Errorf("PUT body = %s", putBody)
+	}
+
+	// Opted out via --skip actions → skip row, no Apply.
+	item = actionsPermissionsItem(c, "owner", "repo", steps.New([]string{"actions"}, nil), &out)
+	if item.Action != wizard.ActionSkip || item.Apply != nil {
+		t.Errorf("opted-out actions item = %+v", item)
+	}
+}
+
+// TestPlanNewRepoBotManaged shows the actions step in an init --dry-run plan
+// and enforces the flag guardrails without a client.
+func TestPlanNewRepoBotManaged(t *testing.T) {
+	resetBotManagedGlobals(t)
+	globals.BotManaged = true
+	globals.DryRun = true
+	t.Cleanup(func() { globals.DryRun = false })
+
+	var out strings.Builder
+	if err := PlanNewRepo("owner", "repo", "private", &out); err != nil {
+		t.Fatalf("PlanNewRepo() error: %v", err)
+	}
+	if !strings.Contains(out.String(), "Actions default token") {
+		t.Errorf("bot-managed init --dry-run must plan the actions step:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "squash-only merges") {
+		t.Errorf("bot-managed settings must be named in the plan:\n%s", out.String())
+	}
+
+	// --octopus is refused even without a client.
+	globals.Octopus = true
+	if err := PlanNewRepo("owner", "repo", "private", &strings.Builder{}); err == nil || !strings.Contains(err.Error(), "--octopus") {
+		t.Errorf("init --dry-run must refuse --octopus + --bot-managed, got %v", err)
+	}
+	globals.Octopus = false
+
+	// An unpinned policy check is refused even without a client.
+	globals.PolicyChecks = []github.PolicyCheck{{Context: "external-review"}}
+	if err := PlanNewRepo("owner", "repo", "private", &strings.Builder{}); err == nil {
+		t.Error("init --dry-run must refuse an unpinned policy check")
+	}
 }
 
 // TestKeepListDoesNotAffectOtherFiles proves the keep list only skips the

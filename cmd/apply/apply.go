@@ -263,6 +263,11 @@ func PlanNewRepo(owner, repo, visibility string, stdout io.Writer) error {
 	if err := loadFlags(); err != nil {
 		return err
 	}
+	// init --dry-run has no client for the token guardrail, but the flag
+	// guardrails (--octopus, unpinned policy checks) still apply.
+	if err := validateBotManagedFlags(); err != nil {
+		return err
+	}
 	pack, err := resolveCIPack(nil, owner, repo)
 	if err != nil {
 		return err
@@ -686,21 +691,30 @@ func loadFlags() error {
 	return globals.ApplyPreset(globals.Preset)
 }
 
-// validateBotManaged enforces the bot-managed profile's flag and token
-// guardrails before any planning or mutation:
-//   - --octopus is refused outright: the profile ships no third-party
-//     data-sharing workflow.
-//   - The token must belong to a human, not a bot or app — the profile's
-//     guardrails assume a human operator is hardening the automation's repo.
-func validateBotManaged(client *github.Client) error {
+// validateBotManagedFlags enforces the profile's flag-only guardrails (no
+// client needed): --octopus is refused outright, and every policy check must
+// pin its app. init --dry-run runs this too (it has no client for the token
+// check).
+func validateBotManagedFlags() error {
 	if !globals.BotManaged {
 		return nil
 	}
 	if globals.Octopus {
 		return fmt.Errorf("--octopus cannot be combined with --bot-managed: the bot-managed profile ships no third-party review workflow")
 	}
-	if err := github.ValidatePolicyChecks(globals.PolicyChecks); err != nil {
+	return github.ValidatePolicyChecks(globals.PolicyChecks)
+}
+
+// validateBotManaged enforces the bot-managed profile's flag and token
+// guardrails before any planning or mutation: the flag rules above, plus the
+// token must belong to a human, not a bot or app — the profile's guardrails
+// assume a human operator is hardening the automation's repo.
+func validateBotManaged(client *github.Client) error {
+	if err := validateBotManagedFlags(); err != nil {
 		return err
+	}
+	if !globals.BotManaged {
+		return nil
 	}
 	isBot, why, err := client.IsBotOrAppToken()
 	if err != nil {
