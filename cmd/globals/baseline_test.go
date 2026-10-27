@@ -18,6 +18,9 @@ func resetBaseline(t *testing.T) {
 		Strict = false
 		NoOverwrite = false
 		FromFile = ""
+		BotManaged = false
+		PolicyChecks = nil
+		KeepFiles = nil
 		ResetExplicit()
 	})
 	ResetExplicit()
@@ -296,3 +299,95 @@ func TestApplyBaseline_SetStateBlocksReread(t *testing.T) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+func TestCurrentBaseline_BotManagedFields(t *testing.T) {
+	resetBaseline(t)
+	BotManaged = true
+	PolicyChecks = []PolicyCheck{{Context: "external-review", IntegrationID: 4242}}
+	KeepFiles = []string{".github/workflows/ci.yml", ".github/workflows/release.yml"}
+
+	var out strings.Builder
+	if err := WriteBaseline(&out, CurrentBaseline()); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		`"bot_managed": true`,
+		`"bot_policy_checks"`,
+		`"context": "external-review"`,
+		`"integration_id": 4242`,
+		`"keep"`,
+		`.github/workflows/ci.yml`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestApplyBaseline_BotManagedFieldsFillUnset(t *testing.T) {
+	resetBaseline(t)
+	if err := ApplyBaseline(Baseline{
+		BotManaged:      true,
+		BotPolicyChecks: []PolicyCheck{{Context: "external-review", IntegrationID: 4242}},
+		Keep:            []string{".github/workflows/ci.yml"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !BotManaged {
+		t.Error("BotManaged not applied from baseline")
+	}
+	if len(PolicyChecks) != 1 || PolicyChecks[0].Context != "external-review" || PolicyChecks[0].IntegrationID != 4242 {
+		t.Errorf("PolicyChecks = %+v", PolicyChecks)
+	}
+	if len(KeepFiles) != 1 || KeepFiles[0] != ".github/workflows/ci.yml" {
+		t.Errorf("KeepFiles = %v", KeepFiles)
+	}
+}
+
+func TestApplyBaseline_BotManagedExplicitFalseWins(t *testing.T) {
+	resetBaseline(t)
+	NoteExplicit("bot-managed")
+	BotManaged = false
+	if err := ApplyBaseline(Baseline{BotManaged: true}); err != nil {
+		t.Fatal(err)
+	}
+	if BotManaged {
+		t.Error("explicit --bot-managed=false must beat the baseline file")
+	}
+}
+
+// TestBotManagedBaselineRoundTrip proves a baseline with the profile on
+// exports and re-imports losslessly.
+func TestBotManagedBaselineRoundTrip(t *testing.T) {
+	resetBaseline(t)
+	BotManaged = true
+	PolicyChecks = []PolicyCheck{{Context: "external-review", IntegrationID: 4242}, {Context: "policy-gate", IntegrationID: 7}}
+	KeepFiles = []string{".github/workflows/ci.yml"}
+
+	var out strings.Builder
+	if err := WriteBaseline(&out, CurrentBaseline()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reset and reload from the serialized JSON.
+	BotManaged = false
+	PolicyChecks = nil
+	KeepFiles = nil
+	path := filepath.Join(t.TempDir(), "b.json")
+	if err := os.WriteFile(path, []byte(out.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadBaselineFile(path); err != nil {
+		t.Fatal(err)
+	}
+	if !BotManaged {
+		t.Error("BotManaged did not round-trip")
+	}
+	if len(PolicyChecks) != 2 || PolicyChecks[1].Context != "policy-gate" || PolicyChecks[1].IntegrationID != 7 {
+		t.Errorf("PolicyChecks did not round-trip: %+v", PolicyChecks)
+	}
+	if len(KeepFiles) != 1 {
+		t.Errorf("KeepFiles did not round-trip: %v", KeepFiles)
+	}
+}

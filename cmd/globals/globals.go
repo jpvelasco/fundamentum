@@ -43,6 +43,20 @@ var SkipSteps []string
 // are applied; everything else is skipped.
 var OnlySteps []string
 
+// SkipTokens returns the effective skip set for the step selector: the --skip
+// list plus the baseline keep list (KeepFiles), so a kept file is excluded
+// from apply exactly as if it had been passed to --skip. The keep list is how
+// a hand-tuned workflow survives a re-apply.
+func SkipTokens() []string {
+	if len(KeepFiles) == 0 {
+		return SkipSteps
+	}
+	out := make([]string, 0, len(SkipSteps)+len(KeepFiles))
+	out = append(out, SkipSteps...)
+	out = append(out, KeepFiles...)
+	return out
+}
+
 // Octopus opts in to the third-party Octopus Review workflow (public repos).
 // Off by default: it shares PR diffs with an external service.
 var Octopus bool

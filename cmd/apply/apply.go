@@ -123,7 +123,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	// Validate --skip/--only tokens against the real steps and rendered
 	// paths: a typo must be an error, not a silent no-op that lets apply
 	// touch exactly what the operator meant to leave alone.
-	if unknown := steps.New(globals.SkipSteps, globals.OnlySteps).Unknown(renderedPaths(rendered)); len(unknown) > 0 {
+	if unknown := steps.New(globals.SkipTokens(), globals.OnlySteps).Unknown(renderedPaths(rendered)); len(unknown) > 0 {
 		return fmt.Errorf("unknown --skip/--only key(s): %s — use settings, protect-main, protect-version-tags, security, files, or an exact shipped file path", strings.Join(unknown, ", "))
 	}
 
@@ -278,7 +278,7 @@ func PlanNewRepo(owner, repo, visibility string, stdout io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("render templates: %w", err)
 	}
-	if unknown := steps.New(globals.SkipSteps, globals.OnlySteps).Unknown(renderedPaths(rendered)); len(unknown) > 0 {
+	if unknown := steps.New(globals.SkipTokens(), globals.OnlySteps).Unknown(renderedPaths(rendered)); len(unknown) > 0 {
 		return fmt.Errorf("unknown --skip/--only key(s): %s — use settings, protect-main, protect-version-tags, security, files, or an exact shipped file path", strings.Join(unknown, ", "))
 	}
 	// Named presets must match a live apply: only strict / --advanced-security
@@ -309,7 +309,7 @@ func buildItems(
 ) ([]wizard.Item, error) {
 	var items []wizard.Item
 
-	selector := steps.New(globals.SkipSteps, globals.OnlySteps)
+	selector := steps.New(globals.SkipTokens(), globals.OnlySteps)
 	aliases := templates.FileAliases()
 
 	// Files first — branch protection applied after, so direct commits are still allowed.
