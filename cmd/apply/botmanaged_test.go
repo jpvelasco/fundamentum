@@ -190,6 +190,31 @@ func TestActionsPermissionsItemApply(t *testing.T) {
 	}
 }
 
+// TestPrintRemovedBypassActors covers the removed-bypass-actors notice.
+func TestPrintRemovedBypassActors(t *testing.T) {
+	// Nothing to print when there are no removed actors.
+	var out strings.Builder
+	printRemovedBypassActors(&out, nil)
+	if out.String() != "" {
+		t.Errorf("no removed actors must print nothing, got %q", out.String())
+	}
+
+	// Removed actors are listed.
+	teamID := int64(7)
+	out.Reset()
+	printRemovedBypassActors(&out, []github.BypassActor{
+		{ActorID: &teamID, ActorType: "Team", BypassMode: "always"},
+		{ActorType: "OrganizationAdmin", BypassMode: "pull_request"},
+	})
+	got := out.String()
+	if !strings.Contains(got, "removing 2 ruleset bypass actor(s)") {
+		t.Errorf("missing removal count:\n%s", got)
+	}
+	if !strings.Contains(got, "Team#7 (always)") || !strings.Contains(got, "OrganizationAdmin (pull_request)") {
+		t.Errorf("missing actor descriptions:\n%s", got)
+	}
+}
+
 // TestPlanNewRepoBotManaged shows the actions step in an init --dry-run plan
 // and enforces the flag guardrails without a client.
 func TestPlanNewRepoBotManaged(t *testing.T) {
