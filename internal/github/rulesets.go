@@ -117,6 +117,22 @@ type BranchProtectionOptions struct {
 	// or baseline). A reconcile enforces an explicitly-chosen value; when
 	// unset it keeps the ruleset's live policy instead of forcing it back.
 	StrictChecksSet bool
+	// BotManaged enables the bot-managed profile for the branch ruleset:
+	// solo-style PR params, squash-only allowed_merge_methods, shipped checks
+	// pinned to the GitHub Actions app, optional policy checks, and an
+	// explicit empty bypass_actors list.
+	BotManaged bool
+	// PolicyChecks are external policy checks required on protect-main in
+	// bot-managed mode. Each must carry the integration (app) id that posts
+	// it — a policy check without an app id is refused.
+	PolicyChecks []PolicyCheck
+}
+
+// PolicyCheck is one external policy status check: a context plus the
+// integration (app) id that must post it.
+type PolicyCheck struct {
+	Context       string `json:"context"`
+	IntegrationID int64  `json:"integration_id"`
 }
 
 func (o BranchProtectionOptions) requireCodeOwners() bool {
@@ -363,6 +379,30 @@ func mergeBranchRulesetBody(live *Ruleset, statusChecks []string, opts BranchPro
 	return body
 }
 
+// RemovedBypassActors returns the live bypass actors a bot-managed reconcile
+// would drop (it sends an explicit empty list). Returns nil when the profile
+// is off or there is nothing to remove, so callers can print exactly what
+// will disappear.
+func RemovedBypassActors(live *Ruleset, opts BranchProtectionOptions) []BypassActor {
+	if !opts.BotManaged || live == nil || len(live.BypassActors) == 0 {
+		return nil
+	}
+	return append([]BypassActor{}, live.BypassActors...)
+}
+
+// DescribeBypassActor renders one bypass actor for the removed-actors notice,
+// e.g. "Team#12345 (always)" or "OrganizationAdmin (pull_request)".
+func DescribeBypassActor(a BypassActor) string {
+	s := a.ActorType
+	if a.ActorID != nil {
+		s += fmt.Sprintf("#%d", *a.ActorID)
+	}
+	if a.BypassMode != "" {
+		s += " (" + a.BypassMode + ")"
+	}
+	return s
+}
+
 // mergeTagRulesetBody is the reconcile-path tag body: keep unowned rules and
 // extra condition entries; ensure the owned ones exist.
 func mergeTagRulesetBody(live *Ruleset) map[string]any {
@@ -370,11 +410,11 @@ func mergeTagRulesetBody(live *Ruleset) map[string]any {
 		return tagRulesetBody()
 	}
 	return map[string]any{
-		"name":        "protect-version-tags",
-		"target":      "tag",
-		"enforcement": "active",
-		"conditions":  mergedConditions(live.Conditions, "refs/tags/v*"),
-		"rules":       mergeOwnedRules(live, tagRulesetRules()),
+		"name":          "protect-version-tags",
+		"target":        "tag",
+		"enforcement":   "active",
+		"conditions":    mergedConditions(live.Conditions, "refs/tags/v*"),
+		"rules":         mergeOwnedRules(live, tagRulesetRules()),
 		"bypass_actors": mergedTagBypassActors(live),
 	}
 }
@@ -434,9 +474,11 @@ func refIncludeStrings(ref map[string]any) []string {
 }
 
 // baseBranchRulesetBody is the shared branch body shape; the rules are
-// replaced by create vs merge paths before use.
+// replaced by create vs merge paths before use. The bot-managed profile also
+// sends an explicit empty bypass_actors list; with the profile off the body
+// carries no bypass_actors key at all, byte-identical to the default.
 func baseBranchRulesetBody(statusChecks []string, opts BranchProtectionOptions) map[string]any {
-	return map[string]any{
+	body := map[string]any{
 		"name":        "protect-main",
 		"target":      "branch",
 		"enforcement": "active",
@@ -448,6 +490,10 @@ func baseBranchRulesetBody(statusChecks []string, opts BranchProtectionOptions) 
 		},
 		"rules": branchRulesetRules(statusChecks, opts, prRuleParams(opts)),
 	}
+	if opts.BotManaged {
+		body["bypass_actors"] = []any{}
+	}
+	return body
 }
 
 func branchRulesetRules(statusChecks []string, opts BranchProtectionOptions, prParams map[string]any) []map[string]any {
@@ -463,14 +509,22 @@ func branchRulesetRules(statusChecks []string, opts BranchProtectionOptions, prP
 }
 
 // prRuleParams is the intended pull_request rule for the create path.
+// Bot-managed forces the solo shape (no code-owner review, no stale-review
+// dismissal — automation cannot supply either) and locks merges to squash-only.
 func prRuleParams(opts BranchProtectionOptions) map[string]any {
-	return map[string]any{
+	params := map[string]any{
 		"required_approving_review_count":   0,
 		"dismiss_stale_reviews_on_push":     !opts.Solo,
 		"require_code_owner_review":         opts.requireCodeOwners(),
 		"require_last_push_approval":        false,
 		"required_review_thread_resolution": true,
 	}
+	if opts.BotManaged {
+		params["dismiss_stale_reviews_on_push"] = false
+		params["require_code_owner_review"] = false
+		params["allowed_merge_methods"] = []string{"squash"}
+	}
+	return params
 }
 
 // strictestPRRule merges a live pull_request rule with the intended one,
@@ -524,18 +578,48 @@ func strictestPRRule(live map[string]any, opts BranchProtectionOptions) map[stri
 	return merged
 }
 
+// ValidatePolicyChecks enforces the bot-managed rule that every required
+// policy check names the app that posts it. An unpinned policy check would be
+// satisfied by ANY app posting that context — exactly the spoof the pin
+// exists to prevent — so it is refused rather than silently required. Callers
+// run this before building or diffing a ruleset body.
+func ValidatePolicyChecks(checks []PolicyCheck) error {
+	for _, pc := range checks {
+		if pc.Context == "" {
+			return fmt.Errorf("bot-managed policy check with integration_id %d has an empty context", pc.IntegrationID)
+		}
+		if pc.IntegrationID == 0 {
+			return fmt.Errorf("bot-managed policy check %q has no integration_id: every required policy check must pin the app that posts it", pc.Context)
+		}
+	}
+	return nil
+}
+
+// policyCheckEntries builds the required_status_checks entries for validated
+// policy checks. Callers must run ValidatePolicyChecks first; entries here
+// are pinned by construction.
+func policyCheckEntries(checks []PolicyCheck) []map[string]any {
+	out := make([]map[string]any, 0, len(checks))
+	for _, pc := range checks {
+		out = append(out, map[string]any{"context": pc.Context, "integration_id": pc.IntegrationID})
+	}
+	return out
+}
+
 // statusChecksRule builds the required_status_checks rule. On the create path
 // it lists the intended checks; the merge path merges the live checks (with
 // their integration_id) in statusChecksRuleMerged.
 func statusChecksRule(statusChecks []string, opts BranchProtectionOptions) map[string]any {
 	allChecks := intendedChecks(statusChecks, opts)
-	if len(allChecks) == 0 {
+	policy := policyCheckEntries(opts.PolicyChecks)
+	if len(allChecks) == 0 && len(policy) == 0 {
 		return nil
 	}
-	checks := make([]map[string]any, len(allChecks))
-	for i, name := range allChecks {
-		checks[i] = newStatusCheck(name)
+	checks := make([]map[string]any, 0, len(allChecks)+len(policy))
+	for _, name := range allChecks {
+		checks = append(checks, newStatusCheck(name))
 	}
+	checks = append(checks, policy...)
 	return statusChecksRuleWith(checks, intendedStrictChecks(opts))
 }
 
@@ -575,6 +659,14 @@ func statusChecksRuleMerged(liveRule map[string]any, statusChecks []string, opts
 	for _, name := range intendedChecks(statusChecks, opts) {
 		if !have[name] {
 			merged = append(merged, newStatusCheck(name))
+		}
+	}
+	// Bot-managed policy checks: present-and-pinned is required. A policy
+	// check already live is kept verbatim; a missing one is added pinned.
+	for _, entry := range policyCheckEntries(opts.PolicyChecks) {
+		ctx := entry["context"].(string)
+		if !have[ctx] {
+			merged = append(merged, entry)
 		}
 	}
 	strict := mapBool(params, "strict_required_status_checks_policy")
@@ -719,7 +811,73 @@ func BranchRulesetDrift(got *Ruleset, statusChecks []string, opts BranchProtecti
 			drift = append(drift, "up-to-date policy")
 		}
 	}
+	if opts.BotManaged {
+		drift = append(drift, botManagedDrift(got, opts)...)
+	}
 	return drift
+}
+
+// botManagedDrift reports the bot-managed-only weaknesses: merges not locked
+// to squash-only, a live bypass actor (the profile grants no standing
+// bypass), or a required policy check that is missing or not pinned to its
+// app.
+func botManagedDrift(got *Ruleset, opts BranchProtectionOptions) []string {
+	var drift []string
+	if !squashOnlyMerges(got) {
+		drift = append(drift, "squash-only merges")
+	}
+	if len(got.BypassActors) > 0 {
+		drift = append(drift, "bypass actors present")
+	}
+	if missing := unpinnedOrMissingPolicyChecks(got, opts.PolicyChecks); len(missing) > 0 {
+		drift = append(drift, "policy checks: "+missing)
+	}
+	return drift
+}
+
+// squashOnlyMerges reports whether the live pull_request rule restricts
+// merges to squash only.
+func squashOnlyMerges(got *Ruleset) bool {
+	pr := ruleByType(got, "pull_request")
+	if pr == nil {
+		return false
+	}
+	params, _ := pr["parameters"].(map[string]any)
+	mm := anySlice(params["allowed_merge_methods"])
+	if len(mm) != 1 {
+		return false
+	}
+	s, ok := mm[0].(string)
+	return ok && s == "squash"
+}
+
+// unpinnedOrMissingPolicyChecks returns a short description when a required
+// policy check is absent or not pinned to its app; empty means all good.
+func unpinnedOrMissingPolicyChecks(got *Ruleset, want []PolicyCheck) string {
+	if len(want) == 0 {
+		return ""
+	}
+	rule := ruleByType(got, "required_status_checks")
+	live := map[string]int64{}
+	if rule != nil {
+		params, _ := rule["parameters"].(map[string]any)
+		for _, item := range anySlice(params["required_status_checks"]) {
+			m, _ := item.(map[string]any)
+			ctx, _ := m["context"].(string)
+			live[ctx] = int64(mapInt(m, "integration_id"))
+		}
+	}
+	var bad []string
+	for _, pc := range want {
+		id, present := live[pc.Context]
+		if !present || id != pc.IntegrationID {
+			bad = append(bad, pc.Context)
+		}
+	}
+	if len(bad) == 0 {
+		return ""
+	}
+	return strings.Join(bad, ", ")
 }
 
 // prRuleWeaker reports whether the live pull_request rule is weaker than the

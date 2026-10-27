@@ -12,6 +12,7 @@ const (
 	ProtectVersionTags = "protect-version-tags" // tag ruleset
 	Security           = "security"             // Dependabot / secret scanning / CodeQL
 	Files              = "files"                // all community/CI file items
+	Actions            = "actions"              // default GITHUB_TOKEN workflow permissions (bot-managed)
 )
 
 // Selector decides whether a step or file should run. An empty only-set means
@@ -46,6 +47,7 @@ func (s Selector) Unknown(renderedPaths []string) []string {
 		ProtectVersionTags: true,
 		Security:           true,
 		Files:              true,
+		Actions:            true,
 	}
 	for _, p := range renderedPaths {
 		known[strings.ToLower(p)] = true

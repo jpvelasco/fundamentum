@@ -72,16 +72,25 @@ func (c *Client) getDecode(path, action string, dest any) error {
 
 // authenticatedLogin returns the login of the token owner (GET /user).
 func (c *Client) authenticatedLogin() (string, error) {
+	login, _, err := c.AuthenticatedUser()
+	return login, err
+}
+
+// AuthenticatedUser returns the login and account type of the token owner
+// (GET /user). The type is "User", "Bot", or "Organization"; an
+// installation token (GitHub App) reports the app's bot login.
+func (c *Client) AuthenticatedUser() (login, accountType string, err error) {
 	var u struct {
 		Login string `json:"login"`
+		Type  string `json:"type"`
 	}
 	if err := c.getDecode("/user", "get authenticated user", &u); err != nil {
-		return "", err
+		return "", "", err
 	}
 	if u.Login == "" {
-		return "", fmt.Errorf("get authenticated user: empty login")
+		return "", "", fmt.Errorf("get authenticated user: empty login")
 	}
-	return u.Login, nil
+	return u.Login, u.Type, nil
 }
 
 // accountType returns the GitHub account type for login ("User" or "Organization").
@@ -96,6 +105,25 @@ func (c *Client) accountType(login string) (string, error) {
 		return "", fmt.Errorf("get account %s: empty type", login)
 	}
 	return u.Type, nil
+}
+
+// IsBotOrAppToken reports whether the client's token belongs to a bot or an
+// app rather than a human: the token is a GitHub App installation token
+// (ghs_…), or GET /user reports the account type "Bot". The bot-managed
+// profile refuses to apply under such a token — its guardrails assume a human
+// operator is driving the harden, not the automation it is about to restrict.
+func (c *Client) IsBotOrAppToken() (bool, string, error) {
+	if strings.HasPrefix(c.Token, "ghs_") {
+		return true, "an installation token (GitHub App)", nil
+	}
+	_, accountType, err := c.AuthenticatedUser()
+	if err != nil {
+		return false, "", err
+	}
+	if strings.EqualFold(accountType, "Bot") {
+		return true, `the authenticated account's type is "Bot"`, nil
+	}
+	return false, "", nil
 }
 
 // Repo is the subset of GET /repos/{owner}/{repo} that apply and audit need.

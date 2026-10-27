@@ -85,6 +85,9 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	if err := loadFlags(); err != nil {
 		return err
 	}
+	if err := validateBotManaged(client); err != nil {
+		return err
+	}
 	info, err := client.GetRepo(owner, repo)
 	if err != nil {
 		return fmt.Errorf("detect repo visibility: %w", err)
@@ -134,6 +137,8 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	opts.SkipCodeOwners = orgOwner
 	opts.StrictChecks = globals.BranchUpToDate
 	opts.StrictChecksSet = globals.BranchUpToDateSet
+	opts.BotManaged = globals.BotManaged
+	opts.PolicyChecks = globals.PolicyChecks
 	protectionUnavailable := false
 	branchPlan, err := client.PlanBranchRuleset(owner, repo, requiredChecks(pack), opts)
 	protectionUnavailable = noteProtectionUnavailable(protectionUnavailable, err)
@@ -183,7 +188,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 		}
 	}
 
-	items, err := buildItems(client, &info, owner, repo, branch, visibility, rendered, branchPlan, tagPlan, classicExists, protectionUnavailable, &opts, paidSecurity, pack)
+	items, err := buildItems(client, &info, owner, repo, branch, visibility, rendered, branchPlan, tagPlan, classicExists, protectionUnavailable, &opts, paidSecurity, pack, stdout)
 	if err != nil {
 		return fmt.Errorf("plan %s/%s: %w (verify the token grants Contents read access and retry)", owner, repo, err)
 	}
@@ -223,6 +228,7 @@ func RenderData(client *github.Client, info github.Repo, pack string, orgOwner b
 		CIPack:             pack,
 		Octopus:            globals.Octopus,
 		CodacyInstructions: globals.CodacyInstructions,
+		BotManaged:         globals.BotManaged,
 	}
 	if client == nil {
 		return data, nil
@@ -278,7 +284,7 @@ func PlanNewRepo(owner, repo, visibility string, stdout io.Writer) error {
 	// Named presets must match a live apply: only strict / --advanced-security
 	// enable GHAS. Interactive dry-run still shows the offered plan line.
 	paid := globals.AdvancedSecurity || github.IsPublicVisibility(visibility) || (globals.DryRun && globals.Preset == "")
-	items, err := buildItems(nil, nil, owner, repo, "main", visibility, rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, paid, pack)
+	items, err := buildItems(nil, nil, owner, repo, "main", visibility, rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, paid, pack, stdout)
 	if err != nil {
 		return err
 	}
@@ -299,6 +305,7 @@ func buildItems(
 	opts *github.BranchProtectionOptions,
 	paidSecurity bool,
 	pack string,
+	stdout io.Writer,
 ) ([]wizard.Item, error) {
 	var items []wizard.Item
 
@@ -353,7 +360,7 @@ func buildItems(
 	}
 	items = append(items, settingsItem)
 
-	protectionItem := branchProtectionItem(c, owner, repo, branch, visibility, branchPlan, classicExists, protectionUnavailable, opts, pack, guardShipped(c, owner, repo, rendered))
+	protectionItem := branchProtectionItem(c, owner, repo, branch, visibility, branchPlan, classicExists, protectionUnavailable, opts, pack, guardShipped(c, owner, repo, rendered), stdout)
 	if !selector.IncludeStep(steps.ProtectMain) {
 		protectionItem = optedOutItem(protectionItem.Name, steps.ProtectMain, selector)
 	}
@@ -374,7 +381,70 @@ func buildItems(
 	}
 	items = append(items, secItem)
 
+	// The Actions default-token step is bot-managed only: with the profile off
+	// it never appears in the plan.
+	if globals.BotManaged {
+		actItem := actionsPermissionsItem(c, owner, repo, selector, stdout)
+		items = append(items, actItem)
+	}
+
 	return items, nil
+}
+
+// printRemovedBypassActors prints the bypass actors a bot-managed reconcile
+// drops from protect-main (the profile sends an explicit empty list). A
+// bot-managed repo grants no one a standing bypass around the ruleset.
+func printRemovedBypassActors(stdout io.Writer, removed []github.BypassActor) {
+	if len(removed) == 0 {
+		return
+	}
+	names := make([]string, 0, len(removed))
+	for _, a := range removed {
+		names = append(names, github.DescribeBypassActor(a))
+	}
+	_, _ = fmt.Fprintf(stdout, "\n    bot-managed: removing %d ruleset bypass actor(s): %s\n", len(removed), strings.Join(names, ", "))
+}
+
+// actionsPermissionsItem is the bot-managed "actions" step: lock the default
+// GITHUB_TOKEN down to read-only and forbid PR approval. The Apply closure
+// always prints the before/after to the injected writer so the operator sees
+// the exact change. A nil client (init --dry-run) shows a would-update row
+// with no Apply closure.
+func actionsPermissionsItem(c *github.Client, owner, repo string, selector steps.Selector, stdout io.Writer) wizard.Item {
+	name := "Actions default token (read-only, no PR approval)"
+	if !selector.IncludeStep(steps.Actions) {
+		return optedOutItem(name, steps.Actions, selector)
+	}
+	if c == nil {
+		return wizard.Item{Name: name, Action: wizard.ActionUpdate}
+	}
+	return wizard.Item{
+		Name:   name,
+		Action: wizard.ActionUpdate,
+		Apply: func() error {
+			before, err := c.GetActionsWorkflowPermissions(owner, repo)
+			if err != nil {
+				return err
+			}
+			// Lead with a newline: the apply loop printed "applying..." without
+			// one, so the before/after block starts on its own lines.
+			_, _ = fmt.Fprintf(stdout, "\n    before: default_workflow_permissions=%s can_approve_pull_request_reviews=%t\n",
+				before.DefaultWorkflowPermissions, before.CanApprovePullRequestReviews)
+			if err := c.SetActionsWorkflowPermissions(owner, repo); err != nil {
+				return err
+			}
+			after, err := c.GetActionsWorkflowPermissions(owner, repo)
+			if err != nil {
+				// The PUT succeeded; report the intended end state if the
+				// confirm read fails rather than failing the whole step.
+				_, _ = fmt.Fprintf(stdout, "    after:  default_workflow_permissions=read can_approve_pull_request_reviews=false (confirm read failed: %v)\n", err)
+				return nil
+			}
+			_, _ = fmt.Fprintf(stdout, "    after:  default_workflow_permissions=%s can_approve_pull_request_reviews=%t\n",
+				after.DefaultWorkflowPermissions, after.CanApprovePullRequestReviews)
+			return nil
+		},
+	}
 }
 
 // optedOutItem returns a skip row for a step or file excluded by --skip /
@@ -402,11 +472,20 @@ func generalSettingsItem(c *github.Client, info *github.Repo, owner, repo string
 		}
 	}
 	return wizard.Item{
-		Name:   "General settings (auto-delete branches)",
+		Name:   generalSettingsName(),
 		Action: action,
 		Detail: detail,
-		Apply:  func() error { return c.ApplyGeneralSettings(owner, repo) },
+		Apply:  func() error { return c.ApplyGeneralSettings(owner, repo, globals.BotManaged) },
 	}
+}
+
+// generalSettingsName names the settings item so a dry-run shows the
+// bot-managed merge lockdown when the profile is on.
+func generalSettingsName() string {
+	if globals.BotManaged {
+		return "General settings (squash-only merges, auto-delete branches)"
+	}
+	return "General settings (auto-delete branches)"
 }
 
 func securityItem(c *github.Client, info *github.Repo, owner, repo, visibility string, rendered []templates.RenderedFile, paidSecurity bool) (wizard.Item, error) {
@@ -510,7 +589,7 @@ func securityMissing(c *github.Client, info github.Repo, owner, repo string, opt
 //   - drifted ruleset → update in place
 //   - classic exists → upgrade (create ruleset + remove classic)
 //   - neither exists → ruleset for public repos; try ruleset then fall back to classic for private
-func branchProtectionItem(c *github.Client, owner, repo, branch, visibility string, plan github.RulesetPlan, classicExists, protectionUnavailable bool, opts *github.BranchProtectionOptions, pack string, guardPresent bool) wizard.Item {
+func branchProtectionItem(c *github.Client, owner, repo, branch, visibility string, plan github.RulesetPlan, classicExists, protectionUnavailable bool, opts *github.BranchProtectionOptions, pack string, guardPresent bool, stdout io.Writer) wizard.Item {
 	if opts == nil {
 		opts = &github.BranchProtectionOptions{}
 	}
@@ -536,6 +615,7 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			Action: wizard.ActionUpdate,
 			Detail: "drift: " + strings.Join(plan.Drift, ", "),
 			Apply: func() error {
+				printRemovedBypassActors(stdout, github.RemovedBypassActors(plan.Live, *opts))
 				return c.EnsureBranchRuleset(owner, repo, requiredChecks(pack), *opts)
 			},
 		}
@@ -604,6 +684,32 @@ func loadFlags() error {
 		}
 	}
 	return globals.ApplyPreset(globals.Preset)
+}
+
+// validateBotManaged enforces the bot-managed profile's flag and token
+// guardrails before any planning or mutation:
+//   - --octopus is refused outright: the profile ships no third-party
+//     data-sharing workflow.
+//   - The token must belong to a human, not a bot or app — the profile's
+//     guardrails assume a human operator is hardening the automation's repo.
+func validateBotManaged(client *github.Client) error {
+	if !globals.BotManaged {
+		return nil
+	}
+	if globals.Octopus {
+		return fmt.Errorf("--octopus cannot be combined with --bot-managed: the bot-managed profile ships no third-party review workflow")
+	}
+	if err := github.ValidatePolicyChecks(globals.PolicyChecks); err != nil {
+		return err
+	}
+	isBot, why, err := client.IsBotOrAppToken()
+	if err != nil {
+		return fmt.Errorf("verify token owner for --bot-managed: %w", err)
+	}
+	if isBot {
+		return fmt.Errorf("--bot-managed refuses to apply under a bot or app token (%s): run it as a human operator", why)
+	}
+	return nil
 }
 
 const prModeNotice = "--pr: file changes go in a pull request. Settings, security, and branch protection still apply live via the API. Required status checks are deferred until you re-apply after that PR merges.\n\n"

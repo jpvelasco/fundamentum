@@ -1,6 +1,8 @@
 // Package globals holds shared mutable state for all commands.
 package globals
 
+import "github.com/jpvelasco/fundamentum/internal/github"
+
 // DryRun prints actions without applying them when true.
 var DryRun bool
 
@@ -49,6 +51,33 @@ var Octopus bool
 // (Codacy MCP rules for AI coding agents). Off by default: it assumes the
 // repo is on Codacy and an MCP server is available.
 var CodacyInstructions bool
+
+// BotManaged opts in to the bot-managed profile: harden a repo whose PRs are
+// opened by automation. It tightens templates (no workflow_run /
+// pull_request_target, no --octopus, no octocov pull-requests: write),
+// settings (squash-merge only), the Actions default token permissions, and the
+// branch ruleset (squash-only merges, shipped checks pinned to the GitHub
+// Actions app, no bypass actors). Off by default; with it off, every rendered
+// file and API request body is byte-identical to the default baseline.
+var BotManaged bool
+
+// PolicyChecks are the optional external "policy" status checks the
+// bot-managed profile requires on protect-main — external review checks an
+// automation pipeline must wait for. Each entry names a context and the
+// integration (app) id that must post it; the integration id is REQUIRED so a
+// check is never required without pinning which app produces it. Set via the
+// baseline (bot_policy_checks); there is no CLI flag.
+var PolicyChecks []PolicyCheck
+
+// PolicyCheck is one external policy status check: a context plus the app
+// that must post it. It aliases github.PolicyCheck so the baseline JSON and
+// the ruleset builder share one shape.
+type PolicyCheck = github.PolicyCheck
+
+// KeepFiles is the per-file keep list (baseline `keep`): target paths apply
+// must never overwrite, even when content drifts, so hand-tuned workflows
+// survive a re-apply. Matched with the same exact-path semantics as --skip.
+var KeepFiles []string
 
 // BranchUpToDate is the intended strict_required_status_checks_policy for
 // protect-main (branches must be up to date before merging). Default true.

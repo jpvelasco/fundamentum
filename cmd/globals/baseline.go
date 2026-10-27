@@ -25,6 +25,15 @@ type Baseline struct {
 	Only               []string `json:"only,omitempty"`
 	Octopus            bool     `json:"octopus,omitempty"`
 	CodacyInstructions bool     `json:"codacy_instructions,omitempty"`
+	// BotManaged opts in to the bot-managed profile. Default false.
+	BotManaged bool `json:"bot_managed,omitempty"`
+	// BotPolicyChecks are external policy checks the bot-managed profile
+	// requires on protect-main; each must name the app that posts it.
+	BotPolicyChecks []PolicyCheck `json:"bot_policy_checks,omitempty"`
+	// Keep is a per-file keep list: target paths apply must never overwrite,
+	// so hand-tuned workflows survive a re-apply. Reuses the skip-path
+	// mechanism (the same exact-path matching as --skip).
+	Keep []string `json:"keep,omitempty"`
 	// RequireBranchUpToDate is a tri-state: nil keeps the live ruleset
 	// policy on reconcile; true/false forces the policy.
 	RequireBranchUpToDate *bool `json:"require_branch_up_to_date,omitempty"`
@@ -41,9 +50,16 @@ func CurrentBaseline() Baseline {
 		NoOverwrite:        NoOverwrite,
 		Octopus:            Octopus,
 		CodacyInstructions: CodacyInstructions,
+		BotManaged:         BotManaged,
 	}
 	if RequireChecks != nil {
 		b.RequireChecks = append([]string{}, RequireChecks...)
+	}
+	if len(PolicyChecks) > 0 {
+		b.BotPolicyChecks = append([]PolicyCheck{}, PolicyChecks...)
+	}
+	if len(KeepFiles) > 0 {
+		b.Keep = append([]string{}, KeepFiles...)
 	}
 	if SkipSteps != nil {
 		b.Skip = append([]string{}, SkipSteps...)
@@ -110,6 +126,12 @@ func ApplyBaseline(b Baseline) error {
 	}
 	if OnlySteps == nil && b.Only != nil {
 		OnlySteps = append([]string{}, b.Only...)
+	}
+	if KeepFiles == nil && b.Keep != nil {
+		KeepFiles = append([]string{}, b.Keep...)
+	}
+	if len(PolicyChecks) == 0 && len(b.BotPolicyChecks) > 0 {
+		PolicyChecks = append([]PolicyCheck{}, b.BotPolicyChecks...)
 	}
 	if b.RequireBranchUpToDate != nil && !Explicit(branchUpToDateFlag) && !BranchUpToDateSet {
 		BranchUpToDate = *b.RequireBranchUpToDate

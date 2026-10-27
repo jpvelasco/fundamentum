@@ -617,7 +617,7 @@ func TestErrorResponses(t *testing.T) {
 			name:   "ApplyGeneralSettings 404",
 			status: http.StatusNotFound,
 			fn: func(c *Client) error {
-				return c.ApplyGeneralSettings("owner", "repo")
+				return c.ApplyGeneralSettings("owner", "repo", false)
 			},
 		},
 		{

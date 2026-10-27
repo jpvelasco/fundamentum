@@ -59,6 +59,10 @@ type RepoData struct {
 	Octopus bool
 	// CodacyInstructions opts in to .github/instructions/codacy.instructions.md.
 	CodacyInstructions bool
+	// BotManaged opts in to the bot-managed profile. When false, rendering is
+	// byte-identical to the default baseline; when true, a small set of
+	// privileged grants is stripped (see applyBotManagedTransforms).
+	BotManaged bool
 	// ReadmePath names the repo's README file (PR-template documentation line).
 	ReadmePath string
 	// AgentGuideLine is the PR-template checklist line for the repo's AI agent
@@ -110,6 +114,7 @@ func (d RepoData) sanitize() (RepoData, error) {
 		CIPack:             d.CIPack,
 		Octopus:            d.Octopus,
 		CodacyInstructions: d.CodacyInstructions,
+		BotManaged:         d.BotManaged,
 		ReadmePath:         sanitizeFileName(d.ReadmePath, "README.md"),
 		AgentGuideLine:     sanitizeAgentGuideLine(d.AgentGuideLine),
 		NodeLintCommand:    sanitizeShellLine(d.NodeLintCommand, defaultNodeLintCommand),
@@ -230,7 +235,47 @@ func renderFromFS(fsys fs.FS, data RepoData) ([]RenderedFile, error) {
 		files = append(files, RenderedFile{Path: target, Content: rendered})
 		return nil
 	})
-	return files, err
+	if err != nil {
+		return nil, err
+	}
+	if data.BotManaged {
+		files = applyBotManagedTransforms(files)
+	}
+	return files, nil
+}
+
+// botManagedOctocovPath is the private-repo octocov workflow whose
+// pull-requests: write grant the bot-managed profile strips.
+const botManagedOctocovPath = ".github/workflows/octocov.yml"
+
+// applyBotManagedTransforms rewrites rendered files for the bot-managed
+// profile. It runs only when BotManaged is set, so the default render is
+// byte-identical to the un-profiled baseline. Today the only transform drops
+// octocov's pull-requests: write grant (a bot-managed repo never lets a
+// workflow write to PRs); the CodeQL workflow keeps its security-events:
+// write, documented as the one expected write scope.
+func applyBotManagedTransforms(files []RenderedFile) []RenderedFile {
+	for i, f := range files {
+		if f.Path == botManagedOctocovPath {
+			files[i].Content = dropYAMLPermission(f.Content, "pull-requests: write")
+		}
+	}
+	return files
+}
+
+// dropYAMLPermission removes a top-level "permissions:" entry line (e.g.
+// "  pull-requests: write") from a rendered workflow. It matches the exact
+// two-space-indented line so a comment mentioning the same scope is kept.
+func dropYAMLPermission(content, perm string) string {
+	line := "  " + perm
+	out := make([]string, 0, strings.Count(content, "\n")+1)
+	for _, l := range strings.Split(content, "\n") {
+		if strings.TrimRight(l, " \t") == line {
+			continue
+		}
+		out = append(out, l)
+	}
+	return strings.Join(out, "\n")
 }
 
 // templateIncluded reports whether the template at embedded path ships for
