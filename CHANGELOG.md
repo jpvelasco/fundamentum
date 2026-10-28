@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-28
+
+**Feature release.** Adds opt-in hardening and audit for automation-managed repositories, tightens the shipped CI workflows, and restricts version-tag creation to authorized actors.
+
 ### Breaking changes
 
 - **`protect-version-tags` now restricts tag creation to repository admins.** The new creation rule blocks `GITHUB_TOKEN` and release bots from creating `v*` tags unless their actor is explicitly authorized to bypass it. Update release automation to use an authorized actor before re-applying; repository admins retain the existing bypass.
@@ -356,7 +360,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.5.0
 [0.4.3]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.4.3
 [0.4.2]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.4.2
 [0.4.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.4.1
