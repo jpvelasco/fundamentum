@@ -28,7 +28,8 @@ type Baseline struct {
 	// BotManaged opts in to the bot-managed profile. Default false.
 	BotManaged bool `json:"bot_managed,omitempty"`
 	// BotPolicyChecks are external policy checks the bot-managed profile
-	// requires on protect-main; each must name the app that posts it.
+	// requires on protect-main; each must name the app that posts it. They are
+	// retained for export but ignored by apply/audit while BotManaged is false.
 	BotPolicyChecks []PolicyCheck `json:"bot_policy_checks,omitempty"`
 	// Keep is a per-file keep list: target paths apply must never overwrite,
 	// so hand-tuned workflows survive a re-apply. Reuses the skip-path

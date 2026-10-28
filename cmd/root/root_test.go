@@ -1,6 +1,7 @@
 package root
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -21,9 +22,48 @@ func resetRootGlobals(t *testing.T) {
 		globals.Preset = ""
 		globals.AdvancedSecurity = false
 		globals.FromFile = ""
+		globals.BotManaged = false
+		globals.PolicyChecks = nil
 		globals.ResetExplicit()
 	})
 	globals.ResetExplicit()
+}
+
+func TestBotManagedFlagWithPresets(t *testing.T) {
+	for _, preset := range []string{"", "oss", "private", "strict"} {
+		for _, flag := range []string{"--bot-managed", "--bot-managed=true", "--bot-managed=false"} {
+			t.Run(preset+"/"+flag, func(t *testing.T) {
+				resetRootGlobals(t)
+				cmd := newRootCmd()
+				var out strings.Builder
+				cmd.SetOut(&out)
+				cmd.SetArgs([]string{"export", "--preset=" + preset, flag})
+				if err := cmd.Execute(); err != nil {
+					t.Fatal(err)
+				}
+				var baseline globals.Baseline
+				if err := json.Unmarshal([]byte(out.String()), &baseline); err != nil {
+					t.Fatal(err)
+				}
+				if baseline.BotManaged != (flag != "--bot-managed=false") || !globals.Explicit("bot-managed") {
+					t.Errorf("flag not preserved: %+v", baseline)
+				}
+				if baseline.Preset != preset || baseline.Strict != (preset == "strict") {
+					t.Errorf("preset not preserved: %+v", baseline)
+				}
+			})
+		}
+	}
+	t.Run("invalid boolean", func(t *testing.T) {
+		resetRootGlobals(t)
+		cmd := newRootCmd()
+		cmd.SetOut(&strings.Builder{})
+		cmd.SetErr(&strings.Builder{})
+		cmd.SetArgs([]string{"export", "--bot-managed=invalid"})
+		if err := cmd.Execute(); err == nil {
+			t.Fatal("invalid boolean must be refused")
+		}
+	})
 }
 
 func TestRequireChecksFlag(t *testing.T) {

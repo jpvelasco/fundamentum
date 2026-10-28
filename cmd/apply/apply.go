@@ -470,10 +470,16 @@ func generalSettingsItem(c *github.Client, info *github.Repo, owner, repo string
 	detail := ""
 	if info != nil {
 		action = wizard.ActionUpdate
-		detail = "delete_branch_on_merge=false"
-		if info.DeleteBranchOnMerge {
+		var drift []string
+		if !info.DeleteBranchOnMerge {
+			drift = append(drift, "delete_branch_on_merge=false")
+		}
+		if globals.BotManaged {
+			drift = append(drift, info.SquashOnlyDrift()...)
+		}
+		detail = strings.Join(drift, ", ")
+		if len(drift) == 0 {
 			action = wizard.ActionSkip
-			detail = ""
 		}
 	}
 	return wizard.Item{

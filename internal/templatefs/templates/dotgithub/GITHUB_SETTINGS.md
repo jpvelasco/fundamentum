@@ -117,8 +117,11 @@ EOF
 > it pins that check to the GitHub Actions app (`integration_id: 15368`) so
 > only a real Actions check run with that exact name satisfies it — a
 > third-party app posting an identically-named green check cannot. Checks it
-> did not ship (e.g. a custom `--require-checks` entry) are never pinned, and
-> checks already present are left exactly as they are.
+> did not ship (e.g. a custom `--require-checks` entry) stay unpinned unless
+> explicitly declared in `bot_policy_checks`. Ordinary reconciliation preserves
+> existing pins. With `--bot-managed`, intended shipped checks and baseline
+> policy checks already present are re-pinned if their `integration_id` is missing
+> or wrong. Unrelated checks keep their existing pins.
 
 > **Note on required status checks:** the `required_status_checks` array above
 > is intentionally empty — GitHub only recognises job names after they've run
@@ -154,7 +157,12 @@ main dashboard update via the integration webhook; coverage via the
    default-branch push, so a repository-secret token would be reachable by any
    job; the environment keeps it scoped to the trusted default branch.
    Validate the upload in the "Test your integration" panel after the next CI
-   run (needs a baseline commit before PR coverage metrics appear).
+   default-branch run. Codacy receives no PR coverage reports; its PR checks
+   cover static analysis. Codecov receives tokenless public-PR reports from
+   the test job and computes patch coverage against the default-branch report.
+   If migrating from the old forwarder, manually remove
+   `.github/workflows/codacy-coverage.yml` after configuring this replacement.
+   `apply` updates and creates files; it never deletes existing workflows.
 4. **Code patterns:** enable the tools that fit the repo's stack (e.g. Revive
    for Go) and disable noise (e.g. Trivy/Checkov where the repo has no
    container/IaC files). Tools enabled by an org AI Policy cannot be disabled

@@ -622,12 +622,14 @@ func statusChecksRule(statusChecks []string, opts BranchProtectionOptions) map[s
 // and bot-managed pin drift.
 func requiredCheckEntries(statusChecks []string, opts BranchProtectionOptions) []map[string]any {
 	allChecks := intendedChecks(statusChecks, opts)
-	policy := policyCheckEntries(opts.PolicyChecks)
-	checks := make([]map[string]any, 0, len(allChecks)+len(policy))
+	checks := make([]map[string]any, 0, len(allChecks))
 	for _, name := range allChecks {
 		checks = append(checks, newStatusCheck(name))
 	}
-	return append(checks, policy...)
+	if opts.BotManaged {
+		checks = append(checks, policyCheckEntries(opts.PolicyChecks)...)
+	}
+	return checks
 }
 
 // intendedStrictChecks is the up-to-date policy for a fresh ruleset: true
@@ -886,14 +888,11 @@ func prRuleWeaker(rule map[string]any, opts BranchProtectionOptions) bool {
 		return true
 	}
 	params, _ := rule["parameters"].(map[string]any)
-	if !mapBool(params, "required_review_thread_resolution") {
-		return true
-	}
-	if opts.requireCodeOwners() && !mapBool(params, "require_code_owner_review") {
-		return true
-	}
-	if !opts.Solo && !mapBool(params, "dismiss_stale_reviews_on_push") {
-		return true
+	intended := prRuleParams(opts)
+	for _, key := range []string{"required_review_thread_resolution", "require_code_owner_review", "dismiss_stale_reviews_on_push"} {
+		if mapBool(intended, key) && !mapBool(params, key) {
+			return true
+		}
 	}
 	return false
 }

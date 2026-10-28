@@ -42,65 +42,82 @@ type EnvironmentBranchPolicy struct {
 	DefaultBranchOnly bool
 	// Patterns are the allowed branch patterns (for reporting).
 	Patterns []string
+	// TagPatterns also permit deployments, so they rule out DefaultBranchOnly.
+	TagPatterns []string
+	// ProtectedBranches is a restriction to protected branches, which may
+	// include branches other than the default branch.
+	ProtectedBranches bool
 }
 
 // EnvironmentBranchPolicies lists each environment's deployment-branch
-// posture. Environments the token cannot read are skipped only on 404; any
-// other failure is an error (fail closed).
+// posture. Incomplete or unreadable policy data is an error, never evidence
+// that an environment is safe.
 func (c *Client) EnvironmentBranchPolicies(owner, repo, defaultBranch string) ([]EnvironmentBranchPolicy, error) {
-	var list struct {
-		Environments []struct {
-			Name string `json:"name"`
-		} `json:"environments"`
-	}
-	if err := c.getDecode(repoPath(owner, repo)+"/environments?per_page=100", "list environments", &list); err != nil {
-		return nil, err
-	}
 	var out []EnvironmentBranchPolicy
-	for _, env := range list.Environments {
-		pol, err := c.environmentBranchPolicy(owner, repo, env.Name, defaultBranch)
+	for path := repoPath(owner, repo) + "/environments?per_page=100"; path != ""; {
+		var list struct {
+			Environments []struct{ Name string }
+		}
+		next, err := c.getDecodePage(path, "list environments", &list)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, pol)
+		for _, env := range list.Environments {
+			pol, err := c.environmentBranchPolicy(owner, repo, env.Name, defaultBranch)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, pol)
+		}
+		path = next
 	}
 	return out, nil
 }
 
-// environmentBranchPolicy reads one environment's branch protection rule.
+// environmentBranchPolicy reads the environment's settings, then its branch
+// and tag patterns from the separate deployment-branch-policies endpoint.
 func (c *Client) environmentBranchPolicy(owner, repo, name, defaultBranch string) (EnvironmentBranchPolicy, error) {
 	pol := EnvironmentBranchPolicy{Name: name}
 	var env struct {
-		ProtectionRules []struct {
-			Type                    string `json:"type"`
-			ProtectedBranches       bool   `json:"protected_branches"`
-			CustomBranchPolicies    bool   `json:"custom_branch_policies"`
-			BranchNamePatternPolicy []struct {
-				Name string `json:"name"`
-			} `json:"branch_name_pattern_policy,omitempty"`
-		} `json:"protection_rules"`
+		DeploymentBranchPolicy *struct {
+			ProtectedBranches    bool `json:"protected_branches"`
+			CustomBranchPolicies bool `json:"custom_branch_policies"`
+		} `json:"deployment_branch_policy"`
 	}
-	resp, err := c.get(repoPath(owner, repo) + "/environments/" + url.PathEscape(name))
-	if err != nil {
-		return pol, fmt.Errorf("get environment %s: %w", name, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if err := expectStatus("get environment "+name, resp, http.StatusOK); err != nil {
+	path := repoPath(owner, repo) + "/environments/" + url.PathEscape(name)
+	if err := c.getDecode(path, "get environment "+name, &env); err != nil {
 		return pol, err
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
-		return pol, fmt.Errorf("decode environment %s: %w", name, err)
+	settings := env.DeploymentBranchPolicy
+	if settings == nil {
+		return pol, nil
 	}
-	for _, rule := range env.ProtectionRules {
-		if rule.Type != "branch_policy" {
-			continue
-		}
-		pol.Restricted = true
-		for _, bp := range rule.BranchNamePatternPolicy {
-			pol.Patterns = append(pol.Patterns, bp.Name)
-		}
+	pol.ProtectedBranches = settings.ProtectedBranches
+	pol.Restricted = settings.ProtectedBranches || settings.CustomBranchPolicies
+	if !settings.CustomBranchPolicies {
+		return pol, nil
 	}
-	pol.DefaultBranchOnly = pol.Restricted && len(pol.Patterns) == 1 && pol.Patterns[0] == defaultBranch
+	for path += "/deployment-branch-policies?per_page=100"; path != ""; {
+		var page struct {
+			BranchPolicies []struct{ Name, Type string } `json:"branch_policies"`
+		}
+		next, err := c.getDecodePage(path, "list deployment policies for "+name, &page)
+		if err != nil {
+			return pol, err
+		}
+		for _, policy := range page.BranchPolicies {
+			switch policy.Type {
+			case "branch":
+				pol.Patterns = append(pol.Patterns, policy.Name)
+			case "tag":
+				pol.TagPatterns = append(pol.TagPatterns, policy.Name)
+			default:
+				return pol, fmt.Errorf("environment %s: unknown deployment policy type %q", name, policy.Type)
+			}
+		}
+		path = next
+	}
+	pol.DefaultBranchOnly = !pol.ProtectedBranches && len(pol.TagPatterns) == 0 && len(pol.Patterns) == 1 && pol.Patterns[0] == defaultBranch
 	return pol, nil
 }
 

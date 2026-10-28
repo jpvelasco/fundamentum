@@ -25,10 +25,9 @@ jobs:
           - language: actions
           - language: go
             build-mode: autobuild
-          # Uncomment when this repo contains JavaScript or TypeScript (e.g. an
-          # npm/release shim). Leaving it on with no JS/TS makes CodeQL error.
-          # - language: javascript-typescript
-          #   build-mode: none
+          # The npm shim and release scripts are JavaScript.
+          - language: javascript-typescript
+            build-mode: none
 
     steps:
       - name: Checkout repository

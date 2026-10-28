@@ -594,6 +594,7 @@ func writeMatchingContent(t *testing.T, w http.ResponseWriter, r *http.Request, 
 		CodeOwnerLine:  "* @owner",
 		ReadmePath:     "README.md",
 		AgentGuideLine: templates.DetectAgentGuideLine(false, false),
+		BotManaged:     globals.BotManaged,
 	}
 	files, err := templates.Render(data)
 	if err != nil {
@@ -650,10 +651,11 @@ func TestAudit_UnknownSkipKeyErrors(t *testing.T) {
 // botManagedProbe is the configurable payload set for the bot-managed audit
 // probe endpoints, so the compliant and gaps handlers share one router.
 type botManagedProbe struct {
-	perms   string
-	countBlob   string
+	perms        string
+	countBlob    string
 	envs         string
 	envDetail    string
+	envPolicies  string
 	workflowList string
 	workflowFile string // path → served for the single workflow file, empty for none
 	workflowBody string // base64 content for workflowFile
@@ -673,6 +675,8 @@ func botManagedHandler(p botManagedProbe) http.HandlerFunc {
 			write(w, p.countBlob)
 		case r.URL.Path == "/repos/owner/repo/environments":
 			write(w, p.envs)
+		case strings.HasSuffix(r.URL.Path, "/deployment-branch-policies"):
+			write(w, p.envPolicies)
 		case strings.Contains(r.URL.Path, "/environments/"):
 			write(w, p.envDetail)
 		case p.workflowFile != "" && strings.Contains(r.URL.Path, "/contents/"+p.workflowFile):
@@ -688,18 +692,19 @@ func botManagedHandler(p botManagedProbe) http.HandlerFunc {
 // compliantBotManagedProbe is a fully-hardened repo: read-only token, no
 // secrets, one default-branch-only environment, no workflows.
 var compliantBotManagedProbe = botManagedProbe{
-	perms:   `{"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}`,
-	countBlob:  `{"total_count":0,"secrets":[]}`,
+	perms:        `{"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}`,
+	countBlob:    `{"total_count":0,"secrets":[]}`,
 	envs:         `{"environments":[{"name":"codacy"}]}`,
-	envDetail:    `{"protection_rules":[{"type":"branch_policy","branch_name_pattern_policy":[{"name":"main"}]}]}`,
+	envDetail:    `{"protection_rules":[{"type":"branch_policy"}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}`,
+	envPolicies:  `{"branch_policies":[{"name":"main","type":"branch"}]}`,
 	workflowList: `[]`,
 }
 
 // gapBotManagedProbe is an unhardened repo: writable self-approving token,
 // four secrets, no environments, one pull_request_target workflow.
 var gapBotManagedProbe = botManagedProbe{
-	perms:   `{"default_workflow_permissions":"write","can_approve_pull_request_reviews":true}`,
-	countBlob:  `{"total_count":4,"secrets":[]}`,
+	perms:        `{"default_workflow_permissions":"write","can_approve_pull_request_reviews":true}`,
+	countBlob:    `{"total_count":4,"secrets":[]}`,
 	envs:         `{"environments":[]}`,
 	workflowList: `[{"type":"file","path":".github/workflows/bad.yml"}]`,
 	workflowFile: ".github/workflows/bad.yml",
@@ -708,7 +713,11 @@ var gapBotManagedProbe = botManagedProbe{
 }
 
 func TestBotManagedChecks_Compliant(t *testing.T) {
-	srv := httptest.NewServer(botManagedHandler(compliantBotManagedProbe))
+	probe := compliantBotManagedProbe
+	probe.workflowFile = ".github/workflows/upload.yml"
+	probe.workflowList = `[{"type":"file","path":".github/workflows/upload.yml"}]`
+	probe.workflowBody = base64.StdEncoding.EncodeToString([]byte("jobs:\n  upload:\n    environment: codacy\n    permissions: {contents: write}\n"))
+	srv := httptest.NewServer(botManagedHandler(probe))
 	defer srv.Close()
 	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 	results := botManagedChecks(c, "owner", "repo", "main")

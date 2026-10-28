@@ -2,6 +2,7 @@ package github
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"strings"
@@ -217,7 +218,9 @@ func TestEnvironmentBranchPolicies(t *testing.T) {
 			_, _ = w.Write([]byte(`{"environments":[{"name":"codacy"},{"name":"open"}]}`))
 		case "/repos/owner/repo/environments/codacy":
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"protection_rules":[{"type":"branch_policy","protected_branches":false,"custom_branch_policies":true,"branch_name_pattern_policy":[{"name":"main"}]}]}`))
+			_, _ = w.Write([]byte(`{"protection_rules":[{"type":"branch_policy"}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}`))
+		case "/repos/owner/repo/environments/codacy/deployment-branch-policies":
+			_, _ = w.Write([]byte(`{"branch_policies":[{"name":"main","type":"branch"}]}`))
 		case "/repos/owner/repo/environments/open":
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"protection_rules":[]}`))
@@ -243,6 +246,126 @@ func TestEnvironmentBranchPolicies(t *testing.T) {
 			t.Errorf("open env must be unrestricted: %+v", byName["open"])
 		}
 	}, nil)
+}
+
+func TestEnvironmentBranchPolicies_Posture(t *testing.T) {
+	for _, tt := range []struct {
+		name, setting, policies string
+		restricted, safe        bool
+	}{
+		{"unrestricted", "null", "", false, false},
+		{"protected", `{"protected_branches":true,"custom_branch_policies":false}`, "", true, false},
+		{"default branch", `{"protected_branches":false,"custom_branch_policies":true}`, `[{"name":"main","type":"branch"}]`, true, true},
+		{"empty", `{"custom_branch_policies":true}`, `[]`, true, false},
+		{"wildcard", `{"custom_branch_policies":true}`, `[{"name":"*","type":"branch"}]`, true, false},
+		{"tag called main", `{"custom_branch_policies":true}`, `[{"name":"main","type":"tag"}]`, true, false},
+		{"branch and tag", `{"custom_branch_policies":true}`, `[{"name":"main","type":"branch"},{"name":"v*","type":"tag"}]`, true, false},
+		{"extra branch", `{"custom_branch_policies":true}`, `[{"name":"main","type":"branch"},{"name":"release/*","type":"branch"}]`, true, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			policyCalls := 0
+			testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/repos/owner/repo/environments":
+					_ = json.NewEncoder(w).Encode(map[string]any{"environments": []map[string]string{{"name": "release env"}}})
+				case "/repos/owner/repo/environments/release env":
+					_ = json.NewEncoder(w).Encode(map[string]any{"deployment_branch_policy": json.RawMessage(tt.setting)})
+				case "/repos/owner/repo/environments/release env/deployment-branch-policies":
+					policyCalls++
+					_ = json.NewEncoder(w).Encode(map[string]any{"branch_policies": json.RawMessage(tt.policies)})
+				default:
+					t.Errorf("unexpected path %q", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}), nil, func(c *Client) {
+				pols, err := c.EnvironmentBranchPolicies("owner", "repo", "main")
+				if err != nil || len(pols) != 1 {
+					t.Fatalf("policies = %v, error = %v", pols, err)
+				}
+				pol := pols[0]
+				if pol.Restricted != tt.restricted || pol.DefaultBranchOnly != tt.safe {
+					t.Errorf("policy = %+v, want restricted=%v, safe=%v", pol, tt.restricted, tt.safe)
+				}
+				if (policyCalls > 0) != (tt.policies != "") {
+					t.Errorf("deployment policy requests = %d", policyCalls)
+				}
+			}, nil)
+		})
+	}
+}
+
+func TestEnvironmentBranchPolicies_Pagination(t *testing.T) {
+	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/repos/owner/repo/environments" && r.URL.Query().Get("page") != "2":
+			w.Header().Set("Link", `</repos/owner/repo/environments?page=2>; rel="next"`)
+			_ = json.NewEncoder(w).Encode(map[string]any{"environments": []map[string]string{{"name": "restricted"}}})
+		case r.URL.Path == "/repos/owner/repo/environments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"environments": []map[string]string{{"name": "open"}}})
+		case r.URL.Path == "/repos/owner/repo/environments/open":
+			_ = json.NewEncoder(w).Encode(map[string]any{"deployment_branch_policy": nil})
+		case r.URL.Path == "/repos/owner/repo/environments/restricted":
+			_ = json.NewEncoder(w).Encode(map[string]any{"deployment_branch_policy": map[string]bool{"custom_branch_policies": true}})
+		case strings.HasSuffix(r.URL.Path, "/deployment-branch-policies"):
+			name := "main"
+			if r.URL.Query().Get("page") == "2" {
+				name = "release/*"
+			} else {
+				w.Header().Set("Link", `</repos/owner/repo/environments/restricted/deployment-branch-policies?page=2>; rel="next"`)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"branch_policies": []map[string]string{{"name": name, "type": "branch"}}})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}), nil, func(c *Client) {
+		pols, err := c.EnvironmentBranchPolicies("owner", "repo", "main")
+		if err != nil || len(pols) != 2 {
+			t.Fatalf("policies = %v, error = %v", pols, err)
+		}
+		if pols[0].DefaultBranchOnly || len(pols[0].Patterns) != 2 || pols[1].Restricted {
+			t.Errorf("pagination lost restrictions: %+v", pols)
+		}
+	}, nil)
+}
+
+func TestEnvironmentBranchPolicies_Errors(t *testing.T) {
+	t.Run("unknown policy type", func(t *testing.T) {
+		testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"environments":             []map[string]string{{"name": "codacy"}},
+				"deployment_branch_policy": map[string]bool{"custom_branch_policies": true},
+				"branch_policies":          []map[string]string{{"name": "main", "type": "unknown"}},
+			})
+		}), nil, func(c *Client) {
+			if _, err := c.EnvironmentBranchPolicies("owner", "repo", "main"); err == nil || !strings.Contains(err.Error(), "unknown deployment policy type") {
+				t.Fatalf("unknown policy type must fail closed: %v", err)
+			}
+		}, nil)
+	})
+	for _, endpoint := range []string{"environments", "environments/codacy", "environments/codacy/deployment-branch-policies"} {
+		for _, status := range []int{http.StatusForbidden, http.StatusNotFound, http.StatusOK} {
+			t.Run(fmt.Sprintf("%s/%d", endpoint, status), func(t *testing.T) {
+				testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == "/repos/owner/repo/"+endpoint {
+						w.WriteHeader(status)
+						_, _ = w.Write([]byte("{"))
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"environments":             []map[string]string{{"name": "codacy"}},
+						"deployment_branch_policy": map[string]bool{"custom_branch_policies": true},
+					})
+				}), nil, func(c *Client) {
+					if _, err := c.EnvironmentBranchPolicies("owner", "repo", "main"); err == nil {
+						t.Error("incomplete or unreadable policy must not be accepted")
+					}
+				}, nil)
+			})
+		}
+	}
 }
 
 func TestGetActionsWorkflowPermissions(t *testing.T) {

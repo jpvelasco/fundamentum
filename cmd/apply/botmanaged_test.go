@@ -1,8 +1,11 @@
 package apply
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -12,6 +15,159 @@ import (
 	"github.com/jpvelasco/fundamentum/internal/templates"
 	"github.com/jpvelasco/fundamentum/internal/wizard"
 )
+
+func TestGeneralSettingsBotManaged(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		bot  bool
+		info github.Repo
+		want wizard.Action
+	}{
+		{"squash disabled", true, github.Repo{DeleteBranchOnMerge: true}, wizard.ActionUpdate},
+		{"merge enabled", true, github.Repo{DeleteBranchOnMerge: true, AllowSquashMerge: true, AllowMergeCommit: true}, wizard.ActionUpdate},
+		{"rebase enabled", true, github.Repo{DeleteBranchOnMerge: true, AllowSquashMerge: true, AllowRebaseMerge: true}, wizard.ActionUpdate},
+		{"compliant", true, github.Repo{DeleteBranchOnMerge: true, AllowSquashMerge: true}, wizard.ActionSkip},
+		{"profile off", false, github.Repo{DeleteBranchOnMerge: true, AllowMergeCommit: true}, wizard.ActionSkip},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetBotManagedGlobals(t)
+			globals.BotManaged = tc.bot
+			item := generalSettingsItem(nil, &tc.info, "owner", "repo")
+			if item.Action != tc.want {
+				t.Fatalf("item = %+v, want %v", item, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunWithClientBotManagedPresets(t *testing.T) {
+	for _, preset := range []string{"", "oss", "private", "strict"} {
+		t.Run("preset="+preset, func(t *testing.T) {
+			resetBotManagedGlobals(t)
+			t.Cleanup(func() {
+				globals.Preset = ""
+				globals.Strict = false
+				globals.AdvancedSecurity = false
+			})
+			globals.BotManaged = true
+			globals.Preset = preset
+			globals.PolicyChecks = []github.PolicyCheck{{Context: "external-review", IntegrationID: 4242}}
+			base := runFlowHandler()
+			var settings, permissions map[string]any
+			var branch github.Ruleset
+			filesWritten := 0
+			srv, client := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.URL.Path == "/user":
+					_, _ = io.WriteString(w, `{"login":"owner","type":"User"}`)
+				case r.URL.Path == "/repos/owner/repo" && r.Method == http.MethodGet:
+					_, _ = io.WriteString(w, `{"visibility":"public","delete_branch_on_merge":true,"allow_squash_merge":true,"allow_merge_commit":true,"allow_rebase_merge":true}`)
+				case r.URL.Path == "/repos/owner/repo" && r.Method == http.MethodPatch:
+					var body map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Error(err)
+					}
+					if _, ok := body["delete_branch_on_merge"]; ok {
+						settings = body
+					}
+					_, _ = io.WriteString(w, `{}`)
+				case strings.HasSuffix(r.URL.Path, "/actions/permissions/workflow"):
+					switch {
+					case r.Method == http.MethodPut:
+						if err := json.NewDecoder(r.Body).Decode(&permissions); err != nil {
+							t.Error(err)
+						}
+						w.WriteHeader(http.StatusNoContent)
+					case permissions != nil:
+						_ = json.NewEncoder(w).Encode(permissions)
+					default:
+						_, _ = io.WriteString(w, `{"default_workflow_permissions":"write","can_approve_pull_request_reviews":true}`)
+					}
+				case strings.HasSuffix(r.URL.Path, "/rulesets") && r.Method == http.MethodPost:
+					var ruleset github.Ruleset
+					if err := json.NewDecoder(r.Body).Decode(&ruleset); err != nil {
+						t.Error(err)
+					}
+					if ruleset.Name == "protect-main" {
+						branch = ruleset
+					}
+					w.WriteHeader(http.StatusCreated)
+					_, _ = io.WriteString(w, `{"id":1}`)
+				default:
+					if r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/contents/") {
+						filesWritten++
+					}
+					base(w, r)
+				}
+			}))
+			defer srv.Close()
+			var out strings.Builder
+			if err := runWithClient(client, "owner", "repo", strings.NewReader("solo\ny\n"), &out); err != nil {
+				t.Fatalf("apply: %v\n%s", err, out.String())
+			}
+			if !reflect.DeepEqual(settings, map[string]any{"delete_branch_on_merge": true, "allow_squash_merge": true, "allow_merge_commit": false, "allow_rebase_merge": false}) {
+				t.Errorf("settings = %v", settings)
+			}
+			if !reflect.DeepEqual(permissions, map[string]any{"default_workflow_permissions": "read", "can_approve_pull_request_reviews": false}) {
+				t.Errorf("permissions = %v", permissions)
+			}
+			opts := github.BranchProtectionOptions{BotManaged: true, PolicyChecks: globals.PolicyChecks, StrictChecks: globals.BranchUpToDate}
+			if branch.Name != "protect-main" || len(branch.BypassActors) != 0 {
+				t.Errorf("branch ruleset = %+v", branch)
+			}
+			if drift := github.BranchRulesetDrift(&branch, github.ResolveRequiredChecksForPack(nil, "go"), opts); len(drift) > 0 {
+				t.Errorf("applied branch drift = %v", drift)
+			}
+			if filesWritten == 0 || !strings.Contains(out.String(), "Done") || !strings.Contains(out.String(), "after:") {
+				t.Errorf("incomplete apply (%d files):\n%s", filesWritten, out.String())
+			}
+		})
+	}
+}
+
+func TestBaselinePolicyChecksOff(t *testing.T) {
+	for _, explicitOff := range []bool{false, true} {
+		t.Run(fmt.Sprintf("explicit-off=%t", explicitOff), func(t *testing.T) {
+			resetBotManagedGlobals(t)
+			globals.ResetExplicit()
+			t.Cleanup(globals.ResetExplicit)
+			globals.BotManaged = false
+			globals.PolicyChecks = nil
+			if explicitOff {
+				globals.NoteExplicit("bot-managed")
+			}
+			if err := globals.ApplyBaseline(globals.Baseline{
+				BotManaged:      explicitOff,
+				BotPolicyChecks: []globals.PolicyCheck{{Context: "unvalidated-policy"}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := ValidateBotManagedFlags(); err != nil {
+				t.Fatal(err)
+			}
+			var body map[string]any
+			srv, client := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				w.WriteHeader(http.StatusCreated)
+			}))
+			defer srv.Close()
+			if err := client.CreateBranchRuleset("owner", "repo", []string{"Lint"}, github.BranchProtectionOptions{
+				Solo: true, BotManaged: globals.BotManaged, PolicyChecks: globals.PolicyChecks,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(encoded), "unvalidated-policy") {
+				t.Fatalf("disabled profile leaked policy into request: %s", encoded)
+			}
+		})
+	}
+}
 
 // resetBotManagedGlobals restores flag state mutated by these tests.
 func resetBotManagedGlobals(t *testing.T) {

@@ -7,12 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking changes
+
+- **`protect-version-tags` now restricts tag creation to repository admins.** The new creation rule blocks `GITHUB_TOKEN` and release bots from creating `v*` tags unless their actor is explicitly authorized to bypass it. Update release automation to use an authorized actor before re-applying; repository admins retain the existing bypass.
+
+### Added
+
+- **`--bot-managed` profile** for automation-opened PRs: squash-only merges, read-only default Actions tokens without review approval, no branch-ruleset bypass actors, app-pinned policy checks, and workflow/environment audit probes. It can be combined with any preset and is off by default.
+
 ### Security
 
 - **Coverage uploads no longer run in privileged contexts reachable by PRs.** Two related defaults are tightened for every hardened repo:
-  - **Codacy coverage moved out of the privileged `workflow_run` forwarder into a push-only CI job.** The `codacy-coverage.yml` `workflow_run` workflow consumed a test-job artifact in a privileged context. It is deleted; the Codacy upload now runs as a `codacy-upload` job inside `ci.yml` that runs only on the default-branch push (`needs: test`) and reads `CODACY_REPOSITORY_API_TOKEN` from a `codacy` **environment** restricted to the default branch instead of a repository secret, so a pull request can never reach the token. `GITHUB_SETTINGS.md` now walks through creating that environment and secret.
-  - **`id-token: write` moved out of the test job.** The Codecov OIDC grant now lives on a separate push-only `coverage-upload` job (`needs: test`); the test job — which runs untrusted PR code — no longer holds an OIDC token. Per-OS coverage and Test Analytics still upload, only on the trusted default-branch push. PR coverage diffs are still computed by Codecov against the base report.
-- **`protect-version-tags` gains a creation rule.** Only bypass actors (the repository admin role) can create matching `v*` tags, so a leaked write token cannot push a malicious version tag that a release workflow would then build and publish. Repository admins keep the ability via a `RepositoryRole` bypass actor.
+  - **Codacy coverage moved out of the privileged `workflow_run` forwarder into a push-only CI job.** The `codacy-coverage.yml` `workflow_run` workflow consumed a test-job artifact in a privileged context. It is no longer shipped; **users must manually remove any existing `.github/workflows/codacy-coverage.yml`** after configuring the replacement because `apply` never deletes files. The Codacy upload now runs as a `codacy-upload` job inside `ci.yml` that runs only on the default-branch push (`needs: test`) and reads `CODACY_REPOSITORY_API_TOKEN` from a `codacy` **environment** restricted to the default branch instead of a repository secret, so a pull request can never reach the token. `GITHUB_SETTINGS.md` now walks through creating that environment and secret.
+  - **`id-token: write` moved out of the test job.** The Codecov OIDC grant now lives on a separate push-only `coverage-upload` job (`needs: test`); the test job — which runs untrusted PR code — no longer holds an OIDC token. Per-OS base coverage and Test Analytics upload on the trusted default-branch push. Public PR coverage uploads without a token or OIDC from the test job, using Codecov's unprotected-branch namespace for both same-repository and fork PRs.
 - **Octopus Review template runs on `pull_request`, not `pull_request_target`.** The opt-in workflow no longer requests the privileged `pull_request_target` trigger; `pull-requests: write` is scoped to the review job only and the header documents the remaining risk of running third-party code with a PR-write token.
 
 ### Changed
@@ -21,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Bot-managed merge settings reconcile independently of branch deletion.** Apply repairs non-squash merge methods even when auto-delete is already on; audit also checks the merge settings.
+
+- **Bot policy checks stay opt-in.** Baseline policy checks are ignored when `--bot-managed` is off, including an explicit flag override.
+- **Environment audit uses GitHub deployment policies.** Reads the top-level deployment settings and paginated branch/tag policies; only an exact default-branch rule with no tag access passes. API failures remain warnings instead of silently marking environments safe.
+- **CodeQL scans the npm shim and release scripts.** Restores the JavaScript analysis configuration alongside Go and Actions.
 - **Bot-managed workflow audit parses YAML per job.** The scan recognizes commented and quoted permission values, `write-all`, workflow-level inheritance, job overrides, and all trigger forms. A restricted environment on one job no longer hides another job's writes. Malformed YAML produces a warning.
 
 ## [0.4.3] - 2026-10-26

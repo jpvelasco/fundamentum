@@ -701,7 +701,11 @@ func writeGoModPresent(w http.ResponseWriter, r *http.Request) bool {
 // public repo with no existing protection or files: visibility check, ruleset
 // checks, classic protection, file status/upsert, settings, and security.
 func newRunFlowServer() *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return httptest.NewServer(runFlowHandler())
+}
+
+func runFlowHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		if writeGoModPresent(w, r) {
 			return
 		}
@@ -763,7 +767,7 @@ func newRunFlowServer() *httptest.Server {
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
-	}))
+	}
 }
 
 // TestRunWithClient_FullFlow drives the complete apply flow against a mock

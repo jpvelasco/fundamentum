@@ -137,6 +137,36 @@ func TestBranchBodyBotManagedOffIsBaseline(t *testing.T) {
 	}
 }
 
+func TestPolicyChecksIgnoredWithoutBotManaged(t *testing.T) {
+	for _, checks := range [][]string{nil, {}, {"Lint"}} {
+		for _, policy := range []PolicyCheck{
+			{Context: "external-review"},
+			{Context: "external-review", IntegrationID: 4242},
+		} {
+			opts := BranchProtectionOptions{Solo: true}
+			wantCreate := branchRulesetBody(checks, opts)
+			wantMerge := mergeBranchRulesetBody(liveBranchRuleset(), checks, opts)
+			opts.PolicyChecks = []PolicyCheck{policy}
+			for _, pair := range [][2]map[string]any{
+				{wantCreate, branchRulesetBody(checks, opts)},
+				{wantMerge, mergeBranchRulesetBody(liveBranchRuleset(), checks, opts)},
+			} {
+				want, err := json.Marshal(pair[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := json.Marshal(pair[1])
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(got) != string(want) {
+					t.Errorf("profile-off request bytes changed with policy %+v:\ngot %s\nwant %s", policy, got, want)
+				}
+			}
+		}
+	}
+}
+
 // ruleByTypeBody finds a rule by type in a built body map.
 func ruleByTypeBody(body map[string]any, typ string) map[string]any {
 	rules, _ := body["rules"].([]map[string]any)

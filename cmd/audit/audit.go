@@ -192,6 +192,10 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 		boolCheck("Dependabot alerts", dependabot, "not enabled", steps.Security, selector),
 		secretCheck(info, selector),
 	}
+	if globals.BotManaged {
+		drift := info.SquashOnlyDrift()
+		results = append(results, boolCheck("squash-only merges", len(drift) == 0, strings.Join(drift, ", "), steps.Settings, selector))
+	}
 	for _, f := range files {
 		if !selector.IncludeFile(f.Path) {
 			results = append(results, skipFileCheck(f.Path, selector))
@@ -200,10 +204,8 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 		results = append(results, fileCheck(client, owner, repo, f.Path, []byte(f.Content)))
 	}
 
-	// Bot-managed profile: report-only posture probes. These never fail the
-	// run (the profile is opt-in and the repo may legitimately be mid-hardening)
-	// and never delete anything — they only surface how far the repo is from
-	// the profile's posture.
+	// Bot-managed posture probes report WARN rather than FAIL; --strict
+	// promotes warnings to a failed run. They never change repository state.
 	if globals.BotManaged && selector.IncludeStep(steps.Actions) {
 		results = append(results, botManagedChecks(client, owner, repo, info.DefaultBranch)...)
 	}
@@ -464,7 +466,7 @@ func environmentChecks(client *github.Client, owner, repo, defaultBranch string)
 		}
 		detail := "unrestricted — any branch (incl. a PR branch) can reach its secrets"
 		if pol.Restricted {
-			detail = "restricted to branches " + strings.Join(pol.Patterns, ", ") + " (not default-branch-only)"
+			detail = fmt.Sprintf("deployment restrictions: branches=%v, tags=%v, protected-branches=%t (not default-branch-only)", pol.Patterns, pol.TagPatterns, pol.ProtectedBranches)
 		}
 		out = append(out, check{Name: "environment " + pol.Name, Status: statusWarn, Detail: detail})
 	}

@@ -6,6 +6,21 @@ import (
 	"net/http"
 )
 
+// SquashOnlyDrift lists settings that allow other merge methods or disable squash.
+func (r Repo) SquashOnlyDrift() []string {
+	var drift []string
+	if !r.AllowSquashMerge {
+		drift = append(drift, "allow_squash_merge=false")
+	}
+	if r.AllowMergeCommit {
+		drift = append(drift, "allow_merge_commit=true")
+	}
+	if r.AllowRebaseMerge {
+		drift = append(drift, "allow_rebase_merge=true")
+	}
+	return drift
+}
+
 // ApplyGeneralSettings enables auto-delete of head branches. It does not
 // change the repository default branch. When botManaged is set it also locks
 // merges down to squash-only (merge commits and rebase merges off) so an
