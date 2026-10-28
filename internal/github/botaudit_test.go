@@ -2,10 +2,12 @@ package github
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
+
+	"github.com/jpvelasco/fundamentum/internal/templatefs"
 )
 
 func TestAnalyzeWorkflow_PrivilegedTriggers(t *testing.T) {
@@ -157,11 +159,11 @@ func TestAnalyzeWorkflow_YAMLSemantics(t *testing.T) {
 
 func TestAnalyzeWorkflow_ShippedWrites(t *testing.T) {
 	for _, tt := range []struct{ file, job, scope string }{
-		{"public_ci.yml", "coverage-upload", "id-token: write"},
-		{"public_opt_octopus.yml", "review", "pull-requests: write"},
+		{"dotgithub/workflows/public_ci.yml", "coverage-upload", "id-token: write"},
+		{"dotgithub/workflows/public_opt_octopus.yml", "review", "pull-requests: write"},
 	} {
 		t.Run(tt.file, func(t *testing.T) {
-			content, err := os.ReadFile("../templatefs/templates/dotgithub/workflows/" + tt.file)
+			content, err := fs.ReadFile(templatefs.FS, tt.file)
 			if err != nil {
 				t.Fatal(err)
 			}
