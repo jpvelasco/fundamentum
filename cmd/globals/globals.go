@@ -1,7 +1,10 @@
 // Package globals holds shared mutable state for all commands.
 package globals
 
-import "github.com/jpvelasco/fundamentum/internal/github"
+import (
+	"github.com/jpvelasco/fundamentum/internal/github"
+	"github.com/jpvelasco/fundamentum/internal/steps"
+)
 
 // DryRun prints actions without applying them when true.
 var DryRun bool
@@ -46,14 +49,19 @@ var OnlySteps []string
 // SkipTokens returns the effective skip set for the step selector: the --skip
 // list plus the baseline keep list (KeepFiles), so a kept file is excluded
 // from apply exactly as if it had been passed to --skip. The keep list is how
-// a hand-tuned workflow survives a re-apply.
+// a hand-tuned workflow survives a re-apply. Whole-step keys in KeepFiles
+// are ignored: only an explicit --skip may disable an entire step.
 func SkipTokens() []string {
 	if len(KeepFiles) == 0 {
 		return SkipSteps
 	}
 	out := make([]string, 0, len(SkipSteps)+len(KeepFiles))
 	out = append(out, SkipSteps...)
-	out = append(out, KeepFiles...)
+	for _, path := range KeepFiles {
+		if !steps.IsStep(path) {
+			out = append(out, path)
+		}
+	}
 	return out
 }
 

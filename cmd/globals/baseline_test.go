@@ -7,7 +7,31 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/jpvelasco/fundamentum/internal/steps"
 )
+
+func TestKeepCannotDisableWholeSteps(t *testing.T) {
+	resetBaseline(t)
+	t.Cleanup(func() { SkipSteps = nil })
+	SkipSteps = nil
+	KeepFiles = []string{" Settings ", "protect-main", "protect-version-tags", "SECURITY", "files", "actions", "CODEOWNERS", "LICENSE", ".github/workflows/custom.yml"}
+	selector := steps.New(SkipTokens(), nil)
+	for _, step := range []string{steps.Settings, steps.ProtectMain, steps.ProtectVersionTags, steps.Security, steps.Files, steps.Actions} {
+		if !selector.IncludeStep(step) {
+			t.Errorf("keep disabled step %s", step)
+		}
+	}
+	for _, path := range []string{"CODEOWNERS", "LICENSE", ".github/workflows/custom.yml"} {
+		if selector.IncludeFile(path) {
+			t.Errorf("keep failed to preserve %s", path)
+		}
+	}
+	SkipSteps = []string{"protect-main"}
+	if steps.New(SkipTokens(), nil).IncludeStep(steps.ProtectMain) {
+		t.Error("explicit skip must still disable the step")
+	}
+}
 
 func TestSkipTokensIncludesKeptFiles(t *testing.T) {
 	resetBaseline(t)

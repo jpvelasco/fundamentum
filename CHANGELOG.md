@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Bot-managed merge settings reconcile independently of branch deletion.** Apply repairs non-squash merge methods even when auto-delete is already on; audit also checks the merge settings.
 
-- **Portable keep lists tolerate absent files.** Entries not shipped for the target visibility or CI pack are harmless; explicit `--skip` and `--only` typos still fail validation.
+- **Portable keep lists tolerate absent files.** Entries not shipped for the target visibility or CI pack are harmless. Whole-step keys in `keep` are ignored so it cannot disable protection or token lockdown; extensionless paths such as `CODEOWNERS` still work. Explicit `--skip` and `--only` typos still fail validation.
 - **Bot policy checks stay opt-in.** Baseline policy checks are ignored when `--bot-managed` is off, including an explicit flag override.
 - **Environment audit uses GitHub deployment policies.** Reads the top-level deployment settings and paginated branch/tag policies; only an exact default-branch rule with no tag access passes. API failures remain warnings instead of silently marking environments safe.
 - **CodeQL scans the npm shim and release scripts.** Restores the JavaScript analysis configuration alongside Go and Actions.
