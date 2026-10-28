@@ -67,6 +67,7 @@ func TestAuditBotManagedPresets(t *testing.T) {
 			resetAuditGlobals(t)
 			globals.BotManaged = true
 			globals.Preset = preset
+			globals.KeepFiles = []string{".github/workflows/release.yml"}
 			srv := httptest.NewServer(botManagedAuditHandler(t, false))
 			defer srv.Close()
 			var out strings.Builder

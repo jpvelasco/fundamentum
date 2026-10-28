@@ -24,12 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Shipped required checks are pinned to the GitHub Actions app.** When Fundamentum adds one of its own shipped CI checks (Lint, Test, gosec, Trivy, …) to `protect-main`, it now sets that check's `integration_id` to the GitHub Actions app (id `15368`, overridable via `github.GitHubActionsAppID`), so only a real GitHub Actions check run with that exact name can satisfy it — a third-party app posting an identically-named green check cannot. Ordinary reconciliation preserves existing pins. Bot-managed reconciliation corrects missing or wrong pins on intended shipped and external policy checks, preserving unrelated checks.
+- **Shipped required checks are pinned to the GitHub Actions app.** When Fundamentum adds the selected CI pack's default checks (Lint, Test, gosec, Trivy, …) to `protect-main`, it now sets that check's `integration_id` to the GitHub Actions app (id `15368`, overridable via `github.GitHubActionsAppID`), so only a real GitHub Actions check run with that exact name can satisfy it — a third-party app posting an identically-named green check cannot. Explicit `--require-checks` entries are never automatically pinned, even when their names match a shipped check. Ordinary reconciliation preserves existing pins. Bot-managed reconciliation corrects missing or wrong pins on intended shipped and external policy checks, preserving unrelated checks.
 
 ### Fixed
 
 - **Bot-managed merge settings reconcile independently of branch deletion.** Apply repairs non-squash merge methods even when auto-delete is already on; audit also checks the merge settings.
 
+- **Portable keep lists tolerate absent files.** Entries not shipped for the target visibility or CI pack are harmless; explicit `--skip` and `--only` typos still fail validation.
 - **Bot policy checks stay opt-in.** Baseline policy checks are ignored when `--bot-managed` is off, including an explicit flag override.
 - **Environment audit uses GitHub deployment policies.** Reads the top-level deployment settings and paginated branch/tag policies; only an exact default-branch rule with no tag access passes. API failures remain warnings instead of silently marking environments safe.
 - **CodeQL scans the npm shim and release scripts.** Restores the JavaScript analysis configuration alongside Go and Actions.

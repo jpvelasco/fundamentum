@@ -12,9 +12,10 @@ func TestBotManagedReconcilesRequiredCheckPins(t *testing.T) {
 		for _, pin := range []any{nil, float64(0), float64(999), float64(4242), float64(GitHubActionsAppID)} {
 			t.Run(fmt.Sprintf("%s/pin=%v", context, pin), func(t *testing.T) {
 				opts := BranchProtectionOptions{
-					BotManaged:   true,
-					Solo:         true,
-					PolicyChecks: []PolicyCheck{{Context: "external-review", IntegrationID: 4242}},
+					BotManaged:    true,
+					Solo:          true,
+					PolicyChecks:  []PolicyCheck{{Context: "external-review", IntegrationID: 4242}},
+					ShippedChecks: []string{"Lint"},
 				}
 				body := branchRulesetBody([]string{"Lint"}, opts)
 				data, err := json.Marshal(body)
@@ -204,8 +205,9 @@ func TestPolicyCheckEntriesPinAndValidate(t *testing.T) {
 // body pinned, alongside pinned shipped checks.
 func TestStatusChecksRulePolicyChecks(t *testing.T) {
 	opts := BranchProtectionOptions{
-		BotManaged:   true,
-		PolicyChecks: []PolicyCheck{{Context: "external-review", IntegrationID: 4242}},
+		BotManaged:    true,
+		PolicyChecks:  []PolicyCheck{{Context: "external-review", IntegrationID: 4242}},
+		ShippedChecks: []string{"Lint"},
 	}
 	rule := statusChecksRule([]string{"Lint"}, opts)
 	params, _ := rule["parameters"].(map[string]any)
@@ -273,9 +275,10 @@ func TestBotManagedDrift(t *testing.T) {
 		},
 	}
 	opts := BranchProtectionOptions{
-		BotManaged:   true,
-		Solo:         true,
-		PolicyChecks: []PolicyCheck{{Context: "external-review", IntegrationID: 4242}},
+		BotManaged:    true,
+		Solo:          true,
+		PolicyChecks:  []PolicyCheck{{Context: "external-review", IntegrationID: 4242}},
+		ShippedChecks: []string{"Lint"},
 	}
 	if got := BranchRulesetDrift(good, []string{"Lint"}, opts); len(got) != 0 {
 		t.Errorf("fully-compliant bot-managed ruleset drifted: %v", got)
@@ -355,7 +358,7 @@ func TestMergeBranchBodyBotManagedDropsBypass(t *testing.T) {
 
 	// The two bodies differ ONLY in bypass handling + merge methods, not in
 	// the required_status_checks rule shape.
-	if reflect.DeepEqual(normal["rules"], bot["rules"]) {
-		t.Log("rules equal except expected bot-managed deltas")
+	if !reflect.DeepEqual(ruleByTypeBody(normal, "required_status_checks"), ruleByTypeBody(bot, "required_status_checks")) {
+		t.Error("status-check rule differs when both modes add the same check")
 	}
 }

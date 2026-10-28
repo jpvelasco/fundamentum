@@ -4,9 +4,26 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
+
+func TestSkipTokensIncludesKeptFiles(t *testing.T) {
+	resetBaseline(t)
+	t.Cleanup(func() { SkipSteps = nil })
+	SkipSteps = []string{"settings"}
+	if got := SkipTokens(); !slices.Equal(got, []string{"settings"}) {
+		t.Fatalf("skip without keep = %v", got)
+	}
+	KeepFiles = []string{".github/workflows/custom.yml"}
+	if got := SkipTokens(); !slices.Equal(got, []string{"settings", ".github/workflows/custom.yml"}) {
+		t.Fatalf("effective skip = %v", got)
+	}
+	if !slices.Equal(SkipSteps, []string{"settings"}) || !slices.Equal(KeepFiles, []string{".github/workflows/custom.yml"}) {
+		t.Fatal("effective skip mutated the configured lists")
+	}
+}
 
 func resetBaseline(t *testing.T) {
 	t.Helper()

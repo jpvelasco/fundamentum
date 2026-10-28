@@ -113,11 +113,12 @@ EOF
 ```
 
 > **Note on the `protect-main` required checks:** when Fundamentum adds one of
-> its own shipped CI checks (Lint, Test, gosec, Trivy, …) to `protect-main`,
+> the selected CI pack's default checks (Lint, Test, gosec, Trivy, …) to `protect-main`,
 > it pins that check to the GitHub Actions app (`integration_id: 15368`) so
 > only a real Actions check run with that exact name satisfies it — a
-> third-party app posting an identically-named green check cannot. Checks it
-> did not ship (e.g. a custom `--require-checks` entry) stay unpinned unless
+> third-party app posting an identically-named green check cannot. Checks
+> supplied via `--require-checks` stay unpinned even if their names match a
+> starter workflow (also with `--ci none`), unless
 > explicitly declared in `bot_policy_checks`. Ordinary reconciliation preserves
 > existing pins. With `--bot-managed`, intended shipped checks and baseline
 > policy checks already present are re-pinned if their `integration_id` is missing

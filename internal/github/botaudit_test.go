@@ -1,8 +1,10 @@
 package github
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"strings"
@@ -10,6 +12,67 @@ import (
 
 	"github.com/jpvelasco/fundamentum/internal/templatefs"
 )
+
+func TestScanWorkflows(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		listStatus int
+		badList    bool
+		fileStatus int
+		wantError  bool
+		wantCount  int
+	}{
+		{"workflows and other entries", http.StatusOK, false, http.StatusOK, false, 1},
+		{"no workflows directory", http.StatusNotFound, false, http.StatusOK, false, 0},
+		{"listing forbidden", http.StatusForbidden, false, http.StatusOK, true, 0},
+		{"invalid listing JSON", http.StatusOK, true, http.StatusOK, true, 0},
+		{"file forbidden", http.StatusOK, false, http.StatusForbidden, true, 0},
+		{"file removed during scan", http.StatusOK, false, http.StatusNotFound, false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, client := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/repos/owner/repo/contents/.github/workflows" {
+					w.WriteHeader(tc.listStatus)
+					if tc.badList {
+						_, _ = io.WriteString(w, "{")
+						return
+					}
+					_ = json.NewEncoder(w).Encode([]map[string]string{
+						{"type": "file", "path": ".github/workflows/unsafe.yml"},
+						{"type": "file", "path": ".github/workflows/safe.yaml"},
+						{"type": "file", "path": ".github/workflows/README.md"},
+						{"type": "dir", "path": ".github/workflows/folder.yml"},
+					})
+					return
+				}
+				var content string
+				switch r.URL.Path {
+				case "/repos/owner/repo/contents/.github/workflows/unsafe.yml":
+					content = "on: pull_request_target\n"
+				case "/repos/owner/repo/contents/.github/workflows/safe.yaml":
+					content = "jobs:\n  upload:\n    environment: trusted\n    permissions: {contents: write}\n"
+				default:
+					t.Errorf("scanner fetched a non-workflow: %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				w.WriteHeader(tc.fileStatus)
+				_ = json.NewEncoder(w).Encode(map[string]string{"content": base64.StdEncoding.EncodeToString([]byte(content))})
+			}))
+			defer srv.Close()
+			findings, err := client.ScanWorkflows("owner", "repo", "main", map[string]bool{"trusted": true})
+			if (err != nil) != tc.wantError {
+				t.Fatalf("scan error = %v, wantError=%t", err, tc.wantError)
+			}
+			if len(findings) != tc.wantCount {
+				t.Fatalf("findings = %+v, want %d", findings, tc.wantCount)
+			}
+			if len(findings) > 0 && (findings[0].Path != ".github/workflows/unsafe.yml" || !strings.Contains(findings[0].Detail, "pull_request_target")) {
+				t.Errorf("unexpected finding: %+v", findings[0])
+			}
+		})
+	}
+}
 
 func TestAnalyzeWorkflow_PrivilegedTriggers(t *testing.T) {
 	for _, trigger := range []string{"workflow_run:", "pull_request_target:"} {

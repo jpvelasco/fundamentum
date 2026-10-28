@@ -133,6 +133,9 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 		return err
 	}
 	checksWanted := github.ResolveRequiredChecksForPack(globals.RequireChecks, pack)
+	if globals.RequireChecks == nil {
+		opts.ShippedChecks = checksWanted
+	}
 	// On a free-tier private repo GitHub 403s both the rulesets and classic
 	// branch-protection probes with an "Upgrade to GitHub Pro" body, so plan
 	// all three absent (the report then shows SKIP plan-gated) rather than
@@ -181,7 +184,7 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 	for _, f := range files {
 		paths = append(paths, f.Path)
 	}
-	if unknown := steps.New(globals.SkipTokens(), globals.OnlySteps).Unknown(paths); len(unknown) > 0 {
+	if unknown := steps.New(globals.SkipSteps, globals.OnlySteps).Unknown(paths); len(unknown) > 0 {
 		return fmt.Errorf("unknown --skip/--only key(s): %s — use settings, protect-main, protect-version-tags, security, files, or an exact shipped file path", strings.Join(unknown, ", "))
 	}
 

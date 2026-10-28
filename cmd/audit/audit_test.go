@@ -39,6 +39,7 @@ func resetAuditGlobals(t *testing.T) {
 		globals.FromFile = ""
 		globals.BotManaged = false
 		globals.PolicyChecks = nil
+		globals.KeepFiles = nil
 	})
 }
 

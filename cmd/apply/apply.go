@@ -123,7 +123,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	// Validate --skip/--only tokens against the real steps and rendered
 	// paths: a typo must be an error, not a silent no-op that lets apply
 	// touch exactly what the operator meant to leave alone.
-	if unknown := steps.New(globals.SkipTokens(), globals.OnlySteps).Unknown(renderedPaths(rendered)); len(unknown) > 0 {
+	if unknown := steps.New(globals.SkipSteps, globals.OnlySteps).Unknown(renderedPaths(rendered)); len(unknown) > 0 {
 		return fmt.Errorf("unknown --skip/--only key(s): %s — use settings, protect-main, protect-version-tags, security, files, or an exact shipped file path", strings.Join(unknown, ", "))
 	}
 
@@ -139,6 +139,9 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	opts.StrictChecksSet = globals.BranchUpToDateSet
 	opts.BotManaged = globals.BotManaged
 	opts.PolicyChecks = globals.PolicyChecks
+	if globals.RequireChecks == nil {
+		opts.ShippedChecks = requiredChecks(pack)
+	}
 	protectionUnavailable := false
 	branchPlan, err := client.PlanBranchRuleset(owner, repo, requiredChecks(pack), opts)
 	protectionUnavailable = noteProtectionUnavailable(protectionUnavailable, err)
@@ -283,7 +286,7 @@ func PlanNewRepo(owner, repo, visibility string, stdout io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("render templates: %w", err)
 	}
-	if unknown := steps.New(globals.SkipTokens(), globals.OnlySteps).Unknown(renderedPaths(rendered)); len(unknown) > 0 {
+	if unknown := steps.New(globals.SkipSteps, globals.OnlySteps).Unknown(renderedPaths(rendered)); len(unknown) > 0 {
 		return fmt.Errorf("unknown --skip/--only key(s): %s — use settings, protect-main, protect-version-tags, security, files, or an exact shipped file path", strings.Join(unknown, ", "))
 	}
 	// Named presets must match a live apply: only strict / --advanced-security

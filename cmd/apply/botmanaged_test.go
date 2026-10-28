@@ -51,6 +51,7 @@ func TestRunWithClientBotManagedPresets(t *testing.T) {
 			})
 			globals.BotManaged = true
 			globals.Preset = preset
+			globals.KeepFiles = []string{".github/workflows/release.yml"}
 			globals.PolicyChecks = []github.PolicyCheck{{Context: "external-review", IntegrationID: 4242}}
 			base := runFlowHandler()
 			var settings, permissions map[string]any
@@ -111,7 +112,7 @@ func TestRunWithClientBotManagedPresets(t *testing.T) {
 			if !reflect.DeepEqual(permissions, map[string]any{"default_workflow_permissions": "read", "can_approve_pull_request_reviews": false}) {
 				t.Errorf("permissions = %v", permissions)
 			}
-			opts := github.BranchProtectionOptions{BotManaged: true, PolicyChecks: globals.PolicyChecks, StrictChecks: globals.BranchUpToDate}
+			opts := github.BranchProtectionOptions{BotManaged: true, PolicyChecks: globals.PolicyChecks, StrictChecks: globals.BranchUpToDate, ShippedChecks: github.DefaultStatusChecks}
 			if branch.Name != "protect-main" || len(branch.BypassActors) != 0 {
 				t.Errorf("branch ruleset = %+v", branch)
 			}
@@ -166,6 +167,64 @@ func TestBaselinePolicyChecksOff(t *testing.T) {
 				t.Fatalf("disabled profile leaked policy into request: %s", encoded)
 			}
 		})
+	}
+}
+
+func TestApplyCustomCheckNamesStayUnpinned(t *testing.T) {
+	for _, pack := range []string{"none", "go"} {
+		for _, bot := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/bot=%t", pack, bot), func(t *testing.T) {
+				resetBotManagedGlobals(t)
+				t.Cleanup(func() {
+					globals.Preset, globals.CIPack = "", ""
+					globals.OnlySteps, globals.RequireChecks = nil, nil
+				})
+				globals.Preset, globals.CIPack = "oss", pack
+				globals.BotManaged = bot
+				globals.RequireChecks = []string{"CI", "Test", "Lint"}
+				globals.OnlySteps = []string{"protect-main"}
+				base := runFlowHandler()
+				var body map[string]any
+				srv, client := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					switch {
+					case r.URL.Path == "/user":
+						_ = json.NewEncoder(w).Encode(map[string]string{"login": "owner", "type": "User"})
+					case strings.HasSuffix(r.URL.Path, "/rulesets") && r.Method == http.MethodPost:
+						if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+							t.Error(err)
+						}
+						w.WriteHeader(http.StatusCreated)
+						_ = json.NewEncoder(w).Encode(map[string]int{"id": 1})
+					default:
+						base(w, r)
+					}
+				}))
+				defer srv.Close()
+				if err := runWithClient(client, "owner", "repo", strings.NewReader(""), io.Discard); err != nil {
+					t.Fatal(err)
+				}
+				encoded, err := json.Marshal(body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if body["name"] != "protect-main" || strings.Contains(string(encoded), "integration_id") {
+					t.Fatalf("custom check names acquired app pins: %s", encoded)
+				}
+				for _, context := range globals.RequireChecks {
+					if !strings.Contains(string(encoded), `"context":"`+context+`"`) {
+						t.Errorf("required context %s missing: %s", context, encoded)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestPlanNewRepoPortableKeep(t *testing.T) {
+	resetBotManagedGlobals(t)
+	globals.KeepFiles = []string{"codecov.yml", ".github/workflows/release.yml"}
+	if err := PlanNewRepo("owner", "repo", "private", io.Discard); err != nil {
+		t.Fatalf("keep entries absent from private templates must be harmless: %v", err)
 	}
 }
 

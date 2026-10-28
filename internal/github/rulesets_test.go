@@ -553,37 +553,26 @@ func TestRulesetID_Paginates(t *testing.T) {
 }
 
 func TestNewStatusCheck_PinsShippedChecksOnly(t *testing.T) {
-	// Shipped CI checks (Go, generic, and language packs) are pinned to the
-	// GitHub Actions app so only that app can satisfy them.
-	for _, ctx := range []string{"Lint", "Vulnerability scan", "Build (ubuntu-latest)", "Test (windows-latest)", "gosec", "Trivy", "CI", "Test", "Lint (Windows)"} {
-		got := newStatusCheck(ctx)
-		if ctx == "Lint (Windows)" {
-			// Lint (Windows) is not currently in any shipped required-check list;
-			// it must NOT be pinned.
-			if _, pinned := got["integration_id"]; pinned {
-				t.Errorf("newStatusCheck(%q) must not pin integration_id", ctx)
+	for _, pack := range []string{"go", "generic", "node", "python", "rust", "none"} {
+		shipped := ResolveRequiredChecksForPack(nil, pack)
+		for _, context := range []string{"Lint", "CI", "Test", "gosec", "custom-check"} {
+			got := newStatusCheck(context, shipped)
+			_, pinned := got["integration_id"]
+			want := containsString(shipped, context)
+			if pinned != want || (pinned && got["integration_id"] != GitHubActionsAppID) {
+				t.Errorf("pack %s, context %s: pin = %v, want pinned=%t", pack, context, got, want)
 			}
-			continue
-		}
-		id, pinned := got["integration_id"]
-		if !pinned {
-			t.Errorf("newStatusCheck(%q) missing integration_id pin", ctx)
-			continue
-		}
-		if id != GitHubActionsAppID {
-			t.Errorf("newStatusCheck(%q) integration_id = %v, want %d", ctx, id, GitHubActionsAppID)
-		}
-	}
-	// A third-party check (custom --require-checks) is never pinned.
-	for _, ctx := range []string{"Codacy Static Code Analysis", "Socket Security", "my-custom-check"} {
-		if _, pinned := newStatusCheck(ctx)["integration_id"]; pinned {
-			t.Errorf("newStatusCheck(%q) must not pin a third-party check", ctx)
+			// A custom context remains unpinned even when its name collides
+			// with a check produced by one of the starter packs.
+			if _, pinned := newStatusCheck(context, nil)["integration_id"]; pinned {
+				t.Errorf("custom context %s was pinned", context)
+			}
 		}
 	}
 }
 
 func TestStatusChecksRule_PinsNewShippedChecks(t *testing.T) {
-	rule := statusChecksRule([]string{"Lint", "Codacy Static Code Analysis"}, BranchProtectionOptions{Solo: true})
+	rule := statusChecksRule([]string{"Lint", "Codacy Static Code Analysis"}, BranchProtectionOptions{Solo: true, ShippedChecks: []string{"Lint"}})
 	params, _ := rule["parameters"].(map[string]any)
 	raw, _ := params["required_status_checks"].([]map[string]any)
 	byContext := map[string]map[string]any{}
@@ -612,7 +601,7 @@ func TestStatusChecksRuleMerged_KeepsLivePinsAddsNewPins(t *testing.T) {
 			},
 		},
 	}
-	rule := statusChecksRuleMerged(liveRule, []string{"Lint", "gosec"}, BranchProtectionOptions{Solo: true})
+	rule := statusChecksRuleMerged(liveRule, []string{"Lint", "gosec"}, BranchProtectionOptions{Solo: true, ShippedChecks: []string{"Lint", "gosec"}})
 	params, _ := rule["parameters"].(map[string]any)
 	raw := anySlice(params["required_status_checks"])
 	byContext := map[string]map[string]any{}

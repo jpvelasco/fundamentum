@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -68,31 +69,11 @@ var GitHubActionsAppID = 15368
 // deployment reports a different role id.
 var RepositoryRoleAdminID = 5
 
-// shippedCheckContexts is the set of status-check contexts produced by
-// Fundamentum's own shipped CI workflows (DefaultStatusChecks for the Go
-// pack, GenericStatusChecks for generic, LanguageStatusChecks for
-// node/python/rust). Only these are eligible for an integration_id pin —
-// checks from any other app are never pinned.
-func shippedCheckContexts() map[string]bool {
-	set := make(map[string]bool, len(DefaultStatusChecks)+len(GenericStatusChecks)+len(LanguageStatusChecks))
-	for _, name := range DefaultStatusChecks {
-		set[name] = true
-	}
-	for _, name := range GenericStatusChecks {
-		set[name] = true
-	}
-	for _, name := range LanguageStatusChecks {
-		set[name] = true
-	}
-	return set
-}
-
 // newStatusCheck builds one intended required_status_checks entry.
-// When the context is one Fundamentum's
-// shipped workflows produce, it is pinned to the GitHub Actions app so only
-// that app can satisfy it; any other (third-party) context is left unpinned.
-func newStatusCheck(context string) map[string]any {
-	if shippedCheckContexts()[context] {
+// Only explicitly owned contexts receive a GitHub Actions pin; a name alone
+// cannot identify the producer of a custom required check.
+func newStatusCheck(context string, shipped []string) map[string]any {
+	if slices.Contains(shipped, context) {
 		return map[string]any{"context": context, "integration_id": GitHubActionsAppID}
 	}
 	return map[string]any{"context": context}
@@ -110,6 +91,10 @@ type BranchProtectionOptions struct {
 	// fallback so the open harden PR is not blocked by checks that only
 	// exist after that PR merges (Codacy, shipped CI jobs).
 	SkipStatusChecks bool
+	// ShippedChecks identifies the selected CI pack's default check contexts.
+	// Leave empty for custom --require-checks or --ci none: matching a shipped
+	// name does not make a custom check belong to the GitHub Actions app.
+	ShippedChecks []string
 	// StrictChecks is the intended strict_required_status_checks_policy
 	// ("branches must be up to date before merging"). Default true; a create
 	// always uses it.
@@ -624,7 +609,7 @@ func requiredCheckEntries(statusChecks []string, opts BranchProtectionOptions) [
 	allChecks := intendedChecks(statusChecks, opts)
 	checks := make([]map[string]any, 0, len(allChecks))
 	for _, name := range allChecks {
-		checks = append(checks, newStatusCheck(name))
+		checks = append(checks, newStatusCheck(name, opts.ShippedChecks))
 	}
 	if opts.BotManaged {
 		checks = append(checks, policyCheckEntries(opts.PolicyChecks)...)

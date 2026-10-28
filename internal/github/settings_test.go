@@ -1,11 +1,39 @@
 package github
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 )
+
+func TestRepoMergeSettingsDrift(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		squash, merge, rebase bool
+		want                  string
+	}{
+		{"compliant", true, false, false, ""},
+		{"all settings drift", false, true, true, "allow_squash_merge=false,allow_merge_commit=true,allow_rebase_merge=true"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, client := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]bool{
+					"allow_squash_merge": tc.squash, "allow_merge_commit": tc.merge, "allow_rebase_merge": tc.rebase,
+				})
+			}))
+			defer srv.Close()
+			repo, err := client.GetRepo("owner", "repo")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(repo.SquashOnlyDrift(), ","); got != tc.want {
+				t.Errorf("merge settings drift = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
 
 func TestApplyGeneralSettings(t *testing.T) {
 	called := false
