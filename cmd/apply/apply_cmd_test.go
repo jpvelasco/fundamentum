@@ -843,53 +843,12 @@ func TestRunWithClient_InteractiveViaPR(t *testing.T) {
 	globals.ViaPR = true
 
 	var createdPR bool
+	flow := runFlowHandler()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if writeGoModPresent(w, r) {
-			return
-		}
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
-			_, _ = w.Write([]byte(`{"visibility":"public","default_branch":"main"}`))
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets"):
-			_, _ = w.Write([]byte(`[]`))
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/protection"):
-			w.WriteHeader(http.StatusNotFound)
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
-			w.WriteHeader(http.StatusNotFound)
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main"):
-			_, _ = w.Write([]byte(`{"commit":{"sha":"abc123"}}`))
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/refs") && !strings.Contains(r.URL.Path, "/heads/"):
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{}`))
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/git/ref/heads/harden-"):
-			_, _ = w.Write([]byte(`{"object":{"sha":"abc123"}}`))
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/git/commits/"):
-			_, _ = w.Write([]byte(`{"tree":{"sha":"treesha"}}`))
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/blobs"):
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"sha":"blobsha"}`))
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/trees"):
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"sha":"newtree"}`))
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/git/commits"):
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"sha":"newcommit"}`))
-		case r.Method == http.MethodPut:
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{}`))
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/pulls"):
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/pulls") {
 			createdPR = true
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"number":7}`))
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/rulesets"):
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"id":1}`))
-		case r.Method == http.MethodPatch:
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{}`))
-		default:
-			w.WriteHeader(http.StatusNotFound)
 		}
+		flow.ServeHTTP(w, r)
 	}))
 	defer srv.Close()
 	c := newTestClient(srv)
@@ -1093,18 +1052,13 @@ func TestRunWithClient_DryRunPrivateShowsAdvancedSecurity(t *testing.T) {
 	})
 	globals.DryRun = true
 
+	flow := runFlowHandler()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if writeGoModPresent(w, r) {
+		if r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo" {
+			_, _ = w.Write([]byte(`{"visibility":"private","default_branch":"main","owner":{"type":"User"}}`))
 			return
 		}
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
-			_, _ = w.Write([]byte(`{"visibility":"private","default_branch":"main","owner":{"type":"User"}}`))
-		case strings.Contains(r.URL.Path, "/rulesets"):
-			_, _ = w.Write([]byte(`[]`))
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
+		flow.ServeHTTP(w, r)
 	}))
 	defer srv.Close()
 
@@ -1347,25 +1301,19 @@ func TestRunWithClient_UsesDefaultBranch(t *testing.T) {
 	globals.ViaPR = true
 
 	var sawDevelop, sawMain bool
+	flow := runFlowHandler()
 	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if writeGoModPresent(w, r) {
-			return
-		}
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
 			_, _ = w.Write([]byte(`{"visibility":"public","default_branch":"develop"}`))
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets"):
-			_, _ = w.Write([]byte(`[]`))
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/develop"):
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/branches/develop":
 			sawDevelop = true
 			w.WriteHeader(http.StatusNotFound)
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main"):
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/branches/main":
 			sawMain = true
 			w.WriteHeader(http.StatusNotFound)
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
-			w.WriteHeader(http.StatusNotFound)
 		default:
-			w.WriteHeader(http.StatusNotFound)
+			flow.ServeHTTP(w, r)
 		}
 	}))
 	defer srv.Close()
