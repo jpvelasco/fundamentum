@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-28
+
+**Patch release.** Keeps required status checks in policy-only PR-mode runs.
+
+### Fixed
+
+- **Policy-only `--pr` runs retain required checks.** When no file changes need a pull request, apply now reconciles the required checks immediately, including missing or incorrect GitHub Actions app pins in bot-managed mode. Check deferral still applies when file changes actually go to a pull request.
+
 ## [0.5.0] - 2026-10-28
 
 **Feature release.** Adds opt-in hardening and audit for automation-managed repositories, tightens the shipped CI workflows, and restricts version-tag creation to authorized actors.
@@ -360,7 +368,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.5.1
 [0.5.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.5.0
 [0.4.3]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.4.3
 [0.4.2]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.4.2
