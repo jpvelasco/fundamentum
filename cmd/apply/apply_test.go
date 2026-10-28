@@ -1024,24 +1024,24 @@ func TestBuildItems_FileStatusSkip(t *testing.T) {
 // confirms a failed ruleset creation leaves classic protection in place.
 func TestBranchProtectionItem_ClassicUpgradeApply(t *testing.T) {
 	for _, tc := range []struct {
-		name           string
-		rulesets       string
-		wantApplyError bool
-		wantRemoval    bool
+		name                string
+		rulesetCreateStatus int
+		wantApplyError      bool
+		wantClassicRemoval  bool
 	}{
-		{"create ruleset before removing classic protection", `[]`, false, true},
-		{"keep classic protection if ruleset creation fails", `not json`, true, false},
+		{"create ruleset before removing classic protection", http.StatusCreated, false, true},
+		{"keep classic protection if ruleset creation fails", http.StatusUnprocessableEntity, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var classicRemoved bool
 			testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets"):
+					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
-					_, _ = w.Write([]byte(tc.rulesets))
+					_ = json.NewEncoder(w).Encode([]struct{}{})
 				case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/rulesets"):
-					w.WriteHeader(http.StatusCreated)
-					_, _ = w.Write([]byte(`{"id":1}`))
+					w.WriteHeader(tc.rulesetCreateStatus)
 				case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/protection"):
 					classicRemoved = true
 					w.WriteHeader(http.StatusNoContent)
@@ -1058,8 +1058,8 @@ func TestBranchProtectionItem_ClassicUpgradeApply(t *testing.T) {
 					t.Errorf("upgrade Apply() error = %v, want error=%t", err, tc.wantApplyError)
 				}
 			}, func(t *testing.T) {
-				if classicRemoved != tc.wantRemoval {
-					t.Errorf("classic protection removed = %t, want %t", classicRemoved, tc.wantRemoval)
+				if classicRemoved != tc.wantClassicRemoval {
+					t.Errorf("classic protection removed = %t, want %t", classicRemoved, tc.wantClassicRemoval)
 				}
 			})
 		})
