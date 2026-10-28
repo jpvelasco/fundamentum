@@ -4,6 +4,7 @@ package github
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -86,8 +87,8 @@ func shippedCheckContexts() map[string]bool {
 	return set
 }
 
-// newStatusCheck builds one required_status_checks entry for a check being
-// ADDED (not already present live). When the context is one Fundamentum's
+// newStatusCheck builds one intended required_status_checks entry.
+// When the context is one Fundamentum's
 // shipped workflows produce, it is pinned to the GitHub Actions app so only
 // that app can satisfy it; any other (third-party) context is left unpinned.
 func newStatusCheck(context string) map[string]any {
@@ -291,9 +292,9 @@ func (c *Client) PlanTagRuleset(owner, repo string) (RulesetPlan, error) {
 }
 
 // EnsureBranchRuleset creates protect-main, or reconciles it when owned fields
-// have drifted. Reconcile MERGES: required checks already present keep their
-// integration_id, extra checks are kept, unowned rules survive, and stricter
-// live settings are never weakened.
+// have drifted. Reconcile keeps extra checks, unowned rules, and stricter live
+// settings. Existing integration IDs are preserved unless bot-managed intent
+// explicitly pins the check.
 func (c *Client) EnsureBranchRuleset(owner, repo string, statusChecks []string, opts BranchProtectionOptions) error {
 	plan, err := c.PlanBranchRuleset(owner, repo, statusChecks, opts)
 	if err != nil {
@@ -610,17 +611,23 @@ func policyCheckEntries(checks []PolicyCheck) []map[string]any {
 // it lists the intended checks; the merge path merges the live checks (with
 // their integration_id) in statusChecksRuleMerged.
 func statusChecksRule(statusChecks []string, opts BranchProtectionOptions) map[string]any {
-	allChecks := intendedChecks(statusChecks, opts)
-	policy := policyCheckEntries(opts.PolicyChecks)
-	if len(allChecks) == 0 && len(policy) == 0 {
+	checks := requiredCheckEntries(statusChecks, opts)
+	if len(checks) == 0 {
 		return nil
 	}
+	return statusChecksRuleWith(checks, intendedStrictChecks(opts))
+}
+
+// requiredCheckEntries is the shared intent for creation, reconciliation,
+// and bot-managed pin drift.
+func requiredCheckEntries(statusChecks []string, opts BranchProtectionOptions) []map[string]any {
+	allChecks := intendedChecks(statusChecks, opts)
+	policy := policyCheckEntries(opts.PolicyChecks)
 	checks := make([]map[string]any, 0, len(allChecks)+len(policy))
 	for _, name := range allChecks {
 		checks = append(checks, newStatusCheck(name))
 	}
-	checks = append(checks, policy...)
-	return statusChecksRuleWith(checks, intendedStrictChecks(opts))
+	return append(checks, policy...)
 }
 
 // intendedStrictChecks is the up-to-date policy for a fresh ruleset: true
@@ -632,41 +639,35 @@ func intendedStrictChecks(opts BranchProtectionOptions) bool {
 	return true
 }
 
-// statusChecksRuleMerged unions the live checks (kept verbatim, preserving
-// their integration_id) with any intended check that is missing, and applies
-// the strict-policy intent: explicitly set → enforced; unset → keep live.
+// statusChecksRuleMerged unions live and intended checks. Bot-managed mode
+// enforces intended pins; otherwise live entries stay verbatim. The strict
+// policy is enforced only when explicitly set.
 func statusChecksRuleMerged(liveRule map[string]any, statusChecks []string, opts BranchProtectionOptions) map[string]any {
 	params, _ := liveRule["parameters"].(map[string]any)
-	if params == nil {
-		params = map[string]any{}
-	}
 	liveChecks := anySlice(params["required_status_checks"])
-	if liveChecks == nil {
-		liveChecks = []any{}
-	}
-	have := map[string]bool{}
+	have := map[string]int{}
 	merged := make([]any, 0, len(liveChecks)+len(statusChecks))
 	for _, item := range liveChecks {
-		if m, ok := item.(map[string]any); ok {
-			if ctx, ok := m["context"].(string); ok {
-				have[ctx] = true
-				// Keep the entry verbatim — integration_id included, so only
-				// the app that posted the check can satisfy it.
-				merged = append(merged, m)
-			}
+		m, _ := item.(map[string]any)
+		ctx, ok := m["context"].(string)
+		if !ok {
+			continue
 		}
+		have[ctx] = len(merged)
+		merged = append(merged, m)
 	}
-	for _, name := range intendedChecks(statusChecks, opts) {
-		if !have[name] {
-			merged = append(merged, newStatusCheck(name))
-		}
-	}
-	// Bot-managed policy checks: present-and-pinned is required. A policy
-	// check already live is kept verbatim; a missing one is added pinned.
-	for _, entry := range policyCheckEntries(opts.PolicyChecks) {
+	for _, entry := range requiredCheckEntries(statusChecks, opts) {
 		ctx := entry["context"].(string)
-		if !have[ctx] {
+		index, present := have[ctx]
+		if !present {
+			have[ctx] = len(merged)
 			merged = append(merged, entry)
+			continue
+		}
+		if pin, pinned := entry["integration_id"]; opts.BotManaged && pinned {
+			check := maps.Clone(merged[index].(map[string]any))
+			check["integration_id"] = pin
+			merged[index] = check
 		}
 	}
 	strict := mapBool(params, "strict_required_status_checks_policy")
@@ -812,16 +813,16 @@ func BranchRulesetDrift(got *Ruleset, statusChecks []string, opts BranchProtecti
 		}
 	}
 	if opts.BotManaged {
-		drift = append(drift, botManagedDrift(got, opts)...)
+		drift = append(drift, botManagedDrift(got, statusChecks, opts)...)
 	}
 	return drift
 }
 
 // botManagedDrift reports the bot-managed-only weaknesses: merges not locked
 // to squash-only, a live bypass actor (the profile grants no standing
-// bypass), or a required policy check that is missing or not pinned to its
+// bypass), or a required check that is missing or not pinned to its
 // app.
-func botManagedDrift(got *Ruleset, opts BranchProtectionOptions) []string {
+func botManagedDrift(got *Ruleset, statusChecks []string, opts BranchProtectionOptions) []string {
 	var drift []string
 	if !squashOnlyMerges(got) {
 		drift = append(drift, "squash-only merges")
@@ -829,8 +830,8 @@ func botManagedDrift(got *Ruleset, opts BranchProtectionOptions) []string {
 	if len(got.BypassActors) > 0 {
 		drift = append(drift, "bypass actors present")
 	}
-	if missing := unpinnedOrMissingPolicyChecks(got, opts.PolicyChecks); len(missing) > 0 {
-		drift = append(drift, "policy checks: "+missing)
+	if missing := unpinnedOrMissingChecks(got, requiredCheckEntries(statusChecks, opts)); len(missing) > 0 {
+		drift = append(drift, "required check pins: "+missing)
 	}
 	return drift
 }
@@ -851,9 +852,8 @@ func squashOnlyMerges(got *Ruleset) bool {
 	return ok && s == "squash"
 }
 
-// unpinnedOrMissingPolicyChecks returns a short description when a required
-// policy check is absent or not pinned to its app; empty means all good.
-func unpinnedOrMissingPolicyChecks(got *Ruleset, want []PolicyCheck) string {
+// unpinnedOrMissingChecks reports intended pins that are absent or wrong.
+func unpinnedOrMissingChecks(got *Ruleset, want []map[string]any) string {
 	if len(want) == 0 {
 		return ""
 	}
@@ -868,14 +868,12 @@ func unpinnedOrMissingPolicyChecks(got *Ruleset, want []PolicyCheck) string {
 		}
 	}
 	var bad []string
-	for _, pc := range want {
-		id, present := live[pc.Context]
-		if !present || id != pc.IntegrationID {
-			bad = append(bad, pc.Context)
+	for _, check := range want {
+		context, _ := check["context"].(string)
+		pin := int64(mapInt(check, "integration_id"))
+		if pin != 0 && live[context] != pin {
+			bad = append(bad, context)
 		}
-	}
-	if len(bad) == 0 {
-		return ""
 	}
 	return strings.Join(bad, ", ")
 }
@@ -1097,6 +1095,8 @@ func mapInt(m map[string]any, key string) int {
 		return int(v)
 	case int:
 		return v
+	case int64:
+		return int(v)
 	case json.Number:
 		n, _ := v.Int64()
 		return int(n)

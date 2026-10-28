@@ -3,6 +3,8 @@ package github
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -20,16 +22,154 @@ func TestAnalyzeWorkflow_PrivilegedTriggers(t *testing.T) {
 }
 
 func TestAnalyzeWorkflow_LocalAction(t *testing.T) {
-	if got := AnalyzeWorkflow(".github/workflows/x.yml", "steps:\n  - uses: ./local-action\n", nil); len(got) == 0 {
+	if got := AnalyzeWorkflow(".github/workflows/x.yml", "jobs:\n  test:\n    steps:\n      - uses: ./local-action\n", nil); len(got) == 0 {
 		t.Error("local ./ action must be flagged")
 	}
 	// A commented-out local action is not a finding.
-	if got := AnalyzeWorkflow(".github/workflows/x.yml", "steps:\n  # - uses: ./local-action\n", nil); len(got) != 0 {
+	if got := AnalyzeWorkflow(".github/workflows/x.yml", "jobs:\n  test:\n    steps:\n      # - uses: ./local-action\n", nil); len(got) != 0 {
 		t.Errorf("commented local action must not be flagged: %v", got)
 	}
 	// A pinned third-party action is clean.
-	if got := AnalyzeWorkflow(".github/workflows/x.yml", "steps:\n  - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n", nil); len(got) != 0 {
+	if got := AnalyzeWorkflow(".github/workflows/x.yml", "jobs:\n  test:\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n", nil); len(got) != 0 {
 		t.Errorf("pinned action must not be flagged: %v", got)
+	}
+}
+
+func TestAnalyzeWorkflow_YAMLSemantics(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{
+			name: "trailing comment",
+			body: "jobs:\n  upload:\n    permissions:\n      id-token: write # upload\n",
+			want: []string{`job "upload": grants a write scope (id-token: write)`},
+		},
+		{
+			name: "quoted flow permissions",
+			body: `jobs: {review: {permissions: {"pull-requests": "write"}}}`,
+			want: []string{`job "review": grants a write scope (pull-requests: write)`},
+		},
+		{
+			name: "job write-all",
+			body: `jobs: {review: {permissions: write-all}}`,
+			want: []string{`job "review": grants a write scope (write-all)`},
+		},
+		{
+			name: "workflow write-all inherited",
+			body: "permissions: write-all\njobs: {test: {}, upload: {environment: codacy}}",
+			want: []string{`job "test": grants a write scope (write-all)`},
+		},
+		{
+			name: "workflow map inherited",
+			body: "permissions: {contents: write}\njobs: {test: {}, upload: {environment: codacy}}",
+			want: []string{`job "test": grants a write scope (contents: write)`},
+		},
+		{
+			name: "read override replaces workflow grants",
+			body: "permissions: write-all\njobs: {test: {permissions: {contents: read}}, second: {permissions: read-all}, third: {permissions: {}}}",
+		},
+		{
+			name: "job write overrides workflow read",
+			body: "permissions: read-all\njobs: {test: {permissions: {contents: write}}}",
+			want: []string{`job "test": grants a write scope (contents: write)`},
+		},
+		{
+			name: "restricted sibling does not shield write job",
+			body: "jobs:\n  safe:\n    environment: codacy\n  unsafe:\n    permissions: {contents: write}\n",
+			want: []string{`job "unsafe": grants a write scope (contents: write)`},
+		},
+		{
+			name: "unrestricted read sibling does not taint safe write job",
+			body: "jobs:\n  safe:\n    environment: {name: codacy, url: 'https://example.com'}\n    permissions: write-all\n  test:\n    permissions: read-all\n",
+		},
+		{
+			name: "unknown and dynamic environments",
+			body: "permissions: write-all\njobs:\n  first:\n    environment: {name: open}\n  second:\n    environment: '${{ matrix.environment }}'\n",
+			want: []string{`job "first": grants a write scope`, `job "second": grants a write scope`},
+		},
+		{
+			name: "security events exception does not hide other grants",
+			body: `jobs: {analyze: {permissions: {security-events: write, contents: write, issues: write}}}`,
+			want: []string{`job "analyze": grants a write scope (contents: write, issues: write)`},
+		},
+		{
+			name: "scalar trigger",
+			body: `on: pull_request_target`,
+			want: []string{"uses privileged pull_request_target trigger"},
+		},
+		{
+			name: "sequence triggers",
+			body: `on: [push, workflow_run, pull_request_target]`,
+			want: []string{"uses privileged workflow_run trigger", "uses privileged pull_request_target trigger"},
+		},
+		{
+			name: "quoted mapping trigger",
+			body: `"on": {"workflow_run": {workflows: [CI], types: [completed]}}`,
+			want: []string{"uses privileged workflow_run trigger"},
+		},
+		{
+			name: "comments and script content are not workflow declarations",
+			body: "on: push\n# workflow_run:\n# pull_request_target:\njobs:\n  test:\n    steps:\n      - run: |\n          echo 'workflow_run: and pull_request_target:'\n          echo 'uses: ./script'\n          echo 'contents: write'\n",
+		},
+		{
+			name: "quoted local action",
+			body: `jobs: {test: {steps: [{uses: "./action"}]}}`,
+			want: []string{`job "test": uses a local (./) action`},
+		},
+		{
+			name: "local reusable workflow",
+			body: `jobs: {test: {uses: "./.github/workflows/reusable.yml"}}`,
+			want: []string{`job "test": uses a local (./) action`},
+		},
+		{
+			name: "aliases and merge keys",
+			body: "permissions: &grants {contents: write}\njobs:\n  first: &job\n    permissions: *grants\n  second:\n    <<: *job\n    environment: codacy\n",
+			want: []string{`job "first": grants a write scope (contents: write)`},
+		},
+		{
+			name: "invalid YAML is reported",
+			body: "jobs: [",
+			want: []string{"could not parse workflow YAML"},
+		},
+		{
+			name: "duplicate YAML keys are reported",
+			body: "permissions: read-all\npermissions: write-all\n",
+			want: []string{"could not parse workflow YAML"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const path = ".github/workflows/x.yml"
+			got := AnalyzeWorkflow(path, tt.body, map[string]bool{"codacy": true})
+			if len(got) != len(tt.want) {
+				t.Fatalf("findings = %v, want %v", got, tt.want)
+			}
+			for i, want := range tt.want {
+				if got[i].Path != path || !strings.Contains(got[i].Detail, want) {
+					t.Errorf("finding = %+v, want path %s and detail containing %q", got[i], path, want)
+				}
+			}
+		})
+	}
+}
+
+func TestAnalyzeWorkflow_ShippedWrites(t *testing.T) {
+	for _, tt := range []struct{ file, job, scope string }{
+		{"public_ci.yml", "coverage-upload", "id-token: write"},
+		{"public_opt_octopus.yml", "review", "pull-requests: write"},
+	} {
+		t.Run(tt.file, func(t *testing.T) {
+			content, err := os.ReadFile("../templatefs/templates/dotgithub/workflows/" + tt.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := AnalyzeWorkflow(tt.file, string(content), map[string]bool{"codacy": true})
+			if len(got) != 1 || !strings.Contains(got[0].Detail, `job "`+tt.job+`"`) || !strings.Contains(got[0].Detail, tt.scope) {
+				t.Fatalf("findings = %v, want write scope %s on job %s", got, tt.scope, tt.job)
+			}
+		})
 	}
 }
 

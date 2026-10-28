@@ -17,7 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Shipped required checks are pinned to the GitHub Actions app.** When Fundamentum adds one of its own shipped CI checks (Lint, Test, gosec, Trivy, …) to `protect-main`, it now sets that check's `integration_id` to the GitHub Actions app (id `15368`, overridable via `github.GitHubActionsAppID`), so only a real GitHub Actions check run with that exact name can satisfy it — a third-party app posting an identically-named green check cannot. Checks Fundamentum did not ship (custom `--require-checks`) are never pinned, and checks already present on a repo keep their existing `integration_id` untouched.
+- **Shipped required checks are pinned to the GitHub Actions app.** When Fundamentum adds one of its own shipped CI checks (Lint, Test, gosec, Trivy, …) to `protect-main`, it now sets that check's `integration_id` to the GitHub Actions app (id `15368`, overridable via `github.GitHubActionsAppID`), so only a real GitHub Actions check run with that exact name can satisfy it — a third-party app posting an identically-named green check cannot. Ordinary reconciliation preserves existing pins. Bot-managed reconciliation corrects missing or wrong pins on intended shipped and external policy checks, preserving unrelated checks.
+
+### Fixed
+
+- **Bot-managed workflow audit parses YAML per job.** The scan recognizes commented and quoted permission values, `write-all`, workflow-level inheritance, job overrides, and all trigger forms. A restricted environment on one job no longer hides another job's writes. Malformed YAML produces a warning.
 
 ## [0.4.3] - 2026-10-26
 

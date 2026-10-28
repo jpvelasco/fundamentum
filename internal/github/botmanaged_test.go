@@ -1,9 +1,95 @@
 package github
 
 import (
+	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 )
+
+func TestBotManagedReconcilesRequiredCheckPins(t *testing.T) {
+	for _, context := range []string{"Lint", "external-review"} {
+		for _, pin := range []any{nil, float64(0), float64(999), float64(4242), float64(GitHubActionsAppID)} {
+			t.Run(fmt.Sprintf("%s/pin=%v", context, pin), func(t *testing.T) {
+				opts := BranchProtectionOptions{
+					BotManaged:   true,
+					Solo:         true,
+					PolicyChecks: []PolicyCheck{{Context: "external-review", IntegrationID: 4242}},
+				}
+				body := branchRulesetBody([]string{"Lint"}, opts)
+				data, err := json.Marshal(body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var live Ruleset
+				if err := json.Unmarshal(data, &live); err != nil {
+					t.Fatal(err)
+				}
+				params := ruleByType(&live, "required_status_checks")["parameters"].(map[string]any)
+				checks := anySlice(params["required_status_checks"])
+				for _, item := range checks {
+					entry := item.(map[string]any)
+					if entry["context"] == context {
+						entry["integration_id"] = pin
+						if pin == nil {
+							delete(entry, "integration_id")
+						}
+						entry["extra"] = "preserved"
+					}
+				}
+				params["required_status_checks"] = append(checks, map[string]any{"context": "unowned", "integration_id": float64(777)})
+				before, err := json.Marshal(&live)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantPin := int64(4242)
+				if context == "Lint" {
+					wantPin = int64(GitHubActionsAppID)
+				}
+				if pin != float64(wantPin) && len(BranchRulesetDrift(&live, []string{"Lint"}, opts)) == 0 {
+					t.Error("incorrect pin must cause drift before reconciliation")
+				}
+				merged := mergeBranchRulesetBody(&live, []string{"Lint"}, opts)
+				after, err := json.Marshal(&live)
+				if err != nil || string(after) != string(before) {
+					t.Error("merge mutated the live ruleset")
+				}
+				data, err = json.Marshal(merged)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var applied Ruleset
+				if err := json.Unmarshal(data, &applied); err != nil {
+					t.Fatal(err)
+				}
+				if drift := BranchRulesetDrift(&applied, []string{"Lint"}, opts); len(drift) != 0 {
+					t.Errorf("drift after apply = %v", drift)
+				}
+				result := anySlice(ruleByType(&applied, "required_status_checks")["parameters"].(map[string]any)["required_status_checks"])
+				if len(result) != 3 {
+					t.Fatalf("merged checks = %v, want exactly 3", result)
+				}
+				for _, item := range result {
+					entry := item.(map[string]any)
+					switch entry["context"] {
+					case context:
+						if int64(mapInt(entry, "integration_id")) != wantPin || entry["extra"] != "preserved" {
+							t.Errorf("reconciled check = %v", entry)
+						}
+					case "unowned":
+						if mapInt(entry, "integration_id") != 777 {
+							t.Errorf("unowned pin changed: %v", entry)
+						}
+					}
+				}
+				next, err := json.Marshal(mergeBranchRulesetBody(&applied, []string{"Lint"}, opts))
+				if err != nil || string(data) != string(next) {
+					t.Errorf("reconcile is not idempotent: %v", err)
+				}
+			})
+		}
+	}
+}
 
 // TestBranchBodyBotManagedOffIsBaseline is the golden test for the API body
 // contract: with BotManaged false, the protect-main request body is identical
@@ -195,7 +281,7 @@ func TestBotManagedDrift(t *testing.T) {
 			}
 		}
 	}
-	if got := BranchRulesetDrift(unpinned, []string{"Lint"}, opts); !containsString(got, "policy checks: external-review") {
+	if got := BranchRulesetDrift(unpinned, []string{"Lint"}, opts); !containsString(got, "required check pins: external-review") {
 		t.Errorf("unpinned-policy-check ruleset must drift: %v", got)
 	}
 }

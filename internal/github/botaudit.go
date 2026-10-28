@@ -4,9 +4,13 @@ package github
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // This file backs the bot-managed audit: read-only probes that report how far
@@ -109,8 +113,7 @@ type WorkflowFinding struct {
 // ScanWorkflows fetches every .github/workflows file and reports bot-managed
 // concerns: privileged triggers (workflow_run / pull_request_target), local
 // (./) actions, and write scopes granted outside a default-branch-only
-// environment. The scan is text-based — enough signal for an audit without a
-// full YAML parser.
+// environment. YAML parsing keeps comments and script text out of the scan.
 func (c *Client) ScanWorkflows(owner, repo, defaultBranch string, defaultBranchOnlyEnvs map[string]bool) ([]WorkflowFinding, error) {
 	paths, err := c.listWorkflowPaths(owner, repo)
 	if err != nil {
@@ -165,76 +168,93 @@ func (c *Client) listWorkflowPaths(owner, repo string) ([]string, error) {
 // branch; a job running in any OTHER environment (or none) with a write scope
 // is flagged.
 func AnalyzeWorkflow(path, content string, defaultBranchOnlyEnvs map[string]bool) []WorkflowFinding {
+	var workflow struct {
+		On          any `yaml:"on"`
+		Permissions any
+		Jobs        map[string]workflowAuditJob
+	}
+	if err := yaml.Unmarshal([]byte(content), &workflow); err != nil {
+		return []WorkflowFinding{{path, "could not parse workflow YAML: " + err.Error()}}
+	}
 	var findings []WorkflowFinding
-	if strings.Contains(content, "workflow_run:") {
-		findings = append(findings, WorkflowFinding{path, "uses privileged workflow_run trigger"})
-	}
-	if strings.Contains(content, "pull_request_target:") {
-		findings = append(findings, WorkflowFinding{path, "uses privileged pull_request_target trigger"})
-	}
-	if usesLocalAction(content) {
-		findings = append(findings, WorkflowFinding{path, "uses a local (./) action"})
-	}
-	for _, scope := range writeScopes(content) {
-		// security-events: write on CodeQL is the one write scope the profile
-		// accepts (CodeQL cannot report without it).
-		if strings.HasPrefix(scope, "security-events:") {
-			continue
+	for _, trigger := range workflowTriggers(workflow.On) {
+		if trigger == "workflow_run" || trigger == "pull_request_target" {
+			findings = append(findings, WorkflowFinding{path, "uses privileged " + trigger + " trigger"})
 		}
-		if !runsInDefaultBranchOnlyEnv(content, defaultBranchOnlyEnvs) {
-			findings = append(findings, WorkflowFinding{path, "grants a write scope (" + strings.TrimSpace(scope) + ") outside a default-branch-only environment"})
+	}
+	for _, name := range slices.Sorted(maps.Keys(workflow.Jobs)) {
+		job := workflow.Jobs[name]
+		prefix := fmt.Sprintf("job %q: ", name)
+		if job.usesLocalAction() {
+			findings = append(findings, WorkflowFinding{path, prefix + "uses a local (./) action"})
 		}
-		break // one write-scope finding per workflow is enough signal
+		permissions := job.Permissions
+		if permissions == nil {
+			permissions = workflow.Permissions
+		}
+		envName, _ := job.Environment.(string)
+		if env, ok := job.Environment.(map[string]any); ok {
+			envName, _ = env["name"].(string)
+		}
+		if scopes := writeScopes(permissions); len(scopes) > 0 && (envName == "" || !defaultBranchOnlyEnvs[envName]) {
+			findings = append(findings, WorkflowFinding{path, prefix + "grants a write scope (" + strings.Join(scopes, ", ") + ") outside a default-branch-only environment"})
+		}
 	}
 	return findings
 }
 
-// usesLocalAction reports whether the workflow references a local ./ action.
-func usesLocalAction(content string) bool {
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "#") {
-			continue
+type workflowAuditJob struct {
+	Permissions any
+	Environment any
+	Uses        string
+	Steps       []struct{ Uses string }
+}
+
+func workflowTriggers(on any) []string {
+	switch events := on.(type) {
+	case string:
+		return []string{events}
+	case []any:
+		var names []string
+		for _, event := range events {
+			if name, ok := event.(string); ok {
+				names = append(names, name)
+			}
 		}
-		if strings.Contains(trimmed, "uses: ./") {
+		return names
+	case map[string]any:
+		return slices.Sorted(maps.Keys(events))
+	default:
+		return nil
+	}
+}
+
+func (job workflowAuditJob) usesLocalAction() bool {
+	if strings.HasPrefix(job.Uses, "./") {
+		return true
+	}
+	for _, step := range job.Steps {
+		if strings.HasPrefix(step.Uses, "./") {
 			return true
 		}
 	}
 	return false
 }
 
-// writeScopes returns the "*: write" permission grants in the workflow.
-func writeScopes(content string) []string {
+// writeScopes returns effective write grants, except CodeQL's accepted
+// security-events scope. An explicit job permissions map replaces, rather
+// than extends, the workflow permissions.
+func writeScopes(permissions any) []string {
+	if permissions == "write-all" {
+		return []string{"write-all"}
+	}
+	grants, _ := permissions.(map[string]any)
 	var out []string
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		if strings.HasSuffix(trimmed, ": write") {
-			out = append(out, trimmed)
+	for scope, grant := range grants {
+		if grant == "write" && scope != "security-events" {
+			out = append(out, scope+": write")
 		}
 	}
+	slices.Sort(out)
 	return out
-}
-
-// runsInDefaultBranchOnlyEnv reports whether every job that declares an
-// environment uses one restricted to the default branch. A workflow with no
-// environment at all is not restricted (its write scopes are reachable by any
-// branch), so it returns false.
-func runsInDefaultBranchOnlyEnv(content string, defaultBranchOnlyEnvs map[string]bool) bool {
-	sawEnv := false
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "environment:") {
-			continue
-		}
-		sawEnv = true
-		name := strings.TrimSpace(strings.TrimPrefix(trimmed, "environment:"))
-		name = strings.Trim(name, `"'`)
-		if !defaultBranchOnlyEnvs[name] {
-			return false
-		}
-	}
-	return sawEnv
 }
