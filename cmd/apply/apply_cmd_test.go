@@ -40,11 +40,7 @@ func newBuildItemsTestFull(t *testing.T, handler http.HandlerFunc, visibility st
 		t.Fatalf("Render() error: %v", err)
 	}
 
-	items, err := buildItems(c, nil, "owner", "repo", "main", visibility, rendered, existsPlan(rulesetExists), existsPlan(tagExists), classicExists, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
-	if err != nil {
-		t.Fatalf("buildItems() error: %v", err)
-	}
-	return items
+	return buildItemsForTest(t, c, visibility, rendered, existsPlan(rulesetExists), existsPlan(tagExists), classicExists)
 }
 
 func TestNewCmd(t *testing.T) {
@@ -513,10 +509,7 @@ func sameStrSlices(got, want []string) bool {
 
 func TestBuildItems_TagRulesetExists(t *testing.T) {
 	c := github.NewClient("", false)
-	items, err := buildItems(c, nil, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, existsPlan(true), false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
-	if err != nil {
-		t.Fatalf("buildItems() error: %v", err)
-	}
+	items := buildItemsForTest(t, c, "private", nil, github.RulesetPlan{}, existsPlan(true), false)
 
 	for _, item := range items {
 		if item.Name == "Tag ruleset (protect-version-tags)" {
@@ -770,41 +763,30 @@ func runFlowHandler() http.HandlerFunc {
 	}
 }
 
-// TestRunWithClient_FullFlow drives the complete apply flow against a mock
-// server: visibility detection, pre-flight checks, solo prompt, defaults
-// confirmation, and direct application of all items.
+func existingRulesetHandler() http.HandlerFunc {
+	flow := runFlowHandler()
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			switch r.URL.Path {
+			case "/repos/owner/repo/rulesets":
+				_, _ = w.Write([]byte(`[{"id":1,"name":"protect-main"},{"id":2,"name":"protect-version-tags"}]`))
+				return
+			case "/repos/owner/repo/rulesets/1":
+				_, _ = w.Write([]byte(`{"id":1,"name":"protect-main","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"]}},"rules":[{"type":"deletion"},{"type":"non_fast_forward"},{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"require_code_owner_review":false,"dismiss_stale_reviews_on_push":false}},{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"Lint"},{"context":"Vulnerability scan"},{"context":"Build (ubuntu-latest)"},{"context":"Build (windows-latest)"},{"context":"Test (ubuntu-latest)"},{"context":"Test (windows-latest)"},{"context":"gosec"},{"context":"Trivy"}]}}]}`))
+				return
+			case "/repos/owner/repo/rulesets/2":
+				_, _ = w.Write([]byte(`{"id":2,"name":"protect-version-tags","target":"tag","enforcement":"active","conditions":{"ref_name":{"include":["refs/tags/v*"]}},"rules":[{"type":"deletion"},{"type":"non_fast_forward"}]}`))
+				return
+			}
+		}
+		flow.ServeHTTP(w, r)
+	}
+}
+
+// TestRunWithClient_ExistingRulesetInfersSolo verifies an existing ruleset
+// suppresses the solo/team prompt.
 func TestRunWithClient_ExistingRulesetInfersSolo(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if writeGoModPresent(w, r) {
-			return
-		}
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo":
-			_, _ = w.Write([]byte(`{"visibility":"public"}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/rulesets":
-			_, _ = w.Write([]byte(`[{"id":1,"name":"protect-main"},{"id":2,"name":"protect-version-tags"}]`))
-		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/rulesets/1":
-			_, _ = w.Write([]byte(`{"id":1,"name":"protect-main","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"]}},"rules":[{"type":"deletion"},{"type":"non_fast_forward"},{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"require_code_owner_review":false,"dismiss_stale_reviews_on_push":false}},{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"Lint"},{"context":"Vulnerability scan"},{"context":"Build (ubuntu-latest)"},{"context":"Build (windows-latest)"},{"context":"Test (ubuntu-latest)"},{"context":"Test (windows-latest)"},{"context":"gosec"},{"context":"Trivy"}]}}]}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/rulesets/2":
-			_, _ = w.Write([]byte(`{"id":2,"name":"protect-version-tags","target":"tag","enforcement":"active","conditions":{"ref_name":{"include":["refs/tags/v*"]}},"rules":[{"type":"deletion"},{"type":"non_fast_forward"}]}`))
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/main/protection"):
-			w.WriteHeader(http.StatusNotFound)
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/"):
-			w.WriteHeader(http.StatusNotFound)
-		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/contents/"):
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"content":{}}`))
-		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/vulnerability-alerts"):
-			w.WriteHeader(http.StatusNoContent)
-		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/automated-security-fixes"):
-			w.WriteHeader(http.StatusNoContent)
-		case r.Method == http.MethodPatch && r.URL.Path == "/repos/owner/repo":
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{}`))
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
+	srv := httptest.NewServer(existingRulesetHandler())
 	defer srv.Close()
 
 	var out strings.Builder

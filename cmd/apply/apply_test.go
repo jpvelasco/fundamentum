@@ -287,10 +287,7 @@ func TestBuildItems_WithExistingRuleset(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-	items, err := buildItems(c, nil, "owner", "repo", "main", "public", nil, existsPlan(true), existsPlan(true), false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
-	if err != nil {
-		t.Fatalf("buildItems() error: %v", err)
-	}
+	items := buildItemsForTest(t, c, "public", nil, existsPlan(true), existsPlan(true), false)
 
 	// Branch protection should be skipped
 	for _, item := range items {
@@ -959,10 +956,7 @@ func TestBuildItems_AdvancedCodeQLSkipsDefaultSetup(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Render() error: %v", err)
 		}
-		items, err := buildItems(c, nil, "owner", "repo", "main", "public", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
-		if err != nil {
-			t.Fatalf("buildItems() error: %v", err)
-		}
+		items := buildItemsForTest(t, c, "public", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false)
 		for _, item := range items {
 			if item.Name == "Security (secret scanning, CodeQL, Dependabot)" {
 				if err := item.Apply(); err != nil {
@@ -1015,10 +1009,7 @@ func TestBuildItems_FileStatusSkip(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNotFound)
 	}), func(c *github.Client) {
-		items, err := buildItems(c, nil, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
-		if err != nil {
-			t.Fatalf("buildItems() error: %v", err)
-		}
+		items := buildItemsForTest(t, c, "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false)
 		for _, item := range items {
 			if item.Name == target {
 				if item.Action != wizard.ActionSkip {
@@ -1029,59 +1020,50 @@ func TestBuildItems_FileStatusSkip(t *testing.T) {
 	}, nil)
 }
 
-// TestBranchProtectionItem_ClassicUpgradeApply verifies the upgrade item's
-// Apply closure: create the ruleset first, then remove classic protection.
+// TestBranchProtectionItem_ClassicUpgradeApply covers successful upgrades and
+// confirms a failed ruleset creation leaves classic protection in place.
 func TestBranchProtectionItem_ClassicUpgradeApply(t *testing.T) {
-	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets"):
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`[]`))
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/rulesets"):
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"id":1}`))
-		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/protection"):
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}), func(c *github.Client) {
-		item := branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, true, false, &github.BranchProtectionOptions{}, "", false, io.Discard)
-		if item.Action != wizard.ActionUpgrade {
-			t.Fatalf("expected ActionUpgrade, got %v", item.Action)
-		}
-		if err := item.Apply(); err != nil {
-			t.Fatalf("upgrade Apply() error: %v", err)
-		}
-	}, nil)
-}
-
-// TestBranchProtectionItem_ClassicUpgradeError verifies that a ruleset
-// creation failure during the upgrade aborts before removing classic
-// protection.
-func TestBranchProtectionItem_ClassicUpgradeError(t *testing.T) {
-	var classicRemoved bool
-	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets"):
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`not json`))
-		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/protection"):
-			classicRemoved = true
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}), func(c *github.Client) {
-		item := branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, true, false, &github.BranchProtectionOptions{}, "", false, io.Discard)
-		if err := item.Apply(); err == nil {
-			t.Fatal("expected error when ruleset creation fails")
-		}
-	}, func(t *testing.T) {
-		if classicRemoved {
-			t.Error("classic protection should not be removed when ruleset creation fails")
-		}
-	})
+	for _, tc := range []struct {
+		name           string
+		rulesets       string
+		wantApplyError bool
+		wantRemoval    bool
+	}{
+		{"create ruleset before removing classic protection", `[]`, false, true},
+		{"keep classic protection if ruleset creation fails", `not json`, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var classicRemoved bool
+			testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets"):
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte(tc.rulesets))
+				case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/rulesets"):
+					w.WriteHeader(http.StatusCreated)
+					_, _ = w.Write([]byte(`{"id":1}`))
+				case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/protection"):
+					classicRemoved = true
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}), func(c *github.Client) {
+				item := branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, true, false, &github.BranchProtectionOptions{}, "", false, io.Discard)
+				if item.Action != wizard.ActionUpgrade {
+					t.Fatalf("expected ActionUpgrade, got %v", item.Action)
+				}
+				err := item.Apply()
+				if (err != nil) != tc.wantApplyError {
+					t.Errorf("upgrade Apply() error = %v, want error=%t", err, tc.wantApplyError)
+				}
+			}, func(t *testing.T) {
+				if classicRemoved != tc.wantRemoval {
+					t.Errorf("classic protection removed = %t, want %t", classicRemoved, tc.wantRemoval)
+				}
+			})
+		})
+	}
 }
 
 func TestApplyItems_RequiredFileError(t *testing.T) {
@@ -1248,10 +1230,7 @@ func TestBuildItems_SkipStepsMarksOptOut(t *testing.T) {
 	t.Cleanup(reset)
 
 	globals.SkipSteps = []string{"protect-version-tags", "socket.yml"}
-	items, err := buildItems(nil, nil, "owner", "repo", "main", "public", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
-	if err != nil {
-		t.Fatalf("buildItems() error: %v", err)
-	}
+	items := buildItemsForTest(t, nil, "public", nil, github.RulesetPlan{}, github.RulesetPlan{}, false)
 	for _, item := range items {
 		if item.Name == "Tag ruleset (protect-version-tags)" {
 			if item.Action != wizard.ActionSkip || item.OptOutReason != "--skip" {
@@ -1266,10 +1245,7 @@ func TestBuildItems_SkipStepsMarksOptOut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render() error: %v", err)
 	}
-	items, err = buildItems(nil, nil, "owner", "repo", "main", "public", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
-	if err != nil {
-		t.Fatalf("buildItems() error: %v", err)
-	}
+	items = buildItemsForTest(t, nil, "public", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false)
 	var fileSeen, stepSeen bool
 	for _, item := range items {
 		if item.Content != nil {
@@ -1494,10 +1470,7 @@ func TestBuildItems_PlanGatedWithGuardSkipsViaGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, err := buildItems(c, nil, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, true, &github.BranchProtectionOptions{}, false, "", io.Discard)
-	if err != nil {
-		t.Fatal(err)
-	}
+	items := buildFreeTierPrivateItemsForTest(t, c, rendered)
 	for _, item := range items {
 		if strings.Contains(item.Name, "free-tier Actions guard") {
 			if item.Action != wizard.ActionSkip {
@@ -1519,10 +1492,7 @@ func TestBuildItems_PlanGatedWithoutGuardKeepsManualPath(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-	items, err := buildItems(c, nil, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, true, &github.BranchProtectionOptions{}, false, "", io.Discard)
-	if err != nil {
-		t.Fatal(err)
-	}
+	items := buildFreeTierPrivateItemsForTest(t, c, nil)
 	for _, item := range items {
 		if item.Name == "Branch protection (protect-main)" {
 			if item.Action != wizard.ActionCreate {
