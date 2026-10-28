@@ -110,12 +110,17 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 		return fmt.Errorf("get repo: %w", err)
 	}
 
-	selector := steps.New(globals.SkipSteps, globals.OnlySteps)
+	selector := steps.New(globals.SkipTokens(), globals.OnlySteps)
 
+	if err := apply.ValidateBotManagedFlags(); err != nil {
+		return err
+	}
 	opts := github.BranchProtectionOptions{
 		SkipCodeOwners:  strings.EqualFold(info.OwnerType, "Organization"),
 		StrictChecks:    globals.BranchUpToDate,
 		StrictChecksSet: globals.BranchUpToDateSet,
+		BotManaged:      globals.BotManaged,
+		PolicyChecks:    globals.PolicyChecks,
 	}
 	m, err := templates.DetectManifests(func(path string) (bool, error) {
 		return client.AnyFileExists(owner, repo, []string{path})
@@ -128,6 +133,9 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 		return err
 	}
 	checksWanted := github.ResolveRequiredChecksForPack(globals.RequireChecks, pack)
+	if globals.RequireChecks == nil {
+		opts.ShippedChecks = checksWanted
+	}
 	// On a free-tier private repo GitHub 403s both the rulesets and classic
 	// branch-protection probes with an "Upgrade to GitHub Pro" body, so plan
 	// all three absent (the report then shows SKIP plan-gated) rather than
@@ -187,12 +195,22 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 		boolCheck("Dependabot alerts", dependabot, "not enabled", steps.Security, selector),
 		secretCheck(info, selector),
 	}
+	if globals.BotManaged {
+		drift := info.SquashOnlyDrift()
+		results = append(results, boolCheck("squash-only merges", len(drift) == 0, strings.Join(drift, ", "), steps.Settings, selector))
+	}
 	for _, f := range files {
 		if !selector.IncludeFile(f.Path) {
 			results = append(results, skipFileCheck(f.Path, selector))
 			continue
 		}
 		results = append(results, fileCheck(client, owner, repo, f.Path, []byte(f.Content)))
+	}
+
+	// Bot-managed posture probes report WARN rather than FAIL; --strict
+	// promotes warnings to a failed run. They never change repository state.
+	if globals.BotManaged && selector.IncludeStep(steps.Actions) {
+		results = append(results, botManagedChecks(client, owner, repo, info.DefaultBranch)...)
 	}
 
 	_, _ = fmt.Fprint(stdout, formatReport(owner, repo, results))
@@ -384,4 +402,94 @@ func formatReport(owner, repo string, results []check) string {
 	}
 	fmt.Fprint(&b, ".\n")
 	return b.String()
+}
+
+// botManagedChecks are the bot-managed profile's report-only posture probes.
+// They never delete anything and never FAIL the run: a posture gap is a WARN
+// (fails only with --strict), a compliant setting is a PASS, and pure
+// information (the secret count) is a PASS with the value as detail.
+func botManagedChecks(client *github.Client, owner, repo, defaultBranch string) []check {
+	var out []check
+	out = append(out, actionsTokenCheck(client, owner, repo))
+	out = append(out, secretCountCheck(client, owner, repo))
+	envChecks, defaultBranchOnly := environmentChecks(client, owner, repo, defaultBranch)
+	out = append(out, envChecks...)
+	out = append(out, workflowScanCheck(client, owner, repo, defaultBranchOnly)...)
+	return out
+}
+
+// actionsTokenCheck reports the default GITHUB_TOKEN posture.
+func actionsTokenCheck(client *github.Client, owner, repo string) check {
+	name := "actions default token"
+	perms, err := client.GetActionsWorkflowPermissions(owner, repo)
+	if err != nil {
+		return check{Name: name, Status: statusWarn, Detail: "could not read: " + err.Error()}
+	}
+	if perms.DefaultWorkflowPermissions == "read" && !perms.CanApprovePullRequestReviews {
+		return check{Name: name, Status: statusPass}
+	}
+	return check{
+		Name:   name,
+		Status: statusWarn,
+		Detail: fmt.Sprintf("default_workflow_permissions=%s can_approve_pull_request_reviews=%t (want read/false)", perms.DefaultWorkflowPermissions, perms.CanApprovePullRequestReviews),
+	}
+}
+
+// secretCountCheck reports how many Actions secrets exist (count only).
+func secretCountCheck(client *github.Client, owner, repo string) check {
+	name := "repo secrets"
+	count, err := client.RepoSecretCount(owner, repo)
+	if err != nil {
+		return check{Name: name, Status: statusWarn, Detail: "could not read: " + err.Error()}
+	}
+	if count == 0 {
+		return check{Name: name, Status: statusPass, Detail: "none"}
+	}
+	return check{Name: name, Status: statusWarn, Detail: fmt.Sprintf("%d secret(s) present — prefer default-branch-only environment secrets", count)}
+}
+
+// environmentChecks reports each environment's deployment-branch posture and
+// returns the set of environments restricted to the default branch (used by
+// the workflow scan to judge write scopes).
+func environmentChecks(client *github.Client, owner, repo, defaultBranch string) ([]check, map[string]bool) {
+	defaultBranchOnly := map[string]bool{}
+	pols, err := client.EnvironmentBranchPolicies(owner, repo, defaultBranch)
+	if err != nil {
+		return []check{{Name: "environments", Status: statusWarn, Detail: "could not read: " + err.Error()}}, defaultBranchOnly
+	}
+	if len(pols) == 0 {
+		return []check{{Name: "environments", Status: statusSkip, Detail: "none configured"}}, defaultBranchOnly
+	}
+	var out []check
+	for _, pol := range pols {
+		if pol.DefaultBranchOnly {
+			defaultBranchOnly[pol.Name] = true
+			out = append(out, check{Name: "environment " + pol.Name, Status: statusPass, Detail: "default-branch-only"})
+			continue
+		}
+		detail := "unrestricted — any branch (incl. a PR branch) can reach its secrets"
+		if pol.Restricted {
+			detail = fmt.Sprintf("deployment restrictions: branches=%v, tags=%v, protected-branches=%t (not default-branch-only)", pol.Patterns, pol.TagPatterns, pol.ProtectedBranches)
+		}
+		out = append(out, check{Name: "environment " + pol.Name, Status: statusWarn, Detail: detail})
+	}
+	return out, defaultBranchOnly
+}
+
+// workflowScanCheck reports bot-managed concerns in each workflow, including
+// leftover workflows the profile would not ship (workflow_run /
+// pull_request_target).
+func workflowScanCheck(client *github.Client, owner, repo string, defaultBranchOnly map[string]bool) []check {
+	findings, err := client.ScanWorkflows(owner, repo, "", defaultBranchOnly)
+	if err != nil {
+		return []check{{Name: "workflow scan", Status: statusWarn, Detail: "could not scan: " + err.Error()}}
+	}
+	if len(findings) == 0 {
+		return []check{{Name: "workflow scan", Status: statusPass, Detail: "no privileged triggers, local actions, or unscoped writes"}}
+	}
+	var out []check
+	for _, f := range findings {
+		out = append(out, check{Name: "workflow " + f.Path, Status: statusWarn, Detail: f.Detail})
+	}
+	return out
 }

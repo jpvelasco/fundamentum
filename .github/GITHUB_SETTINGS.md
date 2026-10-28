@@ -86,6 +86,9 @@ gh api repos/OWNER/REPO/rulesets \
 EOF
 
 # Tag ruleset: protect-version-tags
+# The creation rule restricts tag creation to bypass actors (the repo admin
+# role), so only admins can cut v* tags — a leaked write token cannot push a
+# tag that a release workflow would then build and publish.
 gh api repos/OWNER/REPO/rulesets \
   --method POST \
   --header "Content-Type: application/json" \
@@ -98,12 +101,28 @@ gh api repos/OWNER/REPO/rulesets \
     "ref_name": { "include": ["refs/tags/v*"], "exclude": [] }
   },
   "rules": [
+    { "type": "creation" },
     { "type": "deletion" },
     { "type": "non_fast_forward" }
+  ],
+  "bypass_actors": [
+    { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" }
   ]
 }
 EOF
 ```
+
+> **Note on the `protect-main` required checks:** when Fundamentum adds one of
+> the selected CI pack's default checks (Lint, Test, gosec, Trivy, …) to `protect-main`,
+> it pins that check to the GitHub Actions app (`integration_id: 15368`) so
+> only a real Actions check run with that exact name satisfies it — a
+> third-party app posting an identically-named green check cannot. Checks
+> supplied via `--require-checks` stay unpinned even if their names match a
+> starter workflow (also with `--ci none`), unless
+> explicitly declared in `bot_policy_checks`. Ordinary reconciliation preserves
+> existing pins. With `--bot-managed`, intended shipped checks and baseline
+> policy checks already present are re-pinned if their `integration_id` is missing
+> or wrong. Unrelated checks keep their existing pins.
 
 > **Note on required status checks:** the `required_status_checks` array above
 > is intentionally empty — GitHub only recognises job names after they've run
@@ -120,8 +139,8 @@ EOF
 
 Codacy cannot be fully configured from repo files — these steps are done once
 in the Codacy dashboard, then everything runs automatically (PR checks and the
-main dashboard update via the integration webhook; coverage via
-`.github/workflows/codacy-coverage.yml`).
+main dashboard update via the integration webhook; coverage via the
+`codacy-upload` job in `.github/workflows/ci.yml`).
 
 1. **Add the repository to Codacy** (if not already present) so the GitHub
    integration analyzes PRs and posts the `Codacy Static Code Analysis` check.
@@ -129,10 +148,22 @@ main dashboard update via the integration webhook; coverage via
    NOT enable "Repository analysis on your server" — that requires a CI job to
    upload local results on every commit, and if the job doesn't run on PRs
    (or can't upload), PRs deadlock waiting for a check that never reports.
-3. **Repository Settings → Coverage:** copy the project token and add it as the
-   `CODACY_REPOSITORY_API_TOKEN` secret in GitHub → Settings → Secrets.
+3. **Repository Settings → Coverage:** copy the project token, then add it as
+   an **environment secret** named `CODACY_REPOSITORY_API_TOKEN` on a
+   `codacy` environment that is restricted to the default branch — NOT a
+   repository secret. In GitHub → Settings → Environments → New environment,
+   name it `codacy`, add a **deployment branch** rule limited to the default
+   branch (`main`), and add the secret under **Environment secrets**. The
+   `codacy-upload` CI job declares `environment: codacy` and runs only on the
+   default-branch push, so a repository-secret token would be reachable by any
+   job; the environment keeps it scoped to the trusted default branch.
    Validate the upload in the "Test your integration" panel after the next CI
-   run (needs a baseline commit before PR coverage metrics appear).
+   default-branch run. Codacy receives no PR coverage reports; its PR checks
+   cover static analysis. Codecov receives tokenless public-PR reports from
+   the test job and computes patch coverage against the default-branch report.
+   If migrating from the old forwarder, manually remove
+   `.github/workflows/codacy-coverage.yml` after configuring this replacement.
+   `apply` updates and creates files; it never deletes existing workflows.
 4. **Code patterns:** enable the tools that fit the repo's stack (e.g. Revive
    for Go) and disable noise (e.g. Trivy/Checkov where the repo has no
    container/IaC files). Tools enabled by an org AI Policy cannot be disabled
@@ -159,6 +190,7 @@ main dashboard update via the integration webhook; coverage via
 
 ### Tag protection (`v*`)
 - Ruleset name: `protect-version-tags`
+- Restrict creations (admins only, via bypass): yes
 - Restrict deletions: yes
 - Restrict updates: yes
 

@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking changes
+
+- **`protect-version-tags` now restricts tag creation to repository admins.** The new creation rule blocks `GITHUB_TOKEN` and release bots from creating `v*` tags unless their actor is explicitly authorized to bypass it. Update release automation to use an authorized actor before re-applying; repository admins retain the existing bypass.
+
+### Added
+
+- **`--bot-managed` profile** for automation-opened PRs: squash-only merges, read-only default Actions tokens without review approval, no branch-ruleset bypass actors, app-pinned policy checks, and workflow/environment audit probes. It can be combined with any preset and is off by default.
+
+### Security
+
+- **Coverage uploads no longer run in privileged contexts reachable by PRs.** Two related defaults are tightened for every hardened repo:
+  - **Codacy coverage moved out of the privileged `workflow_run` forwarder into a push-only CI job.** The `codacy-coverage.yml` `workflow_run` workflow consumed a test-job artifact in a privileged context. It is no longer shipped; **users must manually remove any existing `.github/workflows/codacy-coverage.yml`** after configuring the replacement because `apply` never deletes files. The Codacy upload now runs as a `codacy-upload` job inside `ci.yml` that runs only on the default-branch push (`needs: test`) and reads `CODACY_REPOSITORY_API_TOKEN` from a `codacy` **environment** restricted to the default branch instead of a repository secret, so a pull request can never reach the token. `GITHUB_SETTINGS.md` now walks through creating that environment and secret.
+  - **`id-token: write` moved out of the test job.** The Codecov OIDC grant now lives on a separate push-only `coverage-upload` job (`needs: test`); the test job — which runs untrusted PR code — no longer holds an OIDC token. Per-OS base coverage and Test Analytics upload on the trusted default-branch push. Public PR coverage uploads without a token or OIDC from the test job, using Codecov's unprotected-branch namespace for both same-repository and fork PRs.
+- **Octopus Review template runs on `pull_request`, not `pull_request_target`.** The opt-in workflow no longer requests the privileged `pull_request_target` trigger; `pull-requests: write` is scoped to the review job only and the header documents the remaining risk of running third-party code with a PR-write token.
+
+### Changed
+
+- **Shipped required checks are pinned to the GitHub Actions app.** When Fundamentum adds the selected CI pack's default checks (Lint, Test, gosec, Trivy, …) to `protect-main`, it now sets that check's `integration_id` to the GitHub Actions app (id `15368`, overridable via `github.GitHubActionsAppID`), so only a real GitHub Actions check run with that exact name can satisfy it — a third-party app posting an identically-named green check cannot. Explicit `--require-checks` entries are never automatically pinned, even when their names match a shipped check. Ordinary reconciliation preserves existing pins. Bot-managed reconciliation corrects missing or wrong pins on intended shipped and external policy checks, preserving unrelated checks.
+
+### Fixed
+
+- **Bot-managed merge settings reconcile independently of branch deletion.** Apply repairs non-squash merge methods even when auto-delete is already on; audit also checks the merge settings.
+
+- **Portable keep lists tolerate absent files.** Entries not shipped for the target visibility or CI pack are harmless. Whole-step keys in `keep` are ignored so it cannot disable protection or token lockdown; extensionless paths such as `CODEOWNERS` still work. Explicit `--skip` and `--only` typos still fail validation.
+- **Bot policy checks stay opt-in.** Baseline policy checks are ignored when `--bot-managed` is off, including an explicit flag override.
+- **Environment audit uses GitHub deployment policies.** Reads the top-level deployment settings and paginated branch/tag policies; only an exact default-branch rule with no tag access passes. API failures remain warnings instead of silently marking environments safe.
+- **CodeQL scans the npm shim and release scripts.** Restores the JavaScript analysis configuration alongside Go and Actions.
+- **Bot-managed workflow audit parses YAML per job.** The scan recognizes commented and quoted permission values, `write-all`, workflow-level inheritance, job overrides, and all trigger forms. A restricted environment on one job no longer hides another job's writes. Malformed YAML produces a warning.
+
 ## [0.4.3] - 2026-10-26
 
 **Patch release.** The free-tier guard's first real run exposed the rest of its latent defect stack: a detection filter that could never match a legitimate merge, an association check that races GitHub's eventual consistency, and a revert step that could never have worked. Together they cancelled into a loud no-op — every push red-Xed, nothing was ever reverted — but each defect individually is serious, and fixing detection without the revert would have made the guard revert legitimate merges.

@@ -15,6 +15,7 @@ func baselineBools(file Baseline) []boolFlag {
 		{name: "no-overwrite", current: &NoOverwrite, file: file.NoOverwrite},
 		{name: "octopus", current: &Octopus, file: file.Octopus},
 		{name: "codacy-instructions", current: &CodacyInstructions, file: file.CodacyInstructions},
+		{name: "bot-managed", current: &BotManaged, file: file.BotManaged},
 	}
 }
 

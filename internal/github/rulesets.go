@@ -4,8 +4,10 @@ package github
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -51,6 +53,32 @@ var LanguageStatusChecks = []string{
 	"Trivy",
 }
 
+// GitHubActionsAppID is the integration_id of the GitHub Actions app — the
+// app that posts the check runs produced by a repository's own workflows.
+// Pinning a required status check to this app means only a GitHub Actions
+// check run with that exact context satisfies it; a third-party app posting
+// an identically-named check cannot. It is a var (not a const) so operators
+// embedding fundamentum can override it if GitHub ever changes the id.
+var GitHubActionsAppID = 15368
+
+// RepositoryRoleAdminID is the bypass-actor actor_id for the repository
+// "admin" role in a ruleset (actor_type "RepositoryRole"). The tag ruleset's
+// creation rule restricts tag creation to bypass actors; granting the admin
+// role lets repository admins still cut version tags while everyone else is
+// blocked. It is a var so operators can override it if their GitHub
+// deployment reports a different role id.
+var RepositoryRoleAdminID = 5
+
+// newStatusCheck builds one intended required_status_checks entry.
+// Only explicitly owned contexts receive a GitHub Actions pin; a name alone
+// cannot identify the producer of a custom required check.
+func newStatusCheck(context string, shipped []string) map[string]any {
+	if slices.Contains(shipped, context) {
+		return map[string]any{"context": context, "integration_id": GitHubActionsAppID}
+	}
+	return map[string]any{"context": context}
+}
+
 // BranchProtectionOptions controls how strictly the branch ruleset is configured.
 type BranchProtectionOptions struct {
 	// Solo disables CODEOWNERS review requirement and stale review dismissal,
@@ -63,6 +91,10 @@ type BranchProtectionOptions struct {
 	// fallback so the open harden PR is not blocked by checks that only
 	// exist after that PR merges (Codacy, shipped CI jobs).
 	SkipStatusChecks bool
+	// ShippedChecks identifies the selected CI pack's default check contexts.
+	// Leave empty for custom --require-checks or --ci none: matching a shipped
+	// name does not make a custom check belong to the GitHub Actions app.
+	ShippedChecks []string
 	// StrictChecks is the intended strict_required_status_checks_policy
 	// ("branches must be up to date before merging"). Default true; a create
 	// always uses it.
@@ -71,6 +103,22 @@ type BranchProtectionOptions struct {
 	// or baseline). A reconcile enforces an explicitly-chosen value; when
 	// unset it keeps the ruleset's live policy instead of forcing it back.
 	StrictChecksSet bool
+	// BotManaged enables the bot-managed profile for the branch ruleset:
+	// solo-style PR params, squash-only allowed_merge_methods, shipped checks
+	// pinned to the GitHub Actions app, optional policy checks, and an
+	// explicit empty bypass_actors list.
+	BotManaged bool
+	// PolicyChecks are external policy checks required on protect-main in
+	// bot-managed mode. Each must carry the integration (app) id that posts
+	// it — a policy check without an app id is refused.
+	PolicyChecks []PolicyCheck
+}
+
+// PolicyCheck is one external policy status check: a context plus the
+// integration (app) id that must post it.
+type PolicyCheck struct {
+	Context       string `json:"context"`
+	IntegrationID int64  `json:"integration_id"`
 }
 
 func (o BranchProtectionOptions) requireCodeOwners() bool {
@@ -85,6 +133,17 @@ type Ruleset struct {
 	Enforcement string           `json:"enforcement"`
 	Conditions  map[string]any   `json:"conditions"`
 	Rules       []map[string]any `json:"rules"`
+	// BypassActors are the actors allowed to bypass the ruleset. GitHub only
+	// returns this when the caller has write access to the ruleset, so it may
+	// be nil on read.
+	BypassActors []BypassActor `json:"bypass_actors"`
+}
+
+// BypassActor is one ruleset bypass actor.
+type BypassActor struct {
+	ActorID    *int64 `json:"actor_id,omitempty"`
+	ActorType  string `json:"actor_type"`
+	BypassMode string `json:"bypass_mode,omitempty"`
 }
 
 // RulesetPlan is the apply/audit view of a managed ruleset.
@@ -218,9 +277,9 @@ func (c *Client) PlanTagRuleset(owner, repo string) (RulesetPlan, error) {
 }
 
 // EnsureBranchRuleset creates protect-main, or reconciles it when owned fields
-// have drifted. Reconcile MERGES: required checks already present keep their
-// integration_id, extra checks are kept, unowned rules survive, and stricter
-// live settings are never weakened.
+// have drifted. Reconcile keeps extra checks, unowned rules, and stricter live
+// settings. Existing integration IDs are preserved unless bot-managed intent
+// explicitly pins the check.
 func (c *Client) EnsureBranchRuleset(owner, repo string, statusChecks []string, opts BranchProtectionOptions) error {
 	plan, err := c.PlanBranchRuleset(owner, repo, statusChecks, opts)
 	if err != nil {
@@ -306,6 +365,30 @@ func mergeBranchRulesetBody(live *Ruleset, statusChecks []string, opts BranchPro
 	return body
 }
 
+// RemovedBypassActors returns the live bypass actors a bot-managed reconcile
+// would drop (it sends an explicit empty list). Returns nil when the profile
+// is off or there is nothing to remove, so callers can print exactly what
+// will disappear.
+func RemovedBypassActors(live *Ruleset, opts BranchProtectionOptions) []BypassActor {
+	if !opts.BotManaged || live == nil || len(live.BypassActors) == 0 {
+		return nil
+	}
+	return append([]BypassActor{}, live.BypassActors...)
+}
+
+// DescribeBypassActor renders one bypass actor for the removed-actors notice,
+// e.g. "Team#12345 (always)" or "OrganizationAdmin (pull_request)".
+func DescribeBypassActor(a BypassActor) string {
+	s := a.ActorType
+	if a.ActorID != nil {
+		s += fmt.Sprintf("#%d", *a.ActorID)
+	}
+	if a.BypassMode != "" {
+		s += " (" + a.BypassMode + ")"
+	}
+	return s
+}
+
 // mergeTagRulesetBody is the reconcile-path tag body: keep unowned rules and
 // extra condition entries; ensure the owned ones exist.
 func mergeTagRulesetBody(live *Ruleset) map[string]any {
@@ -313,11 +396,12 @@ func mergeTagRulesetBody(live *Ruleset) map[string]any {
 		return tagRulesetBody()
 	}
 	return map[string]any{
-		"name":        "protect-version-tags",
-		"target":      "tag",
-		"enforcement": "active",
-		"conditions":  mergedConditions(live.Conditions, "refs/tags/v*"),
-		"rules":       mergeOwnedRules(live, tagRulesetRules()),
+		"name":          "protect-version-tags",
+		"target":        "tag",
+		"enforcement":   "active",
+		"conditions":    mergedConditions(live.Conditions, "refs/tags/v*"),
+		"rules":         mergeOwnedRules(live, tagRulesetRules()),
+		"bypass_actors": mergedTagBypassActors(live),
 	}
 }
 
@@ -376,9 +460,11 @@ func refIncludeStrings(ref map[string]any) []string {
 }
 
 // baseBranchRulesetBody is the shared branch body shape; the rules are
-// replaced by create vs merge paths before use.
+// replaced by create vs merge paths before use. The bot-managed profile also
+// sends an explicit empty bypass_actors list; with the profile off the body
+// carries no bypass_actors key at all, byte-identical to the default.
 func baseBranchRulesetBody(statusChecks []string, opts BranchProtectionOptions) map[string]any {
-	return map[string]any{
+	body := map[string]any{
 		"name":        "protect-main",
 		"target":      "branch",
 		"enforcement": "active",
@@ -390,6 +476,10 @@ func baseBranchRulesetBody(statusChecks []string, opts BranchProtectionOptions) 
 		},
 		"rules": branchRulesetRules(statusChecks, opts, prRuleParams(opts)),
 	}
+	if opts.BotManaged {
+		body["bypass_actors"] = []any{}
+	}
+	return body
 }
 
 func branchRulesetRules(statusChecks []string, opts BranchProtectionOptions, prParams map[string]any) []map[string]any {
@@ -405,14 +495,22 @@ func branchRulesetRules(statusChecks []string, opts BranchProtectionOptions, prP
 }
 
 // prRuleParams is the intended pull_request rule for the create path.
+// Bot-managed forces the solo shape (no code-owner review, no stale-review
+// dismissal — automation cannot supply either) and locks merges to squash-only.
 func prRuleParams(opts BranchProtectionOptions) map[string]any {
-	return map[string]any{
+	params := map[string]any{
 		"required_approving_review_count":   0,
 		"dismiss_stale_reviews_on_push":     !opts.Solo,
 		"require_code_owner_review":         opts.requireCodeOwners(),
 		"require_last_push_approval":        false,
 		"required_review_thread_resolution": true,
 	}
+	if opts.BotManaged {
+		params["dismiss_stale_reviews_on_push"] = false
+		params["require_code_owner_review"] = false
+		params["allowed_merge_methods"] = []string{"squash"}
+	}
+	return params
 }
 
 // strictestPRRule merges a live pull_request rule with the intended one,
@@ -466,19 +564,57 @@ func strictestPRRule(live map[string]any, opts BranchProtectionOptions) map[stri
 	return merged
 }
 
+// ValidatePolicyChecks enforces the bot-managed rule that every required
+// policy check names the app that posts it. An unpinned policy check would be
+// satisfied by ANY app posting that context — exactly the spoof the pin
+// exists to prevent — so it is refused rather than silently required. Callers
+// run this before building or diffing a ruleset body.
+func ValidatePolicyChecks(checks []PolicyCheck) error {
+	for _, pc := range checks {
+		if pc.Context == "" {
+			return fmt.Errorf("bot-managed policy check with integration_id %d has an empty context", pc.IntegrationID)
+		}
+		if pc.IntegrationID == 0 {
+			return fmt.Errorf("bot-managed policy check %q has no integration_id: every required policy check must pin the app that posts it", pc.Context)
+		}
+	}
+	return nil
+}
+
+// policyCheckEntries builds the required_status_checks entries for validated
+// policy checks. Callers must run ValidatePolicyChecks first; entries here
+// are pinned by construction.
+func policyCheckEntries(checks []PolicyCheck) []map[string]any {
+	out := make([]map[string]any, 0, len(checks))
+	for _, pc := range checks {
+		out = append(out, map[string]any{"context": pc.Context, "integration_id": pc.IntegrationID})
+	}
+	return out
+}
+
 // statusChecksRule builds the required_status_checks rule. On the create path
 // it lists the intended checks; the merge path merges the live checks (with
 // their integration_id) in statusChecksRuleMerged.
 func statusChecksRule(statusChecks []string, opts BranchProtectionOptions) map[string]any {
-	allChecks := intendedChecks(statusChecks, opts)
-	if len(allChecks) == 0 {
+	checks := requiredCheckEntries(statusChecks, opts)
+	if len(checks) == 0 {
 		return nil
 	}
-	checks := make([]map[string]any, len(allChecks))
-	for i, name := range allChecks {
-		checks[i] = map[string]any{"context": name}
-	}
 	return statusChecksRuleWith(checks, intendedStrictChecks(opts))
+}
+
+// requiredCheckEntries is the shared intent for creation, reconciliation,
+// and bot-managed pin drift.
+func requiredCheckEntries(statusChecks []string, opts BranchProtectionOptions) []map[string]any {
+	allChecks := intendedChecks(statusChecks, opts)
+	checks := make([]map[string]any, 0, len(allChecks))
+	for _, name := range allChecks {
+		checks = append(checks, newStatusCheck(name, opts.ShippedChecks))
+	}
+	if opts.BotManaged {
+		checks = append(checks, policyCheckEntries(opts.PolicyChecks)...)
+	}
+	return checks
 }
 
 // intendedStrictChecks is the up-to-date policy for a fresh ruleset: true
@@ -490,33 +626,35 @@ func intendedStrictChecks(opts BranchProtectionOptions) bool {
 	return true
 }
 
-// statusChecksRuleMerged unions the live checks (kept verbatim, preserving
-// their integration_id) with any intended check that is missing, and applies
-// the strict-policy intent: explicitly set → enforced; unset → keep live.
+// statusChecksRuleMerged unions live and intended checks. Bot-managed mode
+// enforces intended pins; otherwise live entries stay verbatim. The strict
+// policy is enforced only when explicitly set.
 func statusChecksRuleMerged(liveRule map[string]any, statusChecks []string, opts BranchProtectionOptions) map[string]any {
 	params, _ := liveRule["parameters"].(map[string]any)
-	if params == nil {
-		params = map[string]any{}
-	}
 	liveChecks := anySlice(params["required_status_checks"])
-	if liveChecks == nil {
-		liveChecks = []any{}
-	}
-	have := map[string]bool{}
+	have := map[string]int{}
 	merged := make([]any, 0, len(liveChecks)+len(statusChecks))
 	for _, item := range liveChecks {
-		if m, ok := item.(map[string]any); ok {
-			if ctx, ok := m["context"].(string); ok {
-				have[ctx] = true
-				// Keep the entry verbatim — integration_id included, so only
-				// the app that posted the check can satisfy it.
-				merged = append(merged, m)
-			}
+		m, _ := item.(map[string]any)
+		ctx, ok := m["context"].(string)
+		if !ok {
+			continue
 		}
+		have[ctx] = len(merged)
+		merged = append(merged, m)
 	}
-	for _, name := range intendedChecks(statusChecks, opts) {
-		if !have[name] {
-			merged = append(merged, map[string]any{"context": name})
+	for _, entry := range requiredCheckEntries(statusChecks, opts) {
+		ctx := entry["context"].(string)
+		index, present := have[ctx]
+		if !present {
+			have[ctx] = len(merged)
+			merged = append(merged, entry)
+			continue
+		}
+		if pin, pinned := entry["integration_id"]; opts.BotManaged && pinned {
+			check := maps.Clone(merged[index].(map[string]any))
+			check["integration_id"] = pin
+			merged[index] = check
 		}
 	}
 	strict := mapBool(params, "strict_required_status_checks_policy")
@@ -571,15 +709,62 @@ func tagRulesetBody() map[string]any {
 				"exclude": []string{},
 			},
 		},
-		"rules": tagRulesetRules(),
+		"rules":         tagRulesetRules(),
+		"bypass_actors": tagRulesetBypassActors(),
 	}
 }
 
+// tagRulesetRules are the owned tag rules. The creation rule restricts tag
+// creation to bypass actors (the admin role below), so version tags can only
+// be cut by a repository admin — a leaked write token can no longer push a
+// malicious v* tag that a release workflow would then build and publish.
 func tagRulesetRules() []map[string]any {
 	return []map[string]any{
+		{"type": "creation"},
 		{"type": "deletion"},
 		{"type": "non_fast_forward"},
 	}
+}
+
+// tagRulesetBypassActors grants the repository admin role bypass so admins
+// can still create version tags under the creation rule.
+func tagRulesetBypassActors() []map[string]any {
+	id := int64(RepositoryRoleAdminID)
+	return []map[string]any{
+		{"actor_id": id, "actor_type": "RepositoryRole", "bypass_mode": "always"},
+	}
+}
+
+// hasTagAdminBypass reports whether the live ruleset already grants bypass to
+// the repository admin role, so a reconcile does not add a duplicate.
+func hasTagAdminBypass(live *Ruleset) bool {
+	for _, a := range live.BypassActors {
+		if a.ActorType == "RepositoryRole" && a.ActorID != nil && *a.ActorID == int64(RepositoryRoleAdminID) {
+			return true
+		}
+	}
+	return false
+}
+
+// mergedTagBypassActors preserves every existing bypass actor and adds the
+// admin role when it is not already present. Normal reconciles never remove
+// an actor — only the bot-managed profile sends an explicit empty list.
+func mergedTagBypassActors(live *Ruleset) []map[string]any {
+	merged := make([]map[string]any, 0, len(live.BypassActors)+1)
+	for _, a := range live.BypassActors {
+		entry := map[string]any{"actor_type": a.ActorType}
+		if a.ActorID != nil {
+			entry["actor_id"] = *a.ActorID
+		}
+		if a.BypassMode != "" {
+			entry["bypass_mode"] = a.BypassMode
+		}
+		merged = append(merged, entry)
+	}
+	if !hasTagAdminBypass(live) {
+		merged = append(merged, tagRulesetBypassActors()...)
+	}
+	return merged
 }
 
 // BranchRulesetDrift returns Fundamentum-owned fields where the live ruleset
@@ -614,7 +799,70 @@ func BranchRulesetDrift(got *Ruleset, statusChecks []string, opts BranchProtecti
 			drift = append(drift, "up-to-date policy")
 		}
 	}
+	if opts.BotManaged {
+		drift = append(drift, botManagedDrift(got, statusChecks, opts)...)
+	}
 	return drift
+}
+
+// botManagedDrift reports the bot-managed-only weaknesses: merges not locked
+// to squash-only, a live bypass actor (the profile grants no standing
+// bypass), or a required check that is missing or not pinned to its
+// app.
+func botManagedDrift(got *Ruleset, statusChecks []string, opts BranchProtectionOptions) []string {
+	var drift []string
+	if !squashOnlyMerges(got) {
+		drift = append(drift, "squash-only merges")
+	}
+	if len(got.BypassActors) > 0 {
+		drift = append(drift, "bypass actors present")
+	}
+	if missing := unpinnedOrMissingChecks(got, requiredCheckEntries(statusChecks, opts)); len(missing) > 0 {
+		drift = append(drift, "required check pins: "+missing)
+	}
+	return drift
+}
+
+// squashOnlyMerges reports whether the live pull_request rule restricts
+// merges to squash only.
+func squashOnlyMerges(got *Ruleset) bool {
+	pr := ruleByType(got, "pull_request")
+	if pr == nil {
+		return false
+	}
+	params, _ := pr["parameters"].(map[string]any)
+	mm := anySlice(params["allowed_merge_methods"])
+	if len(mm) != 1 {
+		return false
+	}
+	s, ok := mm[0].(string)
+	return ok && s == "squash"
+}
+
+// unpinnedOrMissingChecks reports intended pins that are absent or wrong.
+func unpinnedOrMissingChecks(got *Ruleset, want []map[string]any) string {
+	if len(want) == 0 {
+		return ""
+	}
+	rule := ruleByType(got, "required_status_checks")
+	live := map[string]int64{}
+	if rule != nil {
+		params, _ := rule["parameters"].(map[string]any)
+		for _, item := range anySlice(params["required_status_checks"]) {
+			m, _ := item.(map[string]any)
+			ctx, _ := m["context"].(string)
+			live[ctx] = int64(mapInt(m, "integration_id"))
+		}
+	}
+	var bad []string
+	for _, check := range want {
+		context, _ := check["context"].(string)
+		pin := int64(mapInt(check, "integration_id"))
+		if pin != 0 && live[context] != pin {
+			bad = append(bad, context)
+		}
+	}
+	return strings.Join(bad, ", ")
 }
 
 // prRuleWeaker reports whether the live pull_request rule is weaker than the
@@ -625,14 +873,11 @@ func prRuleWeaker(rule map[string]any, opts BranchProtectionOptions) bool {
 		return true
 	}
 	params, _ := rule["parameters"].(map[string]any)
-	if !mapBool(params, "required_review_thread_resolution") {
-		return true
-	}
-	if opts.requireCodeOwners() && !mapBool(params, "require_code_owner_review") {
-		return true
-	}
-	if !opts.Solo && !mapBool(params, "dismiss_stale_reviews_on_push") {
-		return true
+	intended := prRuleParams(opts)
+	for _, key := range []string{"required_review_thread_resolution", "require_code_owner_review", "dismiss_stale_reviews_on_push"} {
+		if mapBool(intended, key) && !mapBool(params, key) {
+			return true
+		}
 	}
 	return false
 }
@@ -663,6 +908,9 @@ func TagRulesetDrift(got *Ruleset) []string {
 	}
 	if !includesRef(got.Conditions, "refs/tags/v*") {
 		drift = append(drift, "conditions")
+	}
+	if !hasRuleType(got, "creation") {
+		drift = append(drift, "creation")
 	}
 	if !hasRuleType(got, "deletion") {
 		drift = append(drift, "deletion")
@@ -831,6 +1079,8 @@ func mapInt(m map[string]any, key string) int {
 		return int(v)
 	case int:
 		return v
+	case int64:
+		return int(v)
 	case json.Number:
 		n, _ := v.Int64()
 		return int(n)

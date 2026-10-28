@@ -211,7 +211,7 @@ func TestEnableSecurity_SecretScanningNetworkError(t *testing.T) {
 
 func TestApplyGeneralSettings_NetworkError(t *testing.T) {
 	c := newErroringClient()
-	if err := c.ApplyGeneralSettings("owner", "repo"); err == nil {
+	if err := c.ApplyGeneralSettings("owner", "repo", false); err == nil {
 		t.Fatal("expected network error")
 	}
 }

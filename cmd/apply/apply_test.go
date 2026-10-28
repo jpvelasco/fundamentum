@@ -287,7 +287,7 @@ func TestBuildItems_WithExistingRuleset(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-	items, err := buildItems(c, nil, "owner", "repo", "main", "public", nil, existsPlan(true), existsPlan(true), false, false, &github.BranchProtectionOptions{}, false, "")
+	items, err := buildItems(c, nil, "owner", "repo", "main", "public", nil, existsPlan(true), existsPlan(true), false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -586,7 +586,7 @@ func TestApplyItems_BranchProtectionFailureFailsRun(t *testing.T) {
 }
 
 func TestBranchProtectionItem_NilOpts(t *testing.T) {
-	item := branchProtectionItem(nil, "owner", "repo", "main", "public", existsPlan(true), false, false, nil, "", false)
+	item := branchProtectionItem(nil, "owner", "repo", "main", "public", existsPlan(true), false, false, nil, "", false, io.Discard)
 	if item.Action != wizard.ActionSkip {
 		t.Errorf("Action = %v, want skip", item.Action)
 	}
@@ -635,7 +635,7 @@ func assertDeferredRequiredChecks(t *testing.T, viaPR bool, refStatus int, failM
 				Action:  wizard.ActionCreate,
 				Content: []byte("me"),
 			},
-			branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, false, false, opts, "", false),
+			branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, false, false, opts, "", false, io.Discard),
 		}
 		if err := applyItems(c, "owner", "repo", "main", items, viaPR, opts, io.Discard); err != nil {
 			t.Fatalf("applyItems() error: %v", err)
@@ -797,7 +797,7 @@ func TestBranchProtectionItem_FallbackOnlyOn403(t *testing.T) {
 					w.WriteHeader(http.StatusNoContent)
 				}
 			}), func(c *github.Client) {
-				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, "", false)
+				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, "", false, io.Discard)
 				err := item.Apply()
 				if tt.wantErr && err == nil {
 					t.Error("expected error, got nil")
@@ -959,7 +959,7 @@ func TestBuildItems_AdvancedCodeQLSkipsDefaultSetup(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Render() error: %v", err)
 		}
-		items, err := buildItems(c, nil, "owner", "repo", "main", "public", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "")
+		items, err := buildItems(c, nil, "owner", "repo", "main", "public", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
 		if err != nil {
 			t.Fatalf("buildItems() error: %v", err)
 		}
@@ -1015,7 +1015,7 @@ func TestBuildItems_FileStatusSkip(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNotFound)
 	}), func(c *github.Client) {
-		items, err := buildItems(c, nil, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "")
+		items, err := buildItems(c, nil, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
 		if err != nil {
 			t.Fatalf("buildItems() error: %v", err)
 		}
@@ -1046,7 +1046,7 @@ func TestBranchProtectionItem_ClassicUpgradeApply(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}), func(c *github.Client) {
-		item := branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, true, false, &github.BranchProtectionOptions{}, "", false)
+		item := branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, true, false, &github.BranchProtectionOptions{}, "", false, io.Discard)
 		if item.Action != wizard.ActionUpgrade {
 			t.Fatalf("expected ActionUpgrade, got %v", item.Action)
 		}
@@ -1073,7 +1073,7 @@ func TestBranchProtectionItem_ClassicUpgradeError(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}), func(c *github.Client) {
-		item := branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, true, false, &github.BranchProtectionOptions{}, "", false)
+		item := branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, true, false, &github.BranchProtectionOptions{}, "", false, io.Discard)
 		if err := item.Apply(); err == nil {
 			t.Fatal("expected error when ruleset creation fails")
 		}
@@ -1196,7 +1196,7 @@ func TestBuildItems_FileStatusErrorFailsPlan(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNotFound)
 	}), func(c *github.Client) {
-		items, err := buildItems(c, nil, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "")
+		items, err := buildItems(c, nil, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
 		if err == nil {
 			t.Fatal("expected buildItems to fail when FileStatus errors, got nil")
 		}
@@ -1226,7 +1226,7 @@ func TestBuildItems_AliasCheckErrorFailsPlan(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}), func(c *github.Client) {
-		items, err := buildItems(c, nil, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "")
+		items, err := buildItems(c, nil, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
 		if err == nil {
 			t.Fatal("expected buildItems to fail when the alias check errors, got nil")
 		}
@@ -1248,7 +1248,7 @@ func TestBuildItems_SkipStepsMarksOptOut(t *testing.T) {
 	t.Cleanup(reset)
 
 	globals.SkipSteps = []string{"protect-version-tags", "socket.yml"}
-	items, err := buildItems(nil, nil, "owner", "repo", "main", "public", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "")
+	items, err := buildItems(nil, nil, "owner", "repo", "main", "public", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -1266,7 +1266,7 @@ func TestBuildItems_SkipStepsMarksOptOut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render() error: %v", err)
 	}
-	items, err = buildItems(nil, nil, "owner", "repo", "main", "public", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "")
+	items, err = buildItems(nil, nil, "owner", "repo", "main", "public", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -1494,7 +1494,7 @@ func TestBuildItems_PlanGatedWithGuardSkipsViaGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, err := buildItems(c, nil, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, true, &github.BranchProtectionOptions{}, false, "")
+	items, err := buildItems(c, nil, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, true, &github.BranchProtectionOptions{}, false, "", io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1519,7 +1519,7 @@ func TestBuildItems_PlanGatedWithoutGuardKeepsManualPath(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-	items, err := buildItems(c, nil, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, true, &github.BranchProtectionOptions{}, false, "")
+	items, err := buildItems(c, nil, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, true, &github.BranchProtectionOptions{}, false, "", io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}

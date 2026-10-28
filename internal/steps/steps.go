@@ -12,7 +12,18 @@ const (
 	ProtectVersionTags = "protect-version-tags" // tag ruleset
 	Security           = "security"             // Dependabot / secret scanning / CodeQL
 	Files              = "files"                // all community/CI file items
+	Actions            = "actions"              // default GITHUB_TOKEN workflow permissions (bot-managed)
 )
+
+// IsStep reports whether a token names a whole step rather than a file path.
+func IsStep(token string) bool {
+	switch strings.ToLower(strings.TrimSpace(token)) {
+	case Settings, ProtectMain, ProtectVersionTags, Security, Files, Actions:
+		return true
+	default:
+		return false
+	}
+}
 
 // Selector decides whether a step or file should run. An empty only-set means
 // "everything"; a non-empty only-set restricts to the listed steps/paths. The
@@ -40,20 +51,11 @@ func (s Selector) Len() int {
 // silent no-op that lets apply touch exactly what the operator meant to
 // preserve, so callers surface these as errors.
 func (s Selector) Unknown(renderedPaths []string) []string {
-	known := map[string]bool{
-		Settings:           true,
-		ProtectMain:        true,
-		ProtectVersionTags: true,
-		Security:           true,
-		Files:              true,
-	}
-	for _, p := range renderedPaths {
-		known[strings.ToLower(p)] = true
-	}
+	knownPaths := keySet(renderedPaths)
 	var out []string
 	for _, set := range []map[string]struct{}{s.skip, s.only} {
 		for k := range set {
-			if !known[k] {
+			if _, known := knownPaths[k]; !known && !IsStep(k) {
 				out = append(out, k)
 			}
 		}

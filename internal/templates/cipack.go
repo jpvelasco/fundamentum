@@ -130,7 +130,7 @@ func templatePackSet(path string) map[string]bool {
 
 	switch stem {
 	case "ci.yml", "codecov.yml", "octocov.yml", "codeql.yml", "codeql-config.yml",
-		"codacy-coverage.yml", "codacy.yml", "dependabot.yml":
+		"codacy.yml", "dependabot.yml":
 		// Un-prefixed legacy names are the Go pack's files. public_codacy.yml
 		// is the go-pack Codacy variant; per-pack variants carry a pack prefix.
 		return packSet(CIPackGo)

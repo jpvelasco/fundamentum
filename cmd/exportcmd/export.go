@@ -19,12 +19,15 @@ func NewCmd() *cobra.Command {
 		Long: `Write the current flag baseline as JSON so apply --from can
 reproduce it. Combine with --preset / --ci / --require-checks /
 --skip / --only / --advanced-security / --strict / --octopus /
---codacy-instructions / --branch-up-to-date. An explicit flag on the later
-apply or audit wins over the file, including --flag=false. Does not call GitHub.
+--codacy-instructions / --bot-managed / --branch-up-to-date. The baseline
+also carries bot_policy_checks and keep (no CLI flag). An explicit flag on
+the later apply or audit wins over the file, including --flag=false.
+Does not call GitHub.
 
 Examples:
   fundamentum --preset oss export
   fundamentum --preset strict --ci generic export -o baseline.json
+  fundamentum --bot-managed export -o bot-baseline.json
   fundamentum --from baseline.json apply OWNER/REPO`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

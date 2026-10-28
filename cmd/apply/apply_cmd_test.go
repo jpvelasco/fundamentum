@@ -40,7 +40,7 @@ func newBuildItemsTestFull(t *testing.T, handler http.HandlerFunc, visibility st
 		t.Fatalf("Render() error: %v", err)
 	}
 
-	items, err := buildItems(c, nil, "owner", "repo", "main", visibility, rendered, existsPlan(rulesetExists), existsPlan(tagExists), classicExists, false, &github.BranchProtectionOptions{}, false, "")
+	items, err := buildItems(c, nil, "owner", "repo", "main", visibility, rendered, existsPlan(rulesetExists), existsPlan(tagExists), classicExists, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestRun_NoArg(t *testing.T) {
 }
 
 func TestBranchProtectionItem_RulesetExists(t *testing.T) {
-	item := branchProtectionItem(nil, "owner", "repo", "main", "public", github.RulesetPlan{Exists: true}, false, false, &github.BranchProtectionOptions{}, "", false)
+	item := branchProtectionItem(nil, "owner", "repo", "main", "public", github.RulesetPlan{Exists: true}, false, false, &github.BranchProtectionOptions{}, "", false, io.Discard)
 	if item.Action != wizard.ActionSkip {
 		t.Errorf("expected ActionSkip when matching ruleset exists, got %v", item.Action)
 	}
@@ -123,7 +123,7 @@ func TestTagRulesetItem_Drift(t *testing.T) {
 }
 
 func TestBranchProtectionItem_RulesetDrift(t *testing.T) {
-	item := branchProtectionItem(nil, "owner", "repo", "main", "public", github.RulesetPlan{Exists: true, Drift: []string{"enforcement"}}, false, false, &github.BranchProtectionOptions{}, "", false)
+	item := branchProtectionItem(nil, "owner", "repo", "main", "public", github.RulesetPlan{Exists: true, Drift: []string{"enforcement"}}, false, false, &github.BranchProtectionOptions{}, "", false, io.Discard)
 	if item.Action != wizard.ActionUpdate {
 		t.Errorf("expected ActionUpdate on ruleset drift, got %v", item.Action)
 	}
@@ -176,7 +176,7 @@ func TestBranchProtectionItem_Creation(t *testing.T) {
 				w.WriteHeader(http.StatusCreated)
 				_, _ = w.Write([]byte(`{"id":1}`))
 			}), func(c *github.Client) {
-				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, existsPlan(tt.rulesetExists), tt.classicExists, false, &github.BranchProtectionOptions{}, "", false)
+				item := branchProtectionItem(c, "owner", "repo", "main", tt.visibility, existsPlan(tt.rulesetExists), tt.classicExists, false, &github.BranchProtectionOptions{}, "", false, io.Discard)
 				if item.Action != tt.wantAction {
 					t.Errorf("expected action %v, got %v", tt.wantAction, item.Action)
 				}
@@ -230,7 +230,7 @@ func TestBuildItems_Private(t *testing.T) {
 
 func TestBuildItems_PrivatePaidSecurity(t *testing.T) {
 	c := github.NewClient("", false)
-	items, err := buildItems(c, nil, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, true, "")
+	items, err := buildItems(c, nil, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, true, "", io.Discard)
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestBuildItems_SettingsAndSecurityActions(t *testing.T) {
 					w.WriteHeader(http.StatusNotFound)
 				}
 			}), func(c *github.Client) {
-				items, err := buildItems(c, &tt.info, "owner", "repo", "main", "public", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "")
+				items, err := buildItems(c, &tt.info, "owner", "repo", "main", "public", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
 				if err != nil {
 					t.Fatalf("buildItems() error: %v", err)
 				}
@@ -513,7 +513,7 @@ func sameStrSlices(got, want []string) bool {
 
 func TestBuildItems_TagRulesetExists(t *testing.T) {
 	c := github.NewClient("", false)
-	items, err := buildItems(c, nil, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, existsPlan(true), false, false, &github.BranchProtectionOptions{}, false, "")
+	items, err := buildItems(c, nil, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, existsPlan(true), false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
 	}
@@ -701,7 +701,11 @@ func writeGoModPresent(w http.ResponseWriter, r *http.Request) bool {
 // public repo with no existing protection or files: visibility check, ruleset
 // checks, classic protection, file status/upsert, settings, and security.
 func newRunFlowServer() *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return httptest.NewServer(runFlowHandler())
+}
+
+func runFlowHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		if writeGoModPresent(w, r) {
 			return
 		}
@@ -763,7 +767,7 @@ func newRunFlowServer() *httptest.Server {
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
-	}))
+	}
 }
 
 // TestRunWithClient_FullFlow drives the complete apply flow against a mock

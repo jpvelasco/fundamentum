@@ -77,7 +77,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
-      id-token: write  # OIDC; lets each leg mint the Codecov upload token
     steps:
       # fetch-depth: 0 so Codecov can walk git history for path mapping and so
       # parent/base SHAs exist when the App compares PR head vs the default branch
@@ -98,21 +97,6 @@ jobs:
         run: |
           go test ./... -v -race -coverprofile=coverage.out -covermode=atomic
           tr -d '\r' < coverage.out > coverage.tmp && mv coverage.tmp coverage.out
-      # Upload per-OS coverage so Codecov merges all legs. A Linux-only report
-      # understates true coverage; merging the OS matrix reflects it.
-      # use_pypi: true — install CLI from PyPI instead of cli.codecov.io so we
-      # skip native-binary GPG verification (fails with "Could not verify
-      # signature" when key import is empty; codecov/codecov-action#1876).
-      # fail_ci_if_error: false — Codecov is a soft gate; infra flakiness
-      # must not fail the required test job and block valid PRs.
-      - name: Upload coverage to Codecov
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
-        with:
-          use_oidc: true
-          use_pypi: true
-          files: ./coverage.out
-          fail_ci_if_error: false
       # JUnit XML for Codecov Test Analytics — Linux only (gotestsum).
       - name: Install gotestsum (Linux)
         if: runner.os == 'Linux'
@@ -120,25 +104,115 @@ jobs:
       - name: Generate JUnit XML (Linux)
         if: runner.os == 'Linux'
         run: gotestsum --junitfile junit.xml --format pkgname -- ./...
+      # Public PR reports use no upload secret or OIDC permission, including
+      # fork PRs. Codecov needs this head report as well as the main report.
+      - name: Upload public PR coverage to Codecov
+        if: github.event_name == 'pull_request' && github.event.repository.private == false
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
+        with:
+          use_oidc: false
+          use_pypi: true
+          files: ./coverage.out
+          disable_search: true
+          override_commit: ${{ github.event.pull_request.head.sha }}
+          # Codecov's unprotected-branch namespace permits tokenless uploads
+          # for same-repository PRs as well as forks.
+          override_branch: "pr${{ github.event.number }}:${{ github.head_ref }}"
+          override_pr: ${{ github.event.number }}
+          slug: ${{ github.repository }}
+          fail_ci_if_error: false
+      # Hand the reports to the privileged upload jobs as artifacts. The test
+      # job runs untrusted PR code, so it holds no OIDC token and no Codacy
+      # token — the coverage-upload and codacy-upload jobs run only on the
+      # trusted default-branch push and pick these up there.
+      - name: Save coverage report
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: coverage-${{ matrix.os }}
+          path: |
+            coverage.out
+            junit.xml
+          if-no-files-found: error
+
+  # Codecov upload, split out of the test job so the OIDC token
+  # (id-token: write) is never granted to a job that runs untrusted PR code.
+  # Runs only on the trusted default-branch push. Public PR head reports
+  # upload without credentials from the test job above.
+  coverage-upload:
+    name: Coverage upload
+    if: github.event_name == 'push'
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    permissions:
+      contents: read
+      id-token: write  # OIDC; mints the Codecov upload token
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download coverage report
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: coverage-${{ matrix.os }}
+      # Upload per-OS coverage so Codecov merges all legs. A Linux-only report
+      # understates true coverage; merging the OS matrix reflects it.
+      # use_pypi: true — install CLI from PyPI instead of cli.codecov.io so we
+      # skip native-binary GPG verification (fails with "Could not verify
+      # signature" when key import is empty; codecov/codecov-action#1876).
+      # fail_ci_if_error: false — Codecov is a soft gate; infra flakiness
+      # must not fail the workflow and block valid pushes.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
+        with:
+          use_oidc: true
+          use_pypi: true
+          files: ./coverage.out
+          override_commit: ${{ github.sha }}
+          override_branch: ${{ github.ref_name }}
+          slug: ${{ github.repository }}
+          fail_ci_if_error: false
       - name: Upload test results to Codecov
-        if: ${{ !cancelled() && runner.os == 'Linux' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
         with:
           use_oidc: true
           use_pypi: true
           report_type: test_results
           files: ./junit.xml
+          override_commit: ${{ github.sha }}
+          override_branch: ${{ github.ref_name }}
+          slug: ${{ github.repository }}
           fail_ci_if_error: false
-      # PR jobs must not receive the Codacy repository token. Save the report;
-      # a trusted workflow_run workflow (codacy-coverage.yml) downloads this
-      # artifact and uploads it to Codacy.
-      - name: Save coverage for Codacy
-        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+
+  # Codacy upload, moved out of the privileged workflow_run forwarder into a
+  # push-only job here. Runs only on the trusted default-branch push and reads
+  # the token from the `codacy` environment, which should be restricted to the
+  # default branch (see GITHUB_SETTINGS.md) so PRs can never reach the secret.
+  codacy-upload:
+    name: Codacy upload
+    if: github.event_name == 'push'
+    needs: test
+    runs-on: ubuntu-latest
+    environment: codacy
+    steps:
+      - name: Download coverage report
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
-          name: codacy-coverage-${{ github.run_id }}-${{ github.run_attempt }}
-          path: coverage.out
-          if-no-files-found: error
+          name: coverage-ubuntu-latest
+      - name: Upload coverage to Codacy
+        uses: codacy/codacy-coverage-reporter-action@89d6c85cfafaec52c72b6c5e8b2878d33104c699  # v1.3.0
+        env:
+          CODACY_COMMIT_UUID: ${{ github.sha }}
+        with:
+          project-token: ${{ secrets.CODACY_REPOSITORY_API_TOKEN }}
+          coverage-reports: coverage.out
+          force-coverage-parser: go
+          language: Go
 
   gosec:
     name: gosec
