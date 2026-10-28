@@ -735,7 +735,7 @@ func validateBotManaged(client *github.Client) error {
 	return nil
 }
 
-const prModeNotice = "--pr: file changes go in a pull request. Settings, security, and branch protection still apply live via the API. Required status checks are deferred until you re-apply after that PR merges.\n\n"
+const prModeNotice = "--pr: file changes go in a pull request. Settings, security, and branch protection still apply live via the API. When file changes go to a PR, required status checks are deferred until you re-apply after it merges.\n\n"
 
 func printPRModeNotice(stdout io.Writer) {
 	if globals.ViaPR {
@@ -862,9 +862,6 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 	var fileChanges []github.FileChange
 	var nonFileItems []wizard.Item
 	requiredFailed := false
-	if viaPR {
-		deferRequiredChecks(opts)
-	}
 
 	for _, item := range items {
 		if wizard.ShouldSkip(item, stdout) {
@@ -879,9 +876,9 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 		}
 		nonFileItems = append(nonFileItems, item)
 	}
-
 	switch {
 	case len(fileChanges) > 0 && viaPR:
+		deferRequiredChecks(opts)
 		if err := applyFilesViaPR(c, owner, repo, branch, fileChanges, stdout); err != nil {
 			return err
 		}
