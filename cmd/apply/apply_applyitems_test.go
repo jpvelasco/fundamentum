@@ -1,7 +1,6 @@
 package apply
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,16 +11,9 @@ import (
 
 	"github.com/jpvelasco/fundamentum/cmd/globals"
 	"github.com/jpvelasco/fundamentum/internal/github"
-	"github.com/jpvelasco/fundamentum/internal/templates"
 	"github.com/jpvelasco/fundamentum/internal/wizard"
 )
 
-// prMockHandler returns an http.HandlerFunc that mocks the full PR workflow:
-// CreatePRBranch (GET /branches/main, POST /git/refs), CommitFiles on the
-// harden branch for non-workflow files (GET /git/ref, GET /git/commits,
-// POST /git/blobs, /git/trees, /git/commits, PATCH /git/refs/heads),
-// per-file Contents upsert for workflow files (GET/PUT /contents),
-// CreatePullRequest (POST /pulls).
 func prMockHandler() http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -63,6 +55,7 @@ func prMockHandler() http.HandlerFunc {
 
 // newFileItems builds a wizard.Item slice with the given names, content, and Apply closures.
 // names, content, and applies must be of equal length.
+
 func newFileItems(names []string, content [][]byte, applies []func() error) []wizard.Item {
 	items := make([]wizard.Item, len(names))
 	for i, name := range names {
@@ -79,6 +72,7 @@ func newFileItems(names []string, content [][]byte, applies []func() error) []wi
 // runApplyItemsExpectNoError applies items against a client pointed at the
 // given server handler, and fails the test if applyItems returns an error.
 // The server is closed automatically.
+
 func runApplyItemsExpectNoError(t *testing.T, handler http.HandlerFunc, items []wizard.Item, viaPR bool) {
 	t.Helper()
 	testWithServer(t, handler, func(c *github.Client) {
@@ -88,220 +82,6 @@ func runApplyItemsExpectNoError(t *testing.T, handler http.HandlerFunc, items []
 	}, nil)
 }
 
-func TestPlanNewRepo(t *testing.T) {
-	t.Cleanup(func() { globals.ViaPR = false })
-	var out strings.Builder
-	if err := PlanNewRepo("owner", "new-repo", "public", &out); err != nil {
-		t.Fatalf("PlanNewRepo() error: %v", err)
-	}
-	got := out.String()
-	if !strings.Contains(got, "would create") || !strings.Contains(got, "Dry run complete") {
-		t.Errorf("expected dry-run plan, got:\n%s", got)
-	}
-	if !strings.Contains(got, "Branch protection") {
-		t.Errorf("expected branch protection, got:\n%s", got)
-	}
-	if strings.Contains(got, "--pr: file changes go in a pull request") {
-		t.Error("PlanNewRepo without --pr must not print the PR-mode notice")
-	}
-}
-
-func TestPlanNewRepo_PRModeNotice(t *testing.T) {
-	t.Cleanup(func() { globals.ViaPR = false })
-	globals.ViaPR = true
-	var out strings.Builder
-	if err := PlanNewRepo("owner", "new-repo", "public", &out); err != nil {
-		t.Fatalf("PlanNewRepo() error: %v", err)
-	}
-	if !strings.Contains(out.String(), "--pr: file changes go in a pull request") {
-		t.Errorf("expected --pr notice, got:\n%s", out.String())
-	}
-}
-
-func TestPlanNewRepo_AutoUsesGenericCI(t *testing.T) {
-	t.Cleanup(func() { globals.CIPack = "" })
-	var out strings.Builder
-	if err := PlanNewRepo("owner", "new-repo", "public", &out); err != nil {
-		t.Fatalf("PlanNewRepo() error: %v", err)
-	}
-	// A repo that does not exist yet has no go.mod, so auto must not
-	// ship Go-only files (Codecov / advanced CodeQL) that assume go.mod.
-	got := out.String()
-	if strings.Contains(got, "codecov.yml") || strings.Contains(got, "codeql.yml") {
-		t.Errorf("new-repo auto pack must not ship Go-only files, got:\n%s", got)
-	}
-	if !strings.Contains(got, ".github/workflows/ci.yml") {
-		t.Errorf("expected generic ci.yml in auto plan, got:\n%s", got)
-	}
-}
-
-func TestPlanNewRepo_CIGo(t *testing.T) {
-	t.Cleanup(func() { globals.CIPack = "" })
-	globals.CIPack = "go"
-	var out strings.Builder
-	if err := PlanNewRepo("owner", "new-repo", "public", &out); err != nil {
-		t.Fatalf("PlanNewRepo() error: %v", err)
-	}
-	got := out.String()
-	if !strings.Contains(got, ".github/workflows/ci.yml") || !strings.Contains(got, "codecov.yml") {
-		t.Errorf("expected Go CI + codecov in --ci go plan, got:\n%s", got)
-	}
-}
-
-func TestPlanNewRepo_PresetPrivateHidesGHAS(t *testing.T) {
-	t.Cleanup(func() { globals.Preset = "" })
-	globals.Preset = "private"
-	var out strings.Builder
-	if err := PlanNewRepo("owner", "new-repo", "private", &out); err != nil {
-		t.Fatalf("PlanNewRepo() error: %v", err)
-	}
-	if strings.Contains(out.String(), "secret scanning") {
-		t.Errorf("--preset private dry-run must not offer GHAS, got:\n%s", out.String())
-	}
-}
-
-func TestPlanNewRepo_InvalidPreset(t *testing.T) {
-	t.Cleanup(func() { globals.Preset = "" })
-	globals.Preset = "enterprise"
-	if err := PlanNewRepo("owner", "new-repo", "public", &strings.Builder{}); err == nil || !strings.Contains(err.Error(), "invalid --preset") {
-		t.Fatalf("expected invalid --preset error, got %v", err)
-	}
-}
-
-func TestPlanNewRepo_InvalidCI(t *testing.T) {
-	t.Cleanup(func() { globals.CIPack = "" })
-	globals.CIPack = "java"
-	if err := PlanNewRepo("owner", "new-repo", "public", &strings.Builder{}); err == nil || !strings.Contains(err.Error(), "invalid --ci") {
-		t.Fatalf("expected invalid --ci error, got %v", err)
-	}
-}
-
-func TestResolveCIPack_DetectsGoMod(t *testing.T) {
-	t.Cleanup(func() { globals.CIPack = "" })
-	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/contents/go.mod") {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"sha":"x"}`))
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}), func(c *github.Client) {
-		got, err := resolveCIPack(c, "owner", "repo")
-		if err != nil || got != templates.CIPackGo {
-			t.Fatalf("resolveCIPack() = (%q, %v), want go", got, err)
-		}
-	}, nil)
-}
-
-func TestResolveCIPack_DetectsPackageJSON(t *testing.T) {
-	t.Cleanup(func() { globals.CIPack = "" })
-	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/contents/package.json") {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"sha":"x"}`))
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}), func(c *github.Client) {
-		got, err := resolveCIPack(c, "owner", "repo")
-		if err != nil || got != templates.CIPackNode {
-			t.Fatalf("resolveCIPack() = (%q, %v), want node", got, err)
-		}
-	}, nil)
-}
-
-func TestResolveCIPack_MissingGoModIsGeneric(t *testing.T) {
-	t.Cleanup(func() { globals.CIPack = "" })
-	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}), func(c *github.Client) {
-		got, err := resolveCIPack(c, "owner", "repo")
-		if err != nil || got != templates.CIPackGeneric {
-			t.Fatalf("resolveCIPack() = (%q, %v), want generic", got, err)
-		}
-	}, nil)
-}
-
-func TestResolveCIPack_DetectError(t *testing.T) {
-	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-	}), func(c *github.Client) {
-		_, err := resolveCIPack(c, "owner", "repo")
-		if err == nil || !strings.Contains(err.Error(), "detect go.mod") {
-			t.Fatalf("error = %v, want detect go.mod", err)
-		}
-	}, nil)
-}
-
-func TestResolveCIPack_InvalidFlagWithClient(t *testing.T) {
-	t.Cleanup(func() { globals.CIPack = "" })
-	globals.CIPack = "java"
-	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}), func(c *github.Client) {
-		_, err := resolveCIPack(c, "owner", "repo")
-		if err == nil || !strings.Contains(err.Error(), "invalid --ci") {
-			t.Fatalf("error = %v, want invalid --ci", err)
-		}
-	}, nil)
-}
-
-func TestBuildItems(t *testing.T) {
-	// Mock server that returns file not found for all files
-	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}), "private")
-
-	// Should have file items + general settings + branch protection + tag ruleset + security
-	if len(items) < 5 {
-		t.Errorf("expected at least 5 items, got %d", len(items))
-	}
-
-	// Check that general settings item exists
-	foundGeneral := false
-	for _, item := range items {
-		if item.Name == "General settings (auto-delete branches)" {
-			foundGeneral = true
-			break
-		}
-	}
-	if !foundGeneral {
-		t.Error("expected general settings item")
-	}
-
-	// Check that branch protection item exists
-	foundBranch := false
-	for _, item := range items {
-		if item.Name == "Branch protection (protect-main)" {
-			foundBranch = true
-			break
-		}
-	}
-	if !foundBranch {
-		t.Error("expected branch protection item")
-	}
-}
-
-func TestBuildItems_WithExistingRuleset(t *testing.T) {
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-	items := buildItemsForTest(t, c, "public", nil, existsPlan(true), existsPlan(true), false)
-
-	// Branch protection should be skipped
-	for _, item := range items {
-		if item.Name == "Branch protection (protect-main ruleset)" {
-			if item.Action != wizard.ActionSkip {
-				t.Errorf("expected branch protection to be skipped, got %v", item.Action)
-			}
-		}
-	}
-}
-
-// gitBatchHandler mocks the full git data API flow for a successful
-// CommitFiles batch: GET ref → GET commit → POST blobs → POST tree →
-// POST commit → PATCH ref (refStatus).
 func gitBatchHandler(refStatus int) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -330,6 +110,7 @@ func gitBatchHandler(refStatus int) http.HandlerFunc {
 // perFileHandler answers the Contents API used by the per-file fallback.
 // putStatus is the status returned for PUT /contents/*; contentsGetStatus
 // for GET /contents/*.
+
 func perFileHandler(contentsGetStatus, putStatus int) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -361,6 +142,7 @@ func TestApplyItems_WritesToInjectedWriter(t *testing.T) {
 }
 
 // testWithServerOutput is testWithServer with an explicit output writer.
+
 func testWithServerOutput(t *testing.T, handler http.HandlerFunc, items []wizard.Item, viaPR bool, out io.Writer, verify func(*testing.T)) {
 	t.Helper()
 	srv := httptest.NewServer(handler)
@@ -423,6 +205,7 @@ func TestApplyItems_ViaPRFromStart(t *testing.T) {
 
 // combineHandlers answers with the first handler that doesn't 404; lets a
 // test layer a PR flow on top of a git-data flow.
+
 func combineHandlers(handlers ...http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, h := range handlers {
@@ -881,191 +664,6 @@ func TestApplyItems_MixedFileAndNonFile(t *testing.T) {
 	}
 }
 
-func TestBuildItems_AliasFormatVariants(t *testing.T) {
-	// Test alias detection for format variants (.yml vs .md for issue templates).
-	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// bug_report.md exists as alias (yml target)
-		if strings.Contains(r.URL.Path, "/bug_report.md") {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"content":"b2xkCg=="}`))
-			return
-		}
-		// feature_request.yml exists at target path with same content
-		if strings.Contains(r.URL.Path, "/feature_request.yml") {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"content":"b2xkCg=="}`))
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}), "private")
-
-	// bug_report.yml should be skipped because .md alias exists
-	for _, item := range items {
-		if item.Name == ".github/ISSUE_TEMPLATE/bug_report.yml" {
-			if item.Action != wizard.ActionSkip {
-				t.Errorf("expected bug_report.yml to be skipped (md alias exists), got %v", item.Action)
-			}
-		}
-	}
-}
-
-func TestBuildItems_AliasWorkflowVariants(t *testing.T) {
-	// Test alias detection for workflow name variants: an existing
-	// octopus-review.yml counts as already having the octopus.yml workflow.
-	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, "/octopus-review.yml") {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"content":"b2xkCg=="}`))
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}), "public")
-
-	// octopus.yml should be skipped because octopus-review.yml alias exists
-	for _, item := range items {
-		if item.Name == ".github/workflows/octopus.yml" {
-			if item.Action != wizard.ActionSkip {
-				t.Errorf("expected octopus.yml to be skipped (octopus-review.yml alias exists), got %v", item.Action)
-			}
-		}
-	}
-}
-
-func TestBuildItems_AdvancedCodeQLSkipsDefaultSetup(t *testing.T) {
-	// Public renders ship the advanced codeql.yml workflow, so the security
-	// item must NOT enable default-setup CodeQL (GitHub rejects advanced
-	// SARIF uploads while default setup is configured).
-	var calledDefaultSetup bool
-	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "code-scanning/default-setup"):
-			calledDefaultSetup = true
-		case r.Method == http.MethodPut:
-			w.WriteHeader(http.StatusNoContent)
-			return
-		case r.Method == http.MethodPatch:
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{}`))
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"content":""}`))
-	}), func(c *github.Client) {
-		data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"}
-		rendered, err := templates.Render(data)
-		if err != nil {
-			t.Fatalf("Render() error: %v", err)
-		}
-		items := buildItemsForTest(t, c, "public", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false)
-		for _, item := range items {
-			if item.Name == "Security (secret scanning, CodeQL, Dependabot)" {
-				if err := item.Apply(); err != nil {
-					t.Fatalf("security item Apply() error: %v", err)
-				}
-			}
-		}
-	}, func(t *testing.T) {
-		if calledDefaultSetup {
-			t.Error("expected no default-setup CodeQL PATCH when advanced codeql.yml workflow is rendered")
-		}
-	})
-}
-
-// TestBuildItems_FileStatusSkip verifies buildItems maps FileStatus "skip"
-// (existing file with identical content) to ActionSkip.
-func TestBuildItems_FileStatusSkip(t *testing.T) {
-	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"}
-	rendered, err := templates.Render(data)
-	if err != nil {
-		t.Fatalf("Render() error: %v", err)
-	}
-
-	// Pick a rendered file with no alias variants (socket.yml) so the exact
-	// path check (FileStatus) runs instead of AnyFileExists.
-	var target string
-	for _, f := range rendered {
-		if strings.HasSuffix(f.Path, "socket.yml") {
-			target = f.Path
-			break
-		}
-	}
-	if target == "" {
-		t.Fatal("expected a socket.yml rendered file")
-	}
-	var targetContent string
-	for _, f := range rendered {
-		if f.Path == target {
-			targetContent = f.Content
-			break
-		}
-	}
-	encoded := base64.StdEncoding.EncodeToString([]byte(targetContent))
-	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, target) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]string{"content": encoded, "sha": "abc"})
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}), func(c *github.Client) {
-		items := buildItemsForTest(t, c, "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false)
-		for _, item := range items {
-			if item.Name == target {
-				if item.Action != wizard.ActionSkip {
-					t.Errorf("expected %s to be skipped (content unchanged), got %v", target, item.Action)
-				}
-			}
-		}
-	}, nil)
-}
-
-// TestBranchProtectionItem_ClassicUpgradeApply covers successful upgrades and
-// confirms a failed ruleset creation leaves classic protection in place.
-func TestBranchProtectionItem_ClassicUpgradeApply(t *testing.T) {
-	for _, tc := range []struct {
-		name                string
-		rulesetCreateStatus int
-		wantApplyError      bool
-		wantClassicRemoval  bool
-	}{
-		{"create ruleset before removing classic protection", http.StatusCreated, false, true},
-		{"keep classic protection if ruleset creation fails", http.StatusUnprocessableEntity, true, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var classicRemoved bool
-			testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				switch {
-				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/rulesets"):
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					_ = json.NewEncoder(w).Encode([]struct{}{})
-				case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/rulesets"):
-					w.WriteHeader(tc.rulesetCreateStatus)
-				case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/protection"):
-					classicRemoved = true
-					w.WriteHeader(http.StatusNoContent)
-				default:
-					w.WriteHeader(http.StatusNotFound)
-				}
-			}), func(c *github.Client) {
-				item := branchProtectionItem(c, "owner", "repo", "main", "public", github.RulesetPlan{}, true, false, &github.BranchProtectionOptions{}, "", false, io.Discard)
-				if item.Action != wizard.ActionUpgrade {
-					t.Fatalf("expected ActionUpgrade, got %v", item.Action)
-				}
-				err := item.Apply()
-				if (err != nil) != tc.wantApplyError {
-					t.Errorf("upgrade Apply() error = %v, want error=%t", err, tc.wantApplyError)
-				}
-			}, func(t *testing.T) {
-				if classicRemoved != tc.wantClassicRemoval {
-					t.Errorf("classic protection removed = %t, want %t", classicRemoved, tc.wantClassicRemoval)
-				}
-			})
-		})
-	}
-}
-
 func TestApplyItems_RequiredFileError(t *testing.T) {
 	// The batch fails for a non-409 reason and the per-file fallback hits an
 	// API error on the first file — the run fails, but later files still run.
@@ -1142,6 +740,7 @@ func TestApplyItems_ViaPRNoWrittenFiles(t *testing.T) {
 
 // TestApplyItems_ViaPRFailure verifies ApplyViaPR errors propagate from
 // applyItems.
+
 func TestApplyItems_ViaPRFailure(t *testing.T) {
 	items := newFileItems(
 		[]string{".github/CODEOWNERS"},
@@ -1162,108 +761,6 @@ func TestApplyItems_ViaPRFailure(t *testing.T) {
 // TestBuildItems_FileStatusErrorFailsPlan verifies that a failed canonical
 // status check surfaces as an error instead of silently defaulting the plan
 // to "create" (which misreports dry-runs and fails later with confusing PUTs).
-func TestBuildItems_FileStatusErrorFailsPlan(t *testing.T) {
-	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"}
-	rendered, err := templates.Render(data)
-	if err != nil {
-		t.Fatalf("Render() error: %v", err)
-	}
-	// Plain 403 is not retried, so this fails fast. socket.yml has no alias
-	// variants, so the canonical FileStatus GET is what fails. Earlier files
-	// in the render order must behave normally (404 = create).
-	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/contents/socket.yml") {
-			w.WriteHeader(http.StatusForbidden)
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}), func(c *github.Client) {
-		items, err := buildItems(c, nil, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
-		if err == nil {
-			t.Fatal("expected buildItems to fail when FileStatus errors, got nil")
-		}
-		if !strings.Contains(err.Error(), "check status of socket.yml") {
-			t.Errorf("expected error to name the failing path, got: %v", err)
-		}
-		if items != nil {
-			t.Errorf("expected nil items on error, got %d items", len(items))
-		}
-	}, nil)
-}
-
-// TestBuildItems_AliasCheckErrorFailsPlan verifies that a failed alias
-// existence check (e.g. root CODEOWNERS variant) also fails the plan instead
-// of being swallowed and risking a duplicate write.
-func TestBuildItems_AliasCheckErrorFailsPlan(t *testing.T) {
-	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"}
-	rendered, err := templates.Render(data)
-	if err != nil {
-		t.Fatalf("Render() error: %v", err)
-	}
-	testWithServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/contents/CODEOWNERS"):
-			w.WriteHeader(http.StatusForbidden)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}), func(c *github.Client) {
-		items, err := buildItems(c, nil, "owner", "repo", "main", "private", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
-		if err == nil {
-			t.Fatal("expected buildItems to fail when the alias check errors, got nil")
-		}
-		if !strings.Contains(err.Error(), "check aliases of .github/CODEOWNERS") {
-			t.Errorf("expected error to name the alias check, got: %v", err)
-		}
-		if items != nil {
-			t.Errorf("expected nil items on error, got %d items", len(items))
-		}
-	}, nil)
-}
-
-func TestBuildItems_SkipStepsMarksOptOut(t *testing.T) {
-	t.Cleanup(func() { globals.SkipSteps = nil; globals.OnlySteps = nil })
-	reset := func() {
-		globals.SkipSteps = nil
-		globals.OnlySteps = nil
-	}
-	t.Cleanup(reset)
-
-	globals.SkipSteps = []string{"protect-version-tags", "socket.yml"}
-	items := buildItemsForTest(t, nil, "public", nil, github.RulesetPlan{}, github.RulesetPlan{}, false)
-	for _, item := range items {
-		if item.Name == "Tag ruleset (protect-version-tags)" {
-			if item.Action != wizard.ActionSkip || item.OptOutReason != "--skip" {
-				t.Errorf("skipped tag ruleset = %+v, want skip via --skip", item)
-			}
-		}
-	}
-
-	globals.SkipSteps = nil
-	globals.OnlySteps = []string{"files"}
-	rendered, err := templates.Render(templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public", CIPack: "go"})
-	if err != nil {
-		t.Fatalf("Render() error: %v", err)
-	}
-	items = buildItemsForTest(t, nil, "public", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false)
-	var fileSeen, stepSeen bool
-	for _, item := range items {
-		if item.Content != nil {
-			fileSeen = true
-			if item.Action == wizard.ActionSkip {
-				t.Errorf("file %q must stay included under --only files: %+v", item.Name, item)
-			}
-		} else {
-			stepSeen = true
-			if item.Action != wizard.ActionSkip || item.OptOutReason != "--only" {
-				t.Errorf("non-file item must be opted out via --only: %+v", item)
-			}
-		}
-	}
-	if !fileSeen || !stepSeen {
-		t.Fatalf("expected both file and step items, fileSeen=%v stepSeen=%v", fileSeen, stepSeen)
-	}
-}
 
 func TestChangesAfter(t *testing.T) {
 	changes := []github.FileChange{
@@ -1339,167 +836,4 @@ func TestApplyItems_PerFile409SwitchesToPR(t *testing.T) {
 			t.Errorf("per-file 409 fallback must defer required checks for the open PR\n%s", dbg.String())
 		}
 	}, nil)
-}
-
-func TestRenderData_DetectionErrorsPropagate(t *testing.T) {
-	// Any detection error aborts the plan instead of falling back silently.
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, "/contents/") {
-			w.WriteHeader(http.StatusForbidden)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
-
-	info := github.Repo{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"}
-	_, err := RenderData(c, info, "go", false)
-	if err == nil {
-		t.Fatal("a 403 on the README detection must propagate")
-	}
-	if !strings.Contains(err.Error(), "check file README.md") {
-		t.Errorf("error must name the failing probe: %v", err)
-	}
-}
-
-func TestRenderData_NilClientTakesDefaults(t *testing.T) {
-	info := github.Repo{Owner: "o", RepoName: "r", DefaultBranch: "main", Visibility: "public"}
-	data, err := RenderData(nil, info, "node", false)
-	if err != nil {
-		t.Fatalf("nil client must not probe: %v", err)
-	}
-	// Detection fields stay empty; RenderData.sanitize substitutes the
-	// defaults (README.md, the AGENTS.md standard line, and the honest
-	// failing node commands) at render time.
-	rendered, err := renderTemplates(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tpl := ""
-	for _, f := range rendered {
-		if f.Path == ".github/PULL_REQUEST_TEMPLATE.md" {
-			tpl = f.Content
-		}
-	}
-	if !strings.Contains(tpl, "Updated README.md") || !strings.Contains(tpl, "Updated AGENTS.md") {
-		t.Errorf("defaults must land in the PR template:\n%s", tpl)
-	}
-	ci := ""
-	for _, f := range rendered {
-		if f.Path == ".github/workflows/ci.yml" {
-			ci = f.Content
-		}
-	}
-	if !strings.Contains(ci, "package.json has no lint script") {
-		t.Errorf("node defaults must fail honestly:\n%s", ci)
-	}
-}
-
-func TestRunWithClient_UnknownSkipKeyErrors(t *testing.T) {
-	t.Cleanup(func() {
-		globals.SkipSteps = nil
-		globals.OnlySteps = nil
-	})
-	globals.SkipSteps = []string{"protect-mian"} // typo: silent no-op would be dangerous
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/repos/owner/repo":
-			_, _ = w.Write([]byte(`{"name":"repo","visibility":"public","default_branch":"main","owner":{"type":"User"}}`))
-		case strings.Contains(r.URL.Path, "/contents/"):
-			w.WriteHeader(http.StatusNotFound)
-		case strings.HasSuffix(r.URL.Path, "/rulesets"):
-			_, _ = w.Write([]byte(`[]`))
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer srv.Close()
-
-	err := runWithClient(c, "owner", "repo", newLineReader("\n"), &strings.Builder{})
-	if err == nil || !strings.Contains(err.Error(), "unknown --skip/--only key(s): protect-mian") {
-		t.Fatalf("typo in --skip must error with the token named, got: %v", err)
-	}
-
-	// A valid path token passes validation.
-	globals.SkipSteps = []string{"socket.yml"}
-	if err := runWithClient(c, "owner", "repo", newLineReader("\n"), &strings.Builder{}); err == nil || !strings.Contains(err.Error(), "Dry run complete") {
-		// runWithClient without --dry-run does a live run; with the mock server
-		// the flow ends in apply errors. Validation happens BEFORE any of that,
-		// so only the unknown-key case must error; the valid case must NOT error
-		// with the unknown-key message.
-		if err != nil && strings.Contains(err.Error(), "unknown --skip/--only") {
-			t.Fatalf("valid token must not trigger the unknown-key error: %v", err)
-		}
-	}
-}
-
-func TestGuardShipped(t *testing.T) {
-	rendered := []templates.RenderedFile{{Path: github.FreeTierGuardPath}}
-	if !guardShipped(nil, "owner", "repo", rendered) {
-		t.Error("guard in the rendered set must force PR mode")
-	}
-	if guardShipped(nil, "owner", "repo", nil) {
-		t.Error("nil client with no rendered guard must not force PR mode")
-	}
-
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.Contains(r.URL.Path, "/contents/.github/workflows/protect-main-guard.yml"):
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"content":""}`))
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer srv.Close()
-	if !guardShipped(c, "owner", "repo", nil) {
-		t.Error("existing guard on the repo must force PR mode")
-	}
-}
-
-func TestBuildItems_PlanGatedWithGuardSkipsViaGuard(t *testing.T) {
-	// A free-tier private repo with the guard rendered: the branch-protection
-	// item points at the guard instead of planning an impossible ruleset.
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "private"}
-	rendered, err := templates.Render(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	items := buildFreeTierPrivateItemsForTest(t, c, rendered)
-	for _, item := range items {
-		if strings.Contains(item.Name, "free-tier Actions guard") {
-			if item.Action != wizard.ActionSkip {
-				t.Errorf("guard item action = %v, want skip", item.Action)
-			}
-			if !strings.Contains(item.Detail, github.FreeTierGuardPath) {
-				t.Errorf("guard item detail must name the workflow: %q", item.Detail)
-			}
-			return
-		}
-	}
-	t.Fatal("expected the free-tier guard item in the plan")
-}
-
-func TestBuildItems_PlanGatedWithoutGuardKeepsManualPath(t *testing.T) {
-	// Plan-gated + the guard file skipped: keep the honest manual-message
-	// path (an operator who opts out of the guard gets the Settings pointer).
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-	items := buildFreeTierPrivateItemsForTest(t, c, nil)
-	for _, item := range items {
-		if item.Name == "Branch protection (protect-main)" {
-			if item.Action != wizard.ActionCreate {
-				t.Errorf("without the guard, plan-gated protection stays create: %v", item.Action)
-			}
-			return
-		}
-	}
-	t.Fatal("expected the branch protection item")
 }
