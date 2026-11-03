@@ -83,6 +83,39 @@ func newTestServer(handler http.HandlerFunc) (*httptest.Server, *Client) {
 	return srv, newZeroDelayClient(srv.URL)
 }
 
+func baseMainRulesetForTest() *Ruleset {
+	return &Ruleset{
+		Name:        "protect-main",
+		Target:      "branch",
+		Enforcement: "active",
+		Conditions: map[string]any{
+			"ref_name": map[string]any{"include": []string{"~DEFAULT_BRANCH"}},
+		},
+		Rules: []map[string]any{
+			{"type": "deletion"},
+			{"type": "non_fast_forward"},
+			{"type": "pull_request", "parameters": map[string]any{
+				"required_review_thread_resolution": true,
+				"require_code_owner_review":         false,
+				"dismiss_stale_reviews_on_push":     false,
+			}},
+		},
+	}
+}
+
+func requiredChecksByContext(rule map[string]any) map[string]map[string]any {
+	params, _ := rule["parameters"].(map[string]any)
+	byContext := make(map[string]map[string]any)
+	for _, item := range anySlice(params["required_status_checks"]) {
+		check, _ := item.(map[string]any)
+		context, _ := check["context"].(string)
+		if context != "" {
+			byContext[context] = check
+		}
+	}
+	return byContext
+}
+
 // clientFactory returns a test client for the given server URL. When nil,
 // the default zero-delay client is used. Non-nil factories allow tests to
 // inject erroring or split-transport clients.

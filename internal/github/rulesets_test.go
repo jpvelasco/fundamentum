@@ -182,27 +182,14 @@ func TestTagRulesetDrift(t *testing.T) {
 }
 
 func TestBranchRulesetDrift_AllOwnedFields(t *testing.T) {
-	base := &Ruleset{
-		Name:        "protect-main",
-		Target:      "branch",
-		Enforcement: "active",
-		Conditions: map[string]any{
-			"ref_name": map[string]any{"include": []string{"~DEFAULT_BRANCH"}},
+	base := baseMainRulesetForTest()
+	base.Rules = append(base.Rules, map[string]any{
+		"type": "required_status_checks",
+		"parameters": map[string]any{
+			"strict_required_status_checks_policy": true,
+			"required_status_checks":               []map[string]any{{"context": "Lint"}},
 		},
-		Rules: []map[string]any{
-			{"type": "deletion"},
-			{"type": "non_fast_forward"},
-			{"type": "pull_request", "parameters": map[string]any{
-				"required_review_thread_resolution": true,
-				"require_code_owner_review":         false,
-				"dismiss_stale_reviews_on_push":     false,
-			}},
-			{"type": "required_status_checks", "parameters": map[string]any{
-				"strict_required_status_checks_policy": true,
-				"required_status_checks":               []map[string]any{{"context": "Lint"}},
-			}},
-		},
-	}
+	})
 	if got := BranchRulesetDrift(nil, []string{"Lint"}, BranchProtectionOptions{Solo: true}); !sameStrings(got, []string{"missing"}) {
 		t.Errorf("nil = %v, want [missing]", got)
 	}
@@ -573,12 +560,7 @@ func TestNewStatusCheck_PinsShippedChecksOnly(t *testing.T) {
 
 func TestStatusChecksRule_PinsNewShippedChecks(t *testing.T) {
 	rule := statusChecksRule([]string{"Lint", "Codacy Static Code Analysis"}, BranchProtectionOptions{Solo: true, ShippedChecks: []string{"Lint"}})
-	params, _ := rule["parameters"].(map[string]any)
-	raw, _ := params["required_status_checks"].([]map[string]any)
-	byContext := map[string]map[string]any{}
-	for _, c := range raw {
-		byContext[c["context"].(string)] = c
-	}
+	byContext := requiredChecksByContext(rule)
 	if byContext["Lint"]["integration_id"] != GitHubActionsAppID {
 		t.Errorf("Lint must be pinned to the GitHub Actions app: %v", byContext["Lint"])
 	}
@@ -602,13 +584,7 @@ func TestStatusChecksRuleMerged_KeepsLivePinsAddsNewPins(t *testing.T) {
 		},
 	}
 	rule := statusChecksRuleMerged(liveRule, []string{"Lint", "gosec"}, BranchProtectionOptions{Solo: true, ShippedChecks: []string{"Lint", "gosec"}})
-	params, _ := rule["parameters"].(map[string]any)
-	raw := anySlice(params["required_status_checks"])
-	byContext := map[string]map[string]any{}
-	for _, item := range raw {
-		m, _ := item.(map[string]any)
-		byContext[m["context"].(string)] = m
-	}
+	byContext := requiredChecksByContext(rule)
 	// Live Lint pin is preserved verbatim (999), not rewritten to the Actions app.
 	if byContext["Lint"]["integration_id"] != 999 {
 		t.Errorf("live Lint pin must be kept untouched: %v", byContext["Lint"])
