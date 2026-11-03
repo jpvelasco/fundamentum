@@ -97,12 +97,7 @@ type check struct {
 }
 
 func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) error {
-	if globals.FromFile != "" {
-		if err := globals.LoadBaselineFile(globals.FromFile); err != nil {
-			return err
-		}
-	}
-	if err := globals.ApplyPreset(globals.Preset); err != nil {
+	if err := globals.LoadSharedFlags(); err != nil {
 		return err
 	}
 	info, err := client.GetRepo(owner, repo)

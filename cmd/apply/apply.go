@@ -691,13 +691,10 @@ func renderedPaths(rendered []templates.RenderedFile) []string {
 	return paths
 }
 
+// loadFlags is the shared --from/--preset preflight (cmd/globals); kept as a
+// thin wrapper so existing callers read the same.
 func loadFlags() error {
-	if globals.FromFile != "" {
-		if err := globals.LoadBaselineFile(globals.FromFile); err != nil {
-			return err
-		}
-	}
-	return globals.ApplyPreset(globals.Preset)
+	return globals.LoadSharedFlags()
 }
 
 // ValidateBotManagedFlags enforces the profile's flag-only guardrails (no
