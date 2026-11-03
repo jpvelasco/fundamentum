@@ -54,7 +54,7 @@ type RepoData struct {
 	DefaultBranch string
 	Visibility    string // "public" or "private"
 	CodeOwnerLine string // CODEOWNERS body line; user: "* @owner", org: comment
-	CIPack        string // go, generic, or none; empty means go (legacy Render callers)
+	CIPack        string // go, node, python, rust, generic, or none; empty means go (legacy Render callers)
 	// Octopus opts in to the third-party Octopus Review workflow (opt_ files).
 	Octopus bool
 	// CodacyInstructions opts in to .github/instructions/codacy.instructions.md.
