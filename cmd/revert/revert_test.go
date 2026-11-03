@@ -24,7 +24,7 @@ func mockRevertServer(t *testing.T, snap *Snapshot) *httptest.Server {
 		path := r.URL.Path
 		switch {
 		case strings.HasSuffix(path, "/contents/"+BaselinePath):
-			_, _ = w.Write([]byte(`{"content":"` + base64.StdEncoding.EncodeToString(snapJSON) + `","sha":"snapsha"}`))
+			writeContents(w, "snapsha", snapJSON)
 		case strings.Contains(path, "/contents/") && r.Method == http.MethodPut:
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{}`))
@@ -52,6 +52,14 @@ func mockRevertServer(t *testing.T, snap *Snapshot) *httptest.Server {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
+}
+
+// writeContents serves a GitHub contents-API file payload.
+func writeContents(w http.ResponseWriter, sha string, raw []byte) {
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"content": base64.StdEncoding.EncodeToString(raw),
+		"sha":     sha,
+	})
 }
 
 func testSnapshot() *Snapshot {
@@ -168,7 +176,7 @@ func TestRun_SnapshotReadError(t *testing.T) {
 func TestRun_SnapshotDecodeError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/contents/"+BaselinePath) {
-			_, _ = w.Write([]byte(`{"content":"` + base64.StdEncoding.EncodeToString([]byte("not json")) + `","sha":"s1"}`))
+			writeContents(w, "s1", []byte("not json"))
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -253,7 +261,7 @@ func TestCaptureSnapshot_PopulatesState(t *testing.T) {
 		path := r.URL.Path
 		switch {
 		case strings.HasSuffix(path, "/contents/.github/workflows/ci.yml"):
-			_, _ = w.Write([]byte(`{"content":"` + base64.StdEncoding.EncodeToString([]byte("on: push")) + `","sha":"s1"}`))
+			writeContents(w, "s1", []byte("on: push"))
 		case strings.Contains(path, "/contents/"):
 			w.WriteHeader(http.StatusNotFound)
 		case strings.HasSuffix(path, "/vulnerability-alerts") || strings.HasSuffix(path, "/automated-security-fixes"):
@@ -296,7 +304,7 @@ func TestCaptureSnapshotForApply_Delegates(t *testing.T) {
 		case strings.HasSuffix(path, "/contents/socket.yml"):
 			w.WriteHeader(http.StatusNotFound)
 		case strings.Contains(path, "/contents/"):
-			_, _ = w.Write([]byte(`{"content":"` + base64.StdEncoding.EncodeToString([]byte("x")) + `","sha":"s1"}`))
+			writeContents(w, "s1", []byte("x"))
 		case strings.HasSuffix(path, "/vulnerability-alerts") || strings.HasSuffix(path, "/automated-security-fixes"):
 			w.WriteHeader(http.StatusNoContent)
 		case strings.HasSuffix(path, "/code-scanning/default-setup"):

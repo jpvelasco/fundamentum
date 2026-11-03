@@ -1,7 +1,6 @@
 package github
 
 import (
-	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,7 +10,7 @@ import (
 func TestGetFileContent_FoundAndMissing(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/contents/ok.yml") {
-			_, _ = w.Write([]byte(`{"content":"` + base64.StdEncoding.EncodeToString([]byte("x")) + `","sha":"s1"}`))
+			_, _ = w.Write([]byte(`{"content":"eA==","sha":"s1"}`))
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -91,7 +90,7 @@ func TestUpdateRulesetAndRepoSettingsAndDisableSecurityAndDeleteFile(t *testing.
 		case strings.HasSuffix(path, "/code-scanning/default-setup"):
 			_, _ = w.Write([]byte(`{"state":"configured"}`))
 		case strings.Contains(path, "/contents/ok.yml") && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(`{"content":"` + base64.StdEncoding.EncodeToString([]byte("x")) + `","sha":"s1"}`))
+			_, _ = w.Write([]byte(`{"content":"eA==","sha":"s1"}`))
 		case strings.Contains(path, "/contents/ok.yml") && r.Method == http.MethodDelete:
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{}`))

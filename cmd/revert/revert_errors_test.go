@@ -19,7 +19,6 @@ type inject struct {
 	method, sub string
 	nth         int
 	status      int
-	body        string
 }
 
 // failingServer fronts upstream with a one-shot fault injector.
@@ -40,7 +39,6 @@ func failingServer(t *testing.T, upstream *httptest.Server, in inject) *httptest
 			mu.Unlock()
 			if hit {
 				w.WriteHeader(in.status)
-				_, _ = w.Write([]byte(in.body))
 				return
 			}
 		}
@@ -64,17 +62,17 @@ func TestExecute_FailurePaths(t *testing.T) {
 		mutate func(*Snapshot)
 		in     inject
 	}{
-		{"file restore", ModeFiles, nil, inject{http.MethodPut, "/contents/.github/workflows/ci.yml", 1, 403, ""}},
-		{"file delete lookup", ModeFiles, nil, inject{http.MethodGet, "/contents/socket.yml", 1, 401, ""}},
-		{"file delete", ModeFiles, nil, inject{http.MethodDelete, "/contents/socket.yml", 1, 403, ""}},
-		{"settings", ModeSettings, nil, inject{http.MethodPatch, "/repos/owner/repo", 1, 403, ""}},
-		{"security", ModeSettings, alertsOff, inject{http.MethodDelete, "/vulnerability-alerts", 1, 403, ""}},
-		{"main ruleset lookup", ModeFull, bothExist, inject{http.MethodGet, "/rulesets", 1, 401, ""}},
-		{"main ruleset update", ModeFull, bothExist, inject{http.MethodPut, "/rulesets/", 1, 403, ""}},
-		{"main ruleset delete", ModeFull, noneExist, inject{http.MethodDelete, "/rulesets/", 1, 403, ""}},
-		{"tags ruleset lookup", ModeFull, bothExist, inject{http.MethodGet, "/rulesets", 2, 401, ""}},
-		{"tags ruleset update", ModeFull, bothExist, inject{http.MethodPut, "/rulesets/", 2, 403, ""}},
-		{"tags ruleset delete", ModeFull, noneExist, inject{http.MethodDelete, "/rulesets/", 2, 403, ""}},
+		{"file restore", ModeFiles, nil, inject{http.MethodPut, "/contents/.github/workflows/ci.yml", 1, 403}},
+		{"file delete lookup", ModeFiles, nil, inject{http.MethodGet, "/contents/socket.yml", 1, 401}},
+		{"file delete", ModeFiles, nil, inject{http.MethodDelete, "/contents/socket.yml", 1, 403}},
+		{"settings", ModeSettings, nil, inject{http.MethodPatch, "/repos/owner/repo", 1, 403}},
+		{"security", ModeSettings, alertsOff, inject{http.MethodDelete, "/vulnerability-alerts", 1, 403}},
+		{"main ruleset lookup", ModeFull, bothExist, inject{http.MethodGet, "/rulesets", 1, 401}},
+		{"main ruleset update", ModeFull, bothExist, inject{http.MethodPut, "/rulesets/", 1, 403}},
+		{"main ruleset delete", ModeFull, noneExist, inject{http.MethodDelete, "/rulesets/", 1, 403}},
+		{"tags ruleset lookup", ModeFull, bothExist, inject{http.MethodGet, "/rulesets", 2, 401}},
+		{"tags ruleset update", ModeFull, bothExist, inject{http.MethodPut, "/rulesets/", 2, 403}},
+		{"tags ruleset delete", ModeFull, noneExist, inject{http.MethodDelete, "/rulesets/", 2, 403}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -103,7 +101,7 @@ func TestExecute_FailurePaths(t *testing.T) {
 func existingFileHandler(next http.Handler, suffix string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, suffix) {
-			_, _ = w.Write([]byte(`{"content":"","sha":"x"}`))
+			writeContents(w, "x", nil)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -112,13 +110,13 @@ func existingFileHandler(next http.Handler, suffix string) http.Handler {
 
 func TestCaptureSnapshot_FailurePaths(t *testing.T) {
 	cases := []inject{
-		{http.MethodGet, "/contents/.github/workflows/ci.yml", 1, 401, ""},
-		{http.MethodGet, "/repos/owner/repo", 1, 401, ""},
-		{http.MethodGet, "/vulnerability-alerts", 1, 401, ""},
-		{http.MethodGet, "/automated-security-fixes", 1, 401, ""},
-		{http.MethodGet, "/code-scanning/default-setup", 1, 401, ""},
-		{http.MethodGet, "/rulesets", 1, 401, ""},
-		{http.MethodGet, "/rulesets", 2, 401, ""},
+		{http.MethodGet, "/contents/.github/workflows/ci.yml", 1, 401},
+		{http.MethodGet, "/repos/owner/repo", 1, 401},
+		{http.MethodGet, "/vulnerability-alerts", 1, 401},
+		{http.MethodGet, "/automated-security-fixes", 1, 401},
+		{http.MethodGet, "/code-scanning/default-setup", 1, 401},
+		{http.MethodGet, "/rulesets", 1, 401},
+		{http.MethodGet, "/rulesets", 2, 401},
 	}
 	for _, in := range cases {
 		t.Run(in.sub, func(t *testing.T) {
