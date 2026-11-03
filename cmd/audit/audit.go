@@ -96,6 +96,12 @@ type check struct {
 	Detail string
 }
 
+// RunWithClientForMCP runs the read-only audit for the MCP server, writing
+// the report to stdout. Callers set globals.Preset / flags first.
+func RunWithClientForMCP(client *github.Client, owner, repo string, stdout io.Writer) error {
+	return runWithClient(client, owner, repo, stdout)
+}
+
 func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) error {
 	if err := globals.LoadSharedFlags(); err != nil {
 		return err

@@ -167,6 +167,18 @@ If a Windows checkout shows a clean `git status` but `--dry-run` reports `would 
 
 Focused, high-quality, free forever. Good defaults for OSS and small teams. Not a compliance platform or org-scale tool.
 
+## Agent use (`fundamentum mcp`)
+
+`fundamentum mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio so a coding agent can drive the same commands locally. It exposes three tools:
+
+- `plan` — dry-run a harden and return the plan table (never changes anything).
+- `audit` — compare a repo to the baseline (read-only).
+- `apply` — harden for real (solo defaults, prompts disabled). **Mutating** — run `plan` first and only call `apply` once the operator has confirmed the plan.
+
+Tokens come from the same places as the CLI (`GITHUB_TOKEN`, `--token`, `gh auth token`) and are never written to tool output.
+
+> **Disclaimer.** fundamentum is free open-source software, provided **as-is** with no warranty of any kind, express or implied. Branch protection, security toggles, and file writes change your repository's configuration. Whether you run it yourself or have an agent run it for you, **you are responsible for every change made to your repos.** Read the plan before you apply.
+
 ## License
 
 MIT
