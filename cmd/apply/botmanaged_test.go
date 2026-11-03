@@ -12,7 +12,6 @@ import (
 	"github.com/jpvelasco/fundamentum/cmd/globals"
 	"github.com/jpvelasco/fundamentum/internal/github"
 	"github.com/jpvelasco/fundamentum/internal/steps"
-	"github.com/jpvelasco/fundamentum/internal/templates"
 	"github.com/jpvelasco/fundamentum/internal/wizard"
 )
 
@@ -319,7 +318,7 @@ func TestKeepListProtectsHandTunedFile(t *testing.T) {
 	// Mock: ci.yml EXISTS on the repo with content that differs from the
 	// template (hand-tuned). Without the keep list this would be an "update";
 	// with it, apply must skip.
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/contents/.github/workflows/ci.yml") {
 			w.WriteHeader(http.StatusOK)
 			// base64 of "hand tuned\n" — differs from the shipped template.
@@ -327,18 +326,7 @@ func TestKeepListProtectsHandTunedFile(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"}
-	rendered, err := templates.Render(data)
-	if err != nil {
-		t.Fatalf("Render() error: %v", err)
-	}
-	items, err := buildItems(c, nil, "owner", "repo", "main", "public", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
-	if err != nil {
-		t.Fatalf("buildItems() error: %v", err)
-	}
+	}), "public")
 	for _, item := range items {
 		if item.Name == ".github/workflows/ci.yml" {
 			if item.Action != wizard.ActionSkip {
@@ -469,7 +457,7 @@ func TestKeepListDoesNotAffectOtherFiles(t *testing.T) {
 	resetBotManagedGlobals(t)
 	globals.KeepFiles = []string{".github/workflows/ci.yml"}
 
-	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	items := newBuildItemsTest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Every shipped file exists with drifted content.
 		if strings.Contains(r.URL.Path, "/contents/") {
 			w.WriteHeader(http.StatusOK)
@@ -477,18 +465,7 @@ func TestKeepListDoesNotAffectOtherFiles(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	data := templates.RepoData{Owner: "owner", RepoName: "repo", DefaultBranch: "main", Visibility: "public"}
-	rendered, err := templates.Render(data)
-	if err != nil {
-		t.Fatalf("Render() error: %v", err)
-	}
-	items, err := buildItems(c, nil, "owner", "repo", "main", "public", rendered, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, false, "", io.Discard)
-	if err != nil {
-		t.Fatalf("buildItems() error: %v", err)
-	}
+	}), "public")
 	for _, item := range items {
 		// codecov.yml has no alias and is not on the keep list → update.
 		if item.Name == "codecov.yml" {
