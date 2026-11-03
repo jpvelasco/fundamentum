@@ -23,6 +23,7 @@ func resetGlobals(t *testing.T) {
 		globals.DryRun = false
 		globals.Preset = ""
 		globals.FromFile = ""
+		newClient = github.NewClient
 	})
 }
 
