@@ -70,6 +70,16 @@ The guard's presence forces PR mode, so expect a pull request rather than a dire
 
 `--preset oss|private|strict` skips the wizard so a scripted apply reproduces the same harden. `oss` and `private` take the solo default and do not enable paid GHAS; `strict` turns on `--strict` and `--advanced-security`. Visibility still picks the public vs private file set. The Octopus Review workflow is **never** part of a preset — it is a third-party data-sharing service and requires an explicit `--octopus`.
 
+**What each preset actually sets.** The names describe intent, not different baselines — `oss` and `private` set the same flags (they differ only in what you intend to run against):
+
+| Preset    | Wizard prompts          | `--strict` | `--advanced-security` (GHAS prompt on private repos) | Shipped file set                     |
+|-----------|-------------------------|------------|------------------------------------------------------|--------------------------------------|
+| `oss`     | skipped (solo default)  | off        | off (GHAS only on public repos, which is free)       | follows repo visibility (usually public) |
+| `private` | skipped (solo default)  | off        | off (no GHAS prompt; pass `--advanced-security` to opt in) | follows repo visibility (usually private) |
+| `strict`  | skipped (solo default)  | **on**     | **on**                                               | follows repo visibility              |
+
+What stays the same across all three: the shipped files (driven by repo **visibility**, not the preset name), branch-protection rulesets, security feature PUTs, and every other flag default. A preset only pre-answers the wizard — explicit flags always win. Presets compose with the other knobs: `--ci` still picks the starter CI pack independently, `--from` loads a baseline first and explicit flags (including a preset) override it, and `--strict` also changes what `--preset strict` fails on (optional tag/security drift fails the run).
+
 Files land as **one commit** (the default) — no more one-commit-per-file history noise. `--pr` batches **file** changes into a pull request instead. Settings, security, and branch protection still apply immediately via the API — they are not deferred until the PR merges. Required status checks are deferred so the open harden PR cannot deadlock on jobs that only exist after merge; re-apply after it lands to require them. Tag ruleset and security steps are optional unless you pass `--strict`. Required checks default to the jobs for the resolved `--ci` pack, not Codacy (`--require-checks` overrides; existing required checks are merged, not replaced).
 
 Everything is **idempotent** — re-running is safe and fast.
