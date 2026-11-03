@@ -331,7 +331,7 @@ func TestSecurityMissing(t *testing.T) {
 					w.WriteHeader(http.StatusNotFound)
 				}
 			}), func(c *github.Client) {
-				got, err := securityMissing(c, tt.info, "owner", "repo", tt.opts)
+				got, err := SecurityMissing(c, tt.info, "owner", "repo", tt.opts)
 				if (err != nil) != tt.wantErr {
 					t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 				}
@@ -364,7 +364,7 @@ func TestSecurityMissing_AdvancedWorkflowCountsAsCodeQL(t *testing.T) {
 		}
 	}), func(c *github.Client) {
 		info := github.Repo{Visibility: "public", SecretScanning: true, SecretPushProtection: true}
-		missing, err := securityMissing(c, info, "owner", "repo", github.SecurityOptions{Visibility: "public"})
+		missing, err := SecurityMissing(c, info, "owner", "repo", github.SecurityOptions{Visibility: "public"})
 		if err != nil {
 			t.Fatalf("securityMissing() error: %v", err)
 		}
