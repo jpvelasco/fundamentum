@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jpvelasco/fundamentum/cmd/globals"
+	"github.com/jpvelasco/fundamentum/cmd/revert"
 	"github.com/jpvelasco/fundamentum/cmd/util"
 	"github.com/jpvelasco/fundamentum/internal/github"
 	"github.com/jpvelasco/fundamentum/internal/steps"
@@ -882,6 +883,23 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 			continue
 		}
 		nonFileItems = append(nonFileItems, item)
+	}
+
+	// Snapshot the pre-apply state before any write so revert can restore it.
+	// Only when something is actually going to change.
+	if !globals.DryRun && len(fileChanges)+len(nonFileItems) > 0 {
+		var paths []string
+		for _, ch := range fileChanges {
+			paths = append(paths, ch.Path)
+		}
+		snap, err := revert.CaptureSnapshotForApply(c, owner, repo, branch, paths)
+		if err != nil {
+			_, _ = fmt.Fprintf(stdout, "  %-45s  ⚠ snapshot failed (%v) — continuing without it\n", "snapshot", err)
+		} else if snapBytes, err := snap.Encode(); err != nil {
+			_, _ = fmt.Fprintf(stdout, "  %-45s  ⚠ snapshot encode failed (%v) — continuing without it\n", "snapshot", err)
+		} else {
+			fileChanges = append(fileChanges, github.FileChange{Path: revert.BaselinePath, Content: snapBytes})
+		}
 	}
 	switch {
 	case len(fileChanges) > 0 && viaPR:

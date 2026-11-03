@@ -10,6 +10,7 @@ import (
 	"github.com/jpvelasco/fundamentum/cmd/globals"
 	"github.com/jpvelasco/fundamentum/cmd/mcp"
 	"github.com/jpvelasco/fundamentum/cmd/repoinit"
+	"github.com/jpvelasco/fundamentum/cmd/revert"
 )
 
 // Version is set by build ldflags (e.g., -ldflags '-X github.com/jpvelasco/fundamentum/cmd/root.Version=v1.0.0').
@@ -58,6 +59,7 @@ Examples:
 	cmd.AddCommand(exportcmd.NewCmd())
 	mcp.SetVersion(Version)
 	cmd.AddCommand(mcp.NewCmd())
+	cmd.AddCommand(revert.NewCmd())
 	return cmd
 }
 
