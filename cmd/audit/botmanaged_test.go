@@ -68,13 +68,10 @@ func TestAuditBotManagedPresets(t *testing.T) {
 			globals.BotManaged = true
 			globals.Preset = preset
 			globals.KeepFiles = []string{".github/workflows/release.yml"}
-			srv := httptest.NewServer(botManagedAuditHandler(t, false))
-			defer srv.Close()
-			var out strings.Builder
-			if err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &out); err != nil {
-				t.Fatalf("audit: %v\n%s", err, out.String())
+			report, err := runAuditWithHandler(t, botManagedAuditHandler(t, false))
+			if err != nil {
+				t.Fatalf("audit: %v\n%s", err, report)
 			}
-			report := out.String()
 			for _, name := range []string{"squash-only merges", "actions default token", "environment codacy", "workflow scan"} {
 				if !strings.Contains(report, name) {
 					t.Errorf("missing %q:\n%s", name, report)
@@ -95,15 +92,12 @@ func TestAuditBotManagedMergeSettings(t *testing.T) {
 			if skip {
 				globals.SkipSteps = []string{"settings"}
 			}
-			srv := httptest.NewServer(botManagedAuditHandler(t, true))
-			defer srv.Close()
-			var out strings.Builder
-			err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &out)
+			report, err := runAuditWithHandler(t, botManagedAuditHandler(t, true))
 			if (err == nil) != skip {
-				t.Fatalf("audit error = %v, skip=%t\n%s", err, skip, out.String())
+				t.Fatalf("audit error = %v, skip=%t\n%s", err, skip, report)
 			}
-			if !skip && !strings.Contains(out.String(), "allow_merge_commit=true") {
-				t.Errorf("missing merge drift:\n%s", out.String())
+			if !skip && !strings.Contains(report, "allow_merge_commit=true") {
+				t.Errorf("missing merge drift:\n%s", report)
 			}
 		})
 	}

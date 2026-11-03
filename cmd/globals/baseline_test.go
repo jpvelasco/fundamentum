@@ -72,11 +72,7 @@ func TestCurrentAndWriteBaseline(t *testing.T) {
 	Preset = "oss"
 	CIPack = "generic"
 	RequireChecks = []string{"CI", "Trivy"}
-	var out strings.Builder
-	if err := WriteBaseline(&out, CurrentBaseline()); err != nil {
-		t.Fatal(err)
-	}
-	got := out.String()
+	got := currentBaselineJSON(t)
 	for _, want := range []string{`"version": 1`, `"preset": "oss"`, `"ci": "generic"`, `"CI"`, `"Trivy"`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
@@ -253,11 +249,7 @@ func TestCurrentBaseline_NewFields(t *testing.T) {
 		CodacyInstructions = false
 	})
 
-	var out strings.Builder
-	if err := WriteBaseline(&out, CurrentBaseline()); err != nil {
-		t.Fatal(err)
-	}
-	got := out.String()
+	got := currentBaselineJSON(t)
 	for _, want := range []string{
 		`"skip"`, `"protect-main"`, `"socket.yml"`,
 		`"only"`, `"security"`,
@@ -398,6 +390,15 @@ func TestApplyBaseline_BotManagedExplicitFalseWins(t *testing.T) {
 	}
 }
 
+func currentBaselineJSON(t *testing.T) string {
+	t.Helper()
+	var out strings.Builder
+	if err := WriteBaseline(&out, CurrentBaseline()); err != nil {
+		t.Fatal(err)
+	}
+	return out.String()
+}
+
 // TestBotManagedBaselineRoundTrip proves a baseline with the profile on
 // exports and re-imports losslessly.
 func TestBotManagedBaselineRoundTrip(t *testing.T) {
@@ -406,17 +407,14 @@ func TestBotManagedBaselineRoundTrip(t *testing.T) {
 	PolicyChecks = []PolicyCheck{{Context: "external-review", IntegrationID: 4242}, {Context: "policy-gate", IntegrationID: 7}}
 	KeepFiles = []string{".github/workflows/ci.yml"}
 
-	var out strings.Builder
-	if err := WriteBaseline(&out, CurrentBaseline()); err != nil {
-		t.Fatal(err)
-	}
+	serialized := currentBaselineJSON(t)
 
 	// Reset and reload from the serialized JSON.
 	BotManaged = false
 	PolicyChecks = nil
 	KeepFiles = nil
 	path := filepath.Join(t.TempDir(), "b.json")
-	if err := os.WriteFile(path, []byte(out.String()), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(serialized), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := LoadBaselineFile(path); err != nil {

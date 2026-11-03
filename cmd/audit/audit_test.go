@@ -81,6 +81,15 @@ func passingAuditHandler(t *testing.T) http.HandlerFunc {
 	}
 }
 
+func runAuditWithHandler(t *testing.T, handler http.HandlerFunc) (string, error) {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+	var out strings.Builder
+	err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &out)
+	return out.String(), err
+}
+
 func TestAudit_PassingRepo(t *testing.T) {
 	resetAuditGlobals(t)
 	srv := httptest.NewServer(passingAuditHandler(t))
@@ -224,7 +233,7 @@ func TestAudit_AliasFileCountsAsPresent(t *testing.T) {
 	// The canonical .github/CODEOWNERS is missing but the root CODEOWNERS
 	// alias exists — audit must report PASS with "alias path in use".
 	resetAuditGlobals(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	report, err := runAuditWithHandler(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/contents/.github/CODEOWNERS"):
 			w.WriteHeader(http.StatusNotFound)
@@ -234,14 +243,11 @@ func TestAudit_AliasFileCountsAsPresent(t *testing.T) {
 			writePassingAudit(t, w, r, true, true)
 		}
 	}))
-	defer srv.Close()
-
-	var out strings.Builder
-	if err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &out); err != nil {
-		t.Fatalf("root CODEOWNERS alias must satisfy audit: %v\n%s", err, out.String())
+	if err != nil {
+		t.Fatalf("root CODEOWNERS alias must satisfy audit: %v\n%s", err, report)
 	}
-	if !strings.Contains(out.String(), "alias path in use") {
-		t.Errorf("expected alias PASS row, got:\n%s", out.String())
+	if !strings.Contains(report, "alias path in use") {
+		t.Errorf("expected alias PASS row, got:\n%s", report)
 	}
 }
 
@@ -381,40 +387,33 @@ func TestAudit_RepoError(t *testing.T) {
 func TestAudit_SkipStepsReportSKIP(t *testing.T) {
 	resetAuditGlobals(t)
 	globals.SkipSteps = []string{"protect-version-tags", "security"}
-	srv := httptest.NewServer(passingAuditHandler(t))
-	defer srv.Close()
-
-	var out strings.Builder
-	if err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &out); err != nil {
-		t.Fatalf("skipped steps must not fail: %v\n%s", err, out.String())
+	report, err := runAuditWithHandler(t, passingAuditHandler(t))
+	if err != nil {
+		t.Fatalf("skipped steps must not fail: %v\n%s", err, report)
 	}
-	got := out.String()
-	if !strings.Contains(got, "SKIP") {
-		t.Errorf("expected SKIP rows, got:\n%s", got)
+	if !strings.Contains(report, "SKIP") {
+		t.Errorf("expected SKIP rows, got:\n%s", report)
 	}
-	if strings.Contains(got, "protect-version-tags  PASS") {
-		t.Errorf("skipped tag ruleset must not PASS, got:\n%s", got)
+	if strings.Contains(report, "protect-version-tags  PASS") {
+		t.Errorf("skipped tag ruleset must not PASS, got:\n%s", report)
 	}
 }
 
 func TestAudit_SkipFileReportsSKIP(t *testing.T) {
 	resetAuditGlobals(t)
 	globals.SkipSteps = []string{"socket.yml"}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	report, err := runAuditWithHandler(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/contents/socket.yml") {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		writePassingAudit(t, w, r, true, true)
 	}))
-	defer srv.Close()
-
-	var out strings.Builder
-	if err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &out); err != nil {
-		t.Fatalf("an opted-out file must not fail even when missing: %v\n%s", err, out.String())
+	if err != nil {
+		t.Fatalf("an opted-out file must not fail even when missing: %v\n%s", err, report)
 	}
-	if !strings.Contains(out.String(), "socket.yml") || !strings.Contains(out.String(), "SKIP") {
-		t.Errorf("expected socket.yml SKIP row, got:\n%s", out.String())
+	if !strings.Contains(report, "socket.yml") || !strings.Contains(report, "SKIP") {
+		t.Errorf("expected socket.yml SKIP row, got:\n%s", report)
 	}
 }
 
@@ -713,19 +712,25 @@ var gapBotManagedProbe = botManagedProbe{
 	workflowBody: "b246CiAgcHVsbF9yZXF1ZXN0X3RhcmdldDoK",
 }
 
+func botManagedChecksByName(t *testing.T, probe botManagedProbe) map[string]check {
+	t.Helper()
+	srv := httptest.NewServer(botManagedHandler(probe))
+	t.Cleanup(srv.Close)
+	client := github.NewClient("t", false).WithBaseURL(srv.URL)
+	results := botManagedChecks(client, "owner", "repo", "main")
+	byName := make(map[string]check, len(results))
+	for _, result := range results {
+		byName[result.Name] = result
+	}
+	return byName
+}
+
 func TestBotManagedChecks_Compliant(t *testing.T) {
 	probe := compliantBotManagedProbe
 	probe.workflowFile = ".github/workflows/upload.yml"
 	probe.workflowList = `[{"type":"file","path":".github/workflows/upload.yml"}]`
 	probe.workflowBody = base64.StdEncoding.EncodeToString([]byte("jobs:\n  upload:\n    environment: codacy\n    permissions: {contents: write}\n"))
-	srv := httptest.NewServer(botManagedHandler(probe))
-	defer srv.Close()
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	results := botManagedChecks(c, "owner", "repo", "main")
-	byName := map[string]check{}
-	for _, r := range results {
-		byName[r.Name] = r
-	}
+	byName := botManagedChecksByName(t, probe)
 	if byName["actions default token"].Status != statusPass {
 		t.Errorf("compliant actions token must PASS: %+v", byName["actions default token"])
 	}
@@ -741,14 +746,7 @@ func TestBotManagedChecks_Compliant(t *testing.T) {
 }
 
 func TestBotManagedChecks_Gaps(t *testing.T) {
-	srv := httptest.NewServer(botManagedHandler(gapBotManagedProbe))
-	defer srv.Close()
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
-	results := botManagedChecks(c, "owner", "repo", "main")
-	byName := map[string]check{}
-	for _, r := range results {
-		byName[r.Name] = r
-	}
+	byName := botManagedChecksByName(t, gapBotManagedProbe)
 	if byName["actions default token"].Status != statusWarn {
 		t.Errorf("write+approve token must WARN: %+v", byName["actions default token"])
 	}
@@ -759,19 +757,13 @@ func TestBotManagedChecks_Gaps(t *testing.T) {
 		t.Errorf("no environments must SKIP: %+v", byName["environments"])
 	}
 	// The pull_request_target workflow must surface as a WARN finding.
-	found := false
-	for _, r := range results {
-		if r.Name == "workflow .github/workflows/bad.yml" && r.Status == statusWarn {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("pull_request_target workflow must WARN: %+v", results)
+	if byName["workflow .github/workflows/bad.yml"].Status != statusWarn {
+		t.Errorf("pull_request_target workflow must WARN: %+v", byName)
 	}
 	// Report-only: nothing in the bot-managed section FAILs the run.
-	for _, r := range results {
-		if r.Status == statusFail {
-			t.Errorf("bot-managed audit is report-only; %q must not FAIL", r.Name)
+	for name, result := range byName {
+		if result.Status == statusFail {
+			t.Errorf("bot-managed audit is report-only; %q must not FAIL", name)
 		}
 	}
 }

@@ -210,13 +210,7 @@ func TestStatusChecksRulePolicyChecks(t *testing.T) {
 		ShippedChecks: []string{"Lint"},
 	}
 	rule := statusChecksRule([]string{"Lint"}, opts)
-	params, _ := rule["parameters"].(map[string]any)
-	raw := anySlice(params["required_status_checks"])
-	byContext := map[string]map[string]any{}
-	for _, item := range raw {
-		m, _ := item.(map[string]any)
-		byContext[m["context"].(string)] = m
-	}
+	byContext := requiredChecksByContext(rule)
 	if byContext["external-review"]["integration_id"] != int64(4242) {
 		t.Errorf("policy check must be pinned: %v", byContext["external-review"])
 	}
@@ -251,29 +245,18 @@ func TestRemovedBypassActors(t *testing.T) {
 // TestBotManagedDrift covers the bot-managed drift signals: squash-only
 // merges, no bypass actors, and pinned policy checks.
 func TestBotManagedDrift(t *testing.T) {
-	good := &Ruleset{
-		Name:        "protect-main",
-		Target:      "branch",
-		Enforcement: "active",
-		Conditions:  map[string]any{"ref_name": map[string]any{"include": []any{"~DEFAULT_BRANCH"}}},
-		Rules: []map[string]any{
-			{"type": "deletion"},
-			{"type": "non_fast_forward"},
-			{"type": "pull_request", "parameters": map[string]any{
-				"required_review_thread_resolution": true,
-				"require_code_owner_review":         false,
-				"dismiss_stale_reviews_on_push":     false,
-				"allowed_merge_methods":             []any{"squash"},
-			}},
-			{"type": "required_status_checks", "parameters": map[string]any{
-				"strict_required_status_checks_policy": true,
-				"required_status_checks": []any{
-					map[string]any{"context": "Lint", "integration_id": float64(GitHubActionsAppID)},
-					map[string]any{"context": "external-review", "integration_id": float64(4242)},
-				},
-			}},
+	good := baseMainRulesetForTest()
+	ruleByType(good, "pull_request")["parameters"].(map[string]any)["allowed_merge_methods"] = []any{"squash"}
+	good.Rules = append(good.Rules, map[string]any{
+		"type": "required_status_checks",
+		"parameters": map[string]any{
+			"strict_required_status_checks_policy": true,
+			"required_status_checks": []any{
+				map[string]any{"context": "Lint", "integration_id": float64(GitHubActionsAppID)},
+				map[string]any{"context": "external-review", "integration_id": float64(4242)},
+			},
 		},
-	}
+	})
 	opts := BranchProtectionOptions{
 		BotManaged:    true,
 		Solo:          true,
@@ -323,22 +306,8 @@ func TestBotManagedDrift(t *testing.T) {
 // an empty bypass list (dropping live actors) only in bot-managed mode.
 func TestMergeBranchBodyBotManagedDropsBypass(t *testing.T) {
 	teamID := int64(7)
-	live := &Ruleset{
-		Name:        "protect-main",
-		Target:      "branch",
-		Enforcement: "active",
-		Conditions:  map[string]any{"ref_name": map[string]any{"include": []any{"~DEFAULT_BRANCH"}}},
-		Rules: []map[string]any{
-			{"type": "deletion"},
-			{"type": "non_fast_forward"},
-			{"type": "pull_request", "parameters": map[string]any{
-				"required_review_thread_resolution": true,
-				"require_code_owner_review":         false,
-				"dismiss_stale_reviews_on_push":     false,
-			}},
-		},
-		BypassActors: []BypassActor{{ActorID: &teamID, ActorType: "Team", BypassMode: "always"}},
-	}
+	live := baseMainRulesetForTest()
+	live.BypassActors = []BypassActor{{ActorID: &teamID, ActorType: "Team", BypassMode: "always"}}
 
 	// Normal reconcile: no bypass_actors key (live actors left untouched).
 	normal := mergeBranchRulesetBody(live, []string{"Lint"}, BranchProtectionOptions{Solo: true})
