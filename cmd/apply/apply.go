@@ -78,6 +78,15 @@ func run(cmd *cobra.Command, args []string) error {
 	return runWithClient(client, owner, repo, cmd.InOrStdin(), cmd.OutOrStdout())
 }
 
+// RunWithClientForMCP runs the non-interactive apply flow for the MCP server:
+// prompts are disabled (strings.NewReader("") satisfies readLine without
+// blocking) and output goes to a buffer the tool result carries back.
+// Callers set globals.DryRun / globals.Preset first; this package never
+// touches os.Stdin.
+func RunWithClientForMCP(client *github.Client, owner, repo string, stdout io.Writer) error {
+	return runWithClient(client, owner, repo, strings.NewReader(""), stdout)
+}
+
 // runWithClient runs the apply flow against client, reading prompts from stdin
 // and writing output to stdout. Extracted from run so tests can inject a
 // mock-server client and buffers.

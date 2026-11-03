@@ -125,11 +125,12 @@ For PRs: use pr-auto for full lifecycle (create, fix CI/reviews, land safely).
 
 Go CLI (Cobra). Entry point: `main.go` → `cmd/root/root.go`.
 
-Four subcommands:
+Five subcommands:
 - **apply OWNER/REPO** — harden an existing repo: upsert community health files, set branch protection, enable security features
 - **init OWNER/REPO** — create a new repo then apply hardening
 - **audit OWNER/REPO** — compare the repo to the intended baseline and print a compact PASS/FAIL/WARN/SKIP report: FAIL fails the run, WARN (optional drift: content drift, tag ruleset, secret scanning / push protection / CodeQL) fails only with `--strict`, SKIP never fails (opted-out steps/files, plan-gated protection, private-without-GHAS security rows). Stricter-than-baseline settings PASS — required checks are judged "at least the intended ones", stricter review settings are never drift. File content is compared, not just existence: missing = FAIL, content drift = WARN with a diffstat. The `security` row reuses `apply.SecurityMissing`, so audit judges the same posture apply enforces — Dependabot alerts + security updates (FAIL, core), secret scanning / push protection / CodeQL (WARN, optional) — and cannot PASS while apply would enable more.
 - **export** — write a portable JSON baseline from the current flags (`--preset`, `--ci`, `--require-checks`, `--advanced-security`, `--strict`, `--skip`, `--only`, `--octopus`, `--codacy-instructions`, `--bot-managed`, `--branch-up-to-date` as a tri-state; `bot_policy_checks` and `keep` are baseline-only, no flag)
+- **mcp** — run a stdio MCP server (hand-rolled newline-delimited JSON-RPC 2.0, no extra dependency) exposing `plan` / `audit` / `apply` tools for agents. `plan` and `audit` are read-only; `apply` is mutating and runs with solo defaults + prompts disabled (`RunWithClientForMCP` passes `strings.NewReader("")` as stdin). The server speaks `protocolVersion 2024-11-05`; tool failures return `isError` content, not protocol errors, and tokens never appear in tool output.
 
 Shared flags on root: `--dry-run`, `--verbose`, `--token`, `--no-overwrite`, `--pr`, `--advanced-security`, `--strict`, `--require-checks`, `--ci`, `--preset`, `--from`, `--skip`, `--only`, `--octopus`, `--codacy-instructions`, `--bot-managed`, `--branch-up-to-date`.
 `init` also takes `--private` (default `true`; pass `--private=false` for public).
@@ -148,6 +149,7 @@ Shared flags `--skip` / `--only` select steps (`internal/steps`): `settings`, `p
 - `cmd/apply` — apply logic: renders templates, checks existing state, builds item list, runs wizard
 - `cmd/audit` — post-apply compliance check using the same ruleset compare as apply
 - `cmd/exportcmd` — writes a portable JSON baseline for `--from`
+- `cmd/mcp` — stdio MCP server (`cmd/mcp/protocol.go` JSON-RPC dispatch, `cmd/mcp/tools.go` plan/audit/apply tools)
 - `cmd/repoinit` — creates repo via API, then delegates to apply
 - `cmd/globals` — shared mutable flag state (DryRun, Token, Verbose, NoOverwrite, ViaPR, AdvancedSecurity, Strict, RequireChecks, CIPack, Preset, FromFile, SkipSteps, OnlySteps, Octopus, CodacyInstructions, BotManaged, PolicyChecks, KeepFiles, BranchUpToDate+BranchUpToDateSet)
 - `cmd/util` — shared utilities (ParseOwnerRepo, RequireToken with `gh auth token` fallback)

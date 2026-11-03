@@ -8,6 +8,7 @@ import (
 	"github.com/jpvelasco/fundamentum/cmd/audit"
 	"github.com/jpvelasco/fundamentum/cmd/exportcmd"
 	"github.com/jpvelasco/fundamentum/cmd/globals"
+	"github.com/jpvelasco/fundamentum/cmd/mcp"
 	"github.com/jpvelasco/fundamentum/cmd/repoinit"
 )
 
@@ -55,6 +56,8 @@ Examples:
 	cmd.AddCommand(repoinit.NewCmd())
 	cmd.AddCommand(audit.NewCmd())
 	cmd.AddCommand(exportcmd.NewCmd())
+	mcp.SetVersion(Version)
+	cmd.AddCommand(mcp.NewCmd())
 	return cmd
 }
 

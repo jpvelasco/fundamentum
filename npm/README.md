@@ -102,6 +102,12 @@ Built for solo devs and small teams who want their repos to feel like they were 
 
 A GitHub token with `repo` scope (classic) or Contents + Metadata + Administration (fine-grained) — via `GITHUB_TOKEN` or `--token`.
 
+## Agent use
+
+`fundamentum mcp` runs a Model Context Protocol server over stdio so a coding agent can drive the same commands (`plan`, `audit`, `apply`). `apply` is mutating — run `plan` first and confirm with the operator. See the [repo README](https://github.com/jpvelasco/fundamentum#agent-use-fundamentum-mcp).
+
+> **Disclaimer.** fundamentum is free open-source software, provided **as-is** with no warranty of any kind. It changes your repository's configuration. Whether you run it yourself or have an agent run it for you, **you are responsible for every change made to your repos.**
+
 ## License
 
 MIT — see [LICENSE](https://github.com/jpvelasco/fundamentum/blob/main/LICENSE).
