@@ -149,6 +149,10 @@ golangci-lint run ./...
 go test ./...
 ```
 
+### Troubleshooting: Windows CRLF makes dry-run lie about template updates
+
+If a Windows checkout shows a clean `git status` but `--dry-run` reports `would update` for templates you never touched, the embedded template files were rewritten with CRLF line endings. The `.gitattributes` clean filter normalizes CRLF→LF so git sees no diff, but `//go:embed` ships the CRLF bytes and they mismatch the LF blobs on GitHub. Fix: delete the affected files and `git checkout HEAD -- <file>` (or clone fresh), then verify with `git hash-object --no-filters <file>` — it must equal `git rev-parse HEAD:<file>`. See `AGENTS.md` ("Windows CRLF embed trap") for the full explanation.
+
 ## Scope & Philosophy
 
 Focused, high-quality, free forever. Good defaults for OSS and small teams. Not a compliance platform or org-scale tool.
