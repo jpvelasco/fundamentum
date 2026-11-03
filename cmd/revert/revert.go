@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -22,9 +21,9 @@ var newClient = github.NewClient
 type Mode string
 
 const (
-	ModeFiles    Mode = "files"     // restore files only
-	ModeSettings Mode = "settings"  // files + repo settings + security toggles
-	ModeFull     Mode = "full"      // files + settings + rulesets (the default)
+	ModeFiles    Mode = "files"    // restore files only
+	ModeSettings Mode = "settings" // files + repo settings + security toggles
+	ModeFull     Mode = "full"     // files + settings + rulesets (the default)
 )
 
 // NewCmd returns the revert subcommand.
@@ -204,5 +203,3 @@ func mustDecode(b64 string) []byte {
 	}
 	return b
 }
-
-var _ = strings.TrimSpace // reserved for future plan formatting

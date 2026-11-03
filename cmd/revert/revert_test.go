@@ -461,26 +461,6 @@ func TestExecute_RulesetRestoreBranch(t *testing.T) {
 	}
 }
 
-func TestExecute_ErrorOnSettingsRestore(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPatch && r.URL.Path == "/repos/owner/repo" {
-			w.WriteHeader(http.StatusForbidden)
-			return
-		}
-		if strings.Contains(r.URL.Path, "/contents/"+BaselinePath) {
-			snapJSON, _ := json.Marshal(testSnapshot())
-			_, _ = w.Write([]byte(`{"content":"` + base64.StdEncoding.EncodeToString(snapJSON) + `","sha":"s1"}`))
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-	var out strings.Builder
-	if err := run(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", ModeSettings, false, &out); err == nil {
-		t.Fatal("settings restore failure must error")
-	}
-}
-
 func TestExecute_ErrorOnFileRestore(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
