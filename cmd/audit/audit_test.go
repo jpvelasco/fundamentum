@@ -432,8 +432,12 @@ func TestAudit_SecretScanningPrivateSkips(t *testing.T) {
 	if err := runWithClient(github.NewClient("t", false).WithBaseURL(srv.URL), "owner", "repo", &out); err != nil {
 		t.Fatalf("private repo audit error: %v\n%s", err, out.String())
 	}
-	if !strings.Contains(out.String(), "secret scanning") || !strings.Contains(out.String(), "SKIP") {
-		t.Errorf("secret scanning on a private repo must SKIP, got:\n%s", out.String())
+	// The combined security row must not FAIL on a private repo without GHAS
+	// (secret scanning is not required there).
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.Contains(line, "security") && strings.Contains(line, "FAIL") {
+			t.Errorf("security on a private repo without GHAS must not FAIL, got:\n%s", out.String())
+		}
 	}
 }
 
@@ -478,16 +482,23 @@ func TestTagCheck(t *testing.T) {
 	}
 }
 
-func TestSecretCheck(t *testing.T) {
+func TestSecurityCheck(t *testing.T) {
 	selector := steps.New(nil, nil)
-	if got := secretCheck(github.Repo{Visibility: "private"}, selector); got.Status != statusSkip {
-		t.Errorf("private without GHAS = %+v, want SKIP", got)
+	if got := securityCheck(nil, selector); got.Status != statusPass {
+		t.Errorf("nothing missing = %+v, want PASS", got)
 	}
-	if got := secretCheck(github.Repo{Visibility: "public", SecretScanning: true, SecretPushProtection: true}, selector); got.Status != statusPass {
-		t.Errorf("public enabled = %+v, want PASS", got)
+	if got := securityCheck([]string{"dependabot alerts"}, selector); got.Status != statusFail {
+		t.Errorf("alerts off = %+v, want FAIL", got)
 	}
-	if got := secretCheck(github.Repo{Visibility: "public"}, selector); got.Status != statusWarn {
-		t.Errorf("public disabled = %+v, want WARN", got)
+	if got := securityCheck([]string{"automated security fixes"}, selector); got.Status != statusFail {
+		t.Errorf("security fixes off = %+v, want FAIL", got)
+	}
+	if got := securityCheck([]string{"secret scanning", "push protection"}, selector); got.Status != statusWarn {
+		t.Errorf("optional off = %+v, want WARN", got)
+	}
+	skipSel := steps.New([]string{"security"}, nil)
+	if got := securityCheck([]string{"dependabot alerts"}, skipSel); got.Status != statusSkip {
+		t.Errorf("opted out = %+v, want SKIP", got)
 	}
 }
 

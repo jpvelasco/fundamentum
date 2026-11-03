@@ -159,11 +159,10 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 	if err != nil {
 		return fmt.Errorf("check free-tier guard: %w", err)
 	}
-	dependabot, err := client.DependabotAlertsEnabled(owner, repo)
-	if err != nil {
-		return fmt.Errorf("check dependabot: %w", err)
-	}
-
+	// Security posture is judged against the same intended baseline apply
+	// enforces (Dependabot alerts + security updates everywhere; secret
+	// scanning, push protection, and CodeQL where the visibility/plan offers
+	// them) — sharing apply.SecurityMissing keeps the two from drifting.
 	data, err := apply.RenderData(client, info, pack, strings.EqualFold(info.OwnerType, "Organization"))
 	if err != nil {
 		return err
@@ -171,6 +170,22 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 	files, err := templates.Render(data)
 	if err != nil {
 		return fmt.Errorf("render templates: %w", err)
+	}
+	advancedCodeQL := false
+	for _, f := range files {
+		if f.Path == ".github/workflows/codeql.yml" {
+			advancedCodeQL = true
+			break
+		}
+	}
+	secOpts := github.SecurityOptions{
+		Visibility:     info.Visibility,
+		AdvancedCodeQL: advancedCodeQL,
+		PaidFeatures:   globals.AdvancedSecurity || github.IsPublicVisibility(info.Visibility),
+	}
+	missing, err := apply.SecurityMissing(client, info, owner, repo, secOpts)
+	if err != nil {
+		return fmt.Errorf("check security: %w", err)
 	}
 
 	// Validate --skip/--only tokens the same way apply does: a typo must be
@@ -187,8 +202,7 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 		branchCheck(branchPlan, classicExists, protectionUnavailable, guardExists, selector),
 		tagCheck(tagPlan, protectionUnavailable, selector),
 		boolCheck("auto-delete branches", info.DeleteBranchOnMerge, "delete_branch_on_merge is false", steps.Settings, selector),
-		boolCheck("Dependabot alerts", dependabot, "not enabled", steps.Security, selector),
-		secretCheck(info, selector),
+		securityCheck(missing, selector),
 	}
 	if globals.BotManaged {
 		drift := info.SquashOnlyDrift()
@@ -292,21 +306,31 @@ func boolCheck(name string, pass bool, failDetail, step string, selector steps.S
 	return check{Name: name, Status: statusFail, Detail: failDetail}
 }
 
-// secretCheck judges secret scanning: public repos need it (WARN when off —
-// free but optional per the baseline); private repos without GHAS SKIP.
-func secretCheck(info github.Repo, selector steps.Selector) check {
-	name := "secret scanning"
+// securityCheck judges the full security posture apply would enforce:
+// Dependabot alerts + security updates (FAIL — always-on core), and secret
+// scanning / push protection / CodeQL where the visibility or GHAS opt-in
+// offers them (WARN — optional drift). Private repos without GHAS SKIP the
+// paid rows via the same rule apply plans with.
+func securityCheck(missing []string, selector steps.Selector) check {
+	name := "security"
 	if c, ok := stepSkipped(steps.Security, selector); ok {
 		c.Name = name
 		return c
 	}
-	if !github.IsPublicVisibility(info.Visibility) && !globals.AdvancedSecurity {
-		return check{Name: name, Status: statusSkip, Detail: "private repo without GHAS (not required)"}
-	}
-	if info.SecretScanning && info.SecretPushProtection {
+	if len(missing) == 0 {
 		return check{Name: name, Status: statusPass}
 	}
-	return check{Name: name, Status: statusWarn, Detail: "not enabled"}
+	core := false
+	for _, m := range missing {
+		if m == "dependabot alerts" || m == "automated security fixes" {
+			core = true
+			break
+		}
+	}
+	if core {
+		return check{Name: name, Status: statusFail, Detail: "off: " + strings.Join(missing, ", ")}
+	}
+	return check{Name: name, Status: statusWarn, Detail: "off: " + strings.Join(missing, ", ")}
 }
 
 // fileCheck compares a shipped file: missing = FAIL, alias present = PASS

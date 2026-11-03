@@ -529,7 +529,7 @@ func securityItem(c *github.Client, info *github.Repo, owner, repo, visibility s
 		// Fail closed: a status-check error aborts the plan instead of
 		// silently planning an update (a false "would update" once made
 		// this repo's dry run lie about already-enabled security).
-		missing, err := securityMissing(c, *info, owner, repo, secOpts)
+		missing, err := SecurityMissing(c, *info, owner, repo, secOpts)
 		if err != nil {
 			return wizard.Item{}, err
 		}
@@ -549,11 +549,12 @@ func securityItem(c *github.Client, info *github.Repo, owner, repo, visibility s
 	}, nil
 }
 
-// securityMissing reports which security features are still off. An empty
+// SecurityMissing reports which security features are still off. An empty
 // slice means the repo is fully configured for the intended visibility.
 // The CodeQL check accepts EITHER default setup or a codeql workflow in
 // .github/workflows — an advanced-workflow repo must not be flagged.
-func securityMissing(c *github.Client, info github.Repo, owner, repo string, opts github.SecurityOptions) ([]string, error) {
+// Exported so audit can judge the same posture apply would enforce.
+func SecurityMissing(c *github.Client, info github.Repo, owner, repo string, opts github.SecurityOptions) ([]string, error) {
 	var missing []string
 
 	alertsEnabled, err := c.DependabotAlertsEnabled(owner, repo)
