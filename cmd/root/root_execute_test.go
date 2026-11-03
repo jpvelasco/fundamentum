@@ -96,8 +96,8 @@ func TestExecute_Root(t *testing.T) {
 // Test that Execute() calls os.Exit on error by checking the command structure.
 func TestExecute_CommandStructure(t *testing.T) {
 	cmd := newRootCmd()
-	if len(cmd.Commands()) != 5 {
-		t.Errorf("expected 5 subcommands, got %d", len(cmd.Commands()))
+	if len(cmd.Commands()) != 6 {
+		t.Errorf("expected 6 subcommands, got %d", len(cmd.Commands()))
 	}
 
 	names := []string{}
@@ -110,6 +110,7 @@ func TestExecute_CommandStructure(t *testing.T) {
 	foundAudit := false
 	foundExport := false
 	foundMcp := false
+	foundRevert := false
 	for _, n := range names {
 		if strings.HasPrefix(n, "apply") {
 			foundApply = true
@@ -126,6 +127,9 @@ func TestExecute_CommandStructure(t *testing.T) {
 		if strings.HasPrefix(n, "mcp") {
 			foundMcp = true
 		}
+		if strings.HasPrefix(n, "revert") {
+			foundRevert = true
+		}
 	}
 	if !foundApply {
 		t.Error("expected apply subcommand")
@@ -141,5 +145,8 @@ func TestExecute_CommandStructure(t *testing.T) {
 	}
 	if !foundMcp {
 		t.Error("expected mcp subcommand")
+	}
+	if !foundRevert {
+		t.Error("expected revert subcommand")
 	}
 }

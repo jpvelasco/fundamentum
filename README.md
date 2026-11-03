@@ -36,6 +36,9 @@ fundamentum --dry-run apply OWNER/REPO
 
 # Apply via pull request
 fundamentum --pr apply OWNER/REPO
+
+# Undo the last apply (writes a snapshot at apply time)
+fundamentum revert OWNER/REPO --mode full
 ```
 
 ## Prerequisites
@@ -120,6 +123,7 @@ Two guardrails apply: the run **refuses a bot or app token** (it must be driven 
 | `--octopus`         | Opt in to the third-party Octopus Review workflow (public repos; shares PR diffs with octopus-review.ai) |
 | `--codacy-instructions` | Opt in to `.github/instructions/codacy.instructions.md` (Codacy MCP rules for AI agents) |
 | `--bot-managed`      | Opt in to the bot-managed profile: harden repos whose PRs are opened by automation (squash-only merges, read-only default Actions token, no privileged workflow triggers, pinned required checks) |
+| `--mode`            | Revert scope: `full` (default), `files`, or `settings` |
 | `--branch-up-to-date` | `protect-main`: require branches up to date before merging (default true; unset keeps the live policy on reconcile) |
 | `--version`         | Print version and exit                           |
 
@@ -166,6 +170,16 @@ If a Windows checkout shows a clean `git status` but `--dry-run` reports `would 
 ## Scope & Philosophy
 
 Focused, high-quality, free forever. Good defaults for OSS and small teams. Not a compliance platform or org-scale tool.
+
+## Revert
+
+`fundamentum revert OWNER/REPO` undoes the last apply using the snapshot written to `.github/fundamentum-baseline.json` at apply time.
+
+- **`--mode full`** (default): restore files, repo settings, security toggles, and the managed rulesets to their pre-apply state.
+- **`--mode files`**: restore only the files apply wrote (delete what it created, restore what it overwrote).
+- **`--mode settings`**: restore files + repo settings + security toggles (leave the rulesets as they are).
+
+`--dry-run` prints the plan without changing anything. Revert is idempotent: a snapshot field that already matches is skipped.
 
 ## Agent use (`fundamentum mcp`)
 
