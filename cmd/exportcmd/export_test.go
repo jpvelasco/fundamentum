@@ -1,6 +1,7 @@
 package exportcmd
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -61,6 +62,64 @@ func TestRun_InvalidPreset(t *testing.T) {
 	globals.Preset = "enterprise"
 	if err := run("", &strings.Builder{}); err == nil || !strings.Contains(err.Error(), "invalid --preset") {
 		t.Fatalf("error = %v, want invalid --preset", err)
+	}
+}
+
+type fakeSink struct {
+	writeErr error
+	closeErr error
+	closed   bool
+}
+
+func (s *fakeSink) Write(p []byte) (int, error) {
+	if s.writeErr != nil {
+		return 0, s.writeErr
+	}
+	return len(p), nil
+}
+
+func (s *fakeSink) Close() error {
+	s.closed = true
+	return s.closeErr
+}
+
+func TestWriteFile_CloseErrorIsReturnedNotReported(t *testing.T) {
+	sink := &fakeSink{closeErr: errors.New("disk full")}
+	var out strings.Builder
+	err := writeFile(sink, "baseline.json", globals.Baseline{}, &out)
+	if err == nil || !strings.Contains(err.Error(), "close baseline.json") || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("error = %v, want close error naming the path", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout = %q, want no success message on close failure", out.String())
+	}
+}
+
+func TestWriteFile_WriteErrorStillClosesSink(t *testing.T) {
+	sink := &fakeSink{writeErr: errors.New("short write")}
+	var out strings.Builder
+	if err := writeFile(sink, "baseline.json", globals.Baseline{}, &out); err == nil {
+		t.Fatal("expected write error")
+	}
+	if !sink.closed {
+		t.Error("sink was not closed after write failure")
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout = %q, want no success message on write failure", out.String())
+	}
+}
+
+func TestWriteFile_Success(t *testing.T) {
+	sink := &fakeSink{}
+	var out strings.Builder
+	if err := writeFile(sink, "baseline.json", globals.Baseline{}, &out); err != nil {
+		t.Fatalf("writeFile() error: %v", err)
+	}
+	if !sink.closed {
+		t.Error("sink was not closed")
+	}
+	if out.String() != "wrote baseline baseline.json\n" {
+		t.Errorf("stdout = %q", out.String())
 	}
 }
 
