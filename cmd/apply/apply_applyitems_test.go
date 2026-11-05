@@ -218,7 +218,7 @@ func combineHandlers(handlers ...http.HandlerFunc) http.HandlerFunc {
 					}
 				}
 				w.WriteHeader(rec.Code)
-				_, _ = w.Write(rec.Body.Bytes())
+				replayBody(w, rec)
 				return
 			}
 		}
@@ -814,14 +814,14 @@ func TestApplyItems_PerFile409SwitchesToPR(t *testing.T) {
 		perFile(perFileRec, r)
 		if perFileRec.Code != http.StatusNotFound {
 			w.WriteHeader(perFileRec.Code)
-			_, _ = w.Write(perFileRec.Body.Bytes())
+			replayBody(w, perFileRec)
 			return
 		}
 		gitRec := httptest.NewRecorder()
 		gitBatchHandler(http.StatusInternalServerError)(gitRec, r)
 		if gitRec.Code != http.StatusNotFound {
 			w.WriteHeader(gitRec.Code)
-			_, _ = w.Write(gitRec.Body.Bytes())
+			replayBody(w, gitRec)
 			return
 		}
 		pr(w, r)
@@ -836,4 +836,10 @@ func TestApplyItems_PerFile409SwitchesToPR(t *testing.T) {
 			t.Errorf("per-file 409 fallback must defer required checks for the open PR\n%s", dbg.String())
 		}
 	}, nil)
+}
+
+// replayBody copies a recorded mock response body to w. The bodies are test
+// fixtures (JSON API payloads), never HTML, so no escaping is bypassed.
+func replayBody(w http.ResponseWriter, rec *httptest.ResponseRecorder) {
+	_, _ = io.Copy(w, rec.Body)
 }
