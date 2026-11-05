@@ -96,6 +96,11 @@ jobs:
         run: |
           go test ./... -v -race -coverprofile=coverage.out -covermode=atomic
           tr -d '\r' < coverage.out > coverage.tmp && mv coverage.tmp coverage.out
+      # npm installer unit tests (zip-slip guard, #236/#288). Runs on the same
+      # 3-OS matrix so the Windows-path check is exercised on every host.
+      - name: npm installer tests
+        working-directory: npm
+        run: npm test
       # JUnit XML for Codecov Test Analytics — Linux only (gotestsum).
       - name: Install gotestsum (Linux)
         if: runner.os == 'Linux'

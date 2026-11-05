@@ -202,8 +202,17 @@ function extract(buffer, archiveName, binDir) {
   }
 }
 
+// A single-letter drive prefix (C: or C:evil) is a Windows drive-relative or
+// absolute path, so it is rejected on every host, not only on win32.
+const driveLetterPrefix = /^[A-Za-z]:/;
+
 function isPathEscape(name) {
-  return path.isAbsolute(name) || name.split(/[\\/]/).includes("..");
+  return (
+    path.isAbsolute(name) ||
+    path.win32.isAbsolute(name) ||
+    driveLetterPrefix.test(name) ||
+    name.split(/[\\/]/).includes("..")
+  );
 }
 
 function listMembers(archivePath, isZip) {
