@@ -61,7 +61,8 @@ test("listMembers + validateMembers reject a real tar that escapes (end to end)"
     fs.writeFileSync(outside, "x");
     execFileSync(
       "tar",
-      ["-czf", archivePath, "-C", tmpDir, "../fundamentum-evil-probe"],
+      // -P keeps the ../ prefix; GNU tar strips it by default.
+      ["-czPf", archivePath, "-C", tmpDir, "../fundamentum-evil-probe"],
       { stdio: "pipe" }
     );
     const members = listMembers(archivePath, false);

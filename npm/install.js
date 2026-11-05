@@ -202,8 +202,14 @@ function extract(buffer, archiveName, binDir) {
   }
 }
 
+// Checks both host and Windows absolute forms so a drive path such as
+// C:\evil is rejected on every platform, not only on win32.
 function isPathEscape(name) {
-  return path.isAbsolute(name) || name.split(/[\\/]/).includes("..");
+  return (
+    path.isAbsolute(name) ||
+    path.win32.isAbsolute(name) ||
+    name.split(/[\\/]/).includes("..")
+  );
 }
 
 function listMembers(archivePath, isZip) {
