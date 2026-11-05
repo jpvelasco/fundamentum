@@ -51,9 +51,18 @@ func run(outPath string, stdout io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("create %s: %w", outPath, err)
 	}
-	defer func() { _ = f.Close() }()
-	if err := globals.WriteBaseline(f, b); err != nil {
+	return writeFile(f, outPath, b, stdout)
+}
+
+// writeFile writes the baseline to sink, closes it, and reports success only
+// after Close succeeds, so a failed flush cannot look like a written baseline.
+func writeFile(sink io.WriteCloser, outPath string, b globals.Baseline, stdout io.Writer) error {
+	if err := globals.WriteBaseline(sink, b); err != nil {
+		_ = sink.Close()
 		return err
+	}
+	if err := sink.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", outPath, err)
 	}
 	_, _ = fmt.Fprintf(stdout, "wrote baseline %s\n", outPath)
 	return nil
