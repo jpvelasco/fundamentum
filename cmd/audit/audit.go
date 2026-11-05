@@ -227,6 +227,11 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 	if globals.BotManaged && selector.IncludeStep(steps.Actions) {
 		results = append(results, botManagedChecks(client, owner, repo, info.DefaultBranch)...)
 	}
+	// pull_request_target is a default-path concern: a PR-head checkout is a
+	// pwn-request whether or not the bot-managed profile is in use.
+	if selector.IncludeStep(steps.Actions) {
+		results = append(results, pullRequestTargetChecks(client, owner, repo)...)
+	}
 
 	_, _ = fmt.Fprint(stdout, formatReport(owner, repo, results))
 	if failedRequired(results) {
@@ -499,6 +504,29 @@ func environmentChecks(client *github.Client, owner, repo, defaultBranch string)
 		out = append(out, check{Name: "environment " + pol.Name, Status: statusWarn, Detail: detail})
 	}
 	return out, defaultBranchOnly
+}
+
+// pullRequestTargetChecks reports risky pull_request_target workflows on the
+// default audit path. A checkout of the PR head FAILs; other concerns WARN.
+// An unreadable listing WARNs rather than failing the whole audit.
+func pullRequestTargetChecks(client *github.Client, owner, repo string) []check {
+	const name = "pull_request_target workflows"
+	findings, err := client.ScanPullRequestTargetWorkflows(owner, repo)
+	if err != nil {
+		return []check{{Name: name, Status: statusWarn, Detail: "could not scan: " + err.Error()}}
+	}
+	if len(findings) == 0 {
+		return []check{{Name: name, Status: statusPass, Detail: "no risky pull_request_target workflows"}}
+	}
+	out := make([]check, 0, len(findings))
+	for _, f := range findings {
+		st := statusWarn
+		if f.Fail {
+			st = statusFail
+		}
+		out = append(out, check{Name: "pull_request_target " + f.Path, Status: st, Detail: f.Detail})
+	}
+	return out
 }
 
 // workflowScanCheck reports bot-managed concerns in each workflow, including

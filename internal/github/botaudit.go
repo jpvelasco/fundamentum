@@ -132,22 +132,33 @@ type WorkflowFinding struct {
 // (./) actions, and write scopes granted outside a default-branch-only
 // environment. YAML parsing keeps comments and script text out of the scan.
 func (c *Client) ScanWorkflows(owner, repo, defaultBranch string, defaultBranchOnlyEnvs map[string]bool) ([]WorkflowFinding, error) {
-	paths, err := c.listWorkflowPaths(owner, repo)
+	var findings []WorkflowFinding
+	err := c.eachWorkflow(owner, repo, func(path, content string) {
+		findings = append(findings, AnalyzeWorkflow(path, content, defaultBranchOnlyEnvs)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var findings []WorkflowFinding
+	return findings, nil
+}
+
+// eachWorkflow calls visit with the path and body of every existing workflow
+// file. A file removed between listing and reading is skipped, not an error.
+func (c *Client) eachWorkflow(owner, repo string, visit func(path, content string)) error {
+	paths, err := c.listWorkflowPaths(owner, repo)
+	if err != nil {
+		return err
+	}
 	for _, path := range paths {
 		content, ok, err := c.ReadFileContents(owner, repo, path)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if !ok {
-			continue
+		if ok {
+			visit(path, string(content))
 		}
-		findings = append(findings, AnalyzeWorkflow(path, string(content), defaultBranchOnlyEnvs)...)
 	}
-	return findings, nil
+	return nil
 }
 
 // listWorkflowPaths lists the file paths under .github/workflows.
@@ -185,11 +196,7 @@ func (c *Client) listWorkflowPaths(owner, repo string) ([]string, error) {
 // branch; a job running in any OTHER environment (or none) with a write scope
 // is flagged.
 func AnalyzeWorkflow(path, content string, defaultBranchOnlyEnvs map[string]bool) []WorkflowFinding {
-	var workflow struct {
-		On          any `yaml:"on"`
-		Permissions any
-		Jobs        map[string]workflowAuditJob
-	}
+	var workflow workflowAudit
 	if err := yaml.Unmarshal([]byte(content), &workflow); err != nil {
 		return []WorkflowFinding{{path, "could not parse workflow YAML: " + err.Error()}}
 	}
@@ -205,26 +212,45 @@ func AnalyzeWorkflow(path, content string, defaultBranchOnlyEnvs map[string]bool
 		if job.usesLocalAction() {
 			findings = append(findings, WorkflowFinding{path, prefix + "uses a local (./) action"})
 		}
-		permissions := job.Permissions
-		if permissions == nil {
-			permissions = workflow.Permissions
-		}
 		envName, _ := job.Environment.(string)
 		if env, ok := job.Environment.(map[string]any); ok {
 			envName, _ = env["name"].(string)
 		}
-		if scopes := writeScopes(permissions); len(scopes) > 0 && (envName == "" || !defaultBranchOnlyEnvs[envName]) {
+		if scopes := writeScopes(workflow.jobPermissions(job)); len(scopes) > 0 && (envName == "" || !defaultBranchOnlyEnvs[envName]) {
 			findings = append(findings, WorkflowFinding{path, prefix + "grants a write scope (" + strings.Join(scopes, ", ") + ") outside a default-branch-only environment"})
 		}
 	}
 	return findings
 }
 
+// workflowAudit is the subset of a workflow file the audits read.
+type workflowAudit struct {
+	On          any `yaml:"on"`
+	Permissions any
+	Jobs        map[string]workflowAuditJob
+}
+
+// jobPermissions returns the job's permissions, or the workflow's when the job
+// sets none. An explicit job map replaces, rather than extends, the workflow's.
+func (wf workflowAudit) jobPermissions(job workflowAuditJob) any {
+	if job.Permissions != nil {
+		return job.Permissions
+	}
+	return wf.Permissions
+}
+
 type workflowAuditJob struct {
 	Permissions any
 	Environment any
+	Env         any
 	Uses        string
-	Steps       []struct{ Uses string }
+	Steps       []workflowAuditStep
+}
+
+type workflowAuditStep struct {
+	Uses string
+	With map[string]any
+	Env  any
 }
 
 func workflowTriggers(on any) []string {
