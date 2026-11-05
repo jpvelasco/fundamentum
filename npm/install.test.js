@@ -19,6 +19,8 @@ test("isPathEscape flags traversal primitives and absolute names", () => {
   assert.equal(isPathEscape("a/../../x"), true);
   assert.equal(isPathEscape("C:\\..\\x"), true);
   assert.equal(isPathEscape("/abs"), true);
+  assert.equal(isPathEscape("C:evil"), true);
+  assert.equal(isPathEscape("C:"), true);
 });
 
 test("isPathEscape accepts ordinary member names", () => {
@@ -37,6 +39,7 @@ test("validateMembers rejects a member that traverses outside the dir", () => {
     () => validateMembers(["C:\\Users\\x\\evil"]),
     /Archive path escape/
   );
+  assert.throws(() => validateMembers(["C:evil"]), /Archive path escape/);
 });
 
 test("validateMembers accepts a flat GoReleaser-style member list", () => {
