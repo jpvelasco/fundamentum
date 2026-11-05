@@ -2,6 +2,7 @@ package audit
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,9 +24,9 @@ func pullRequestTargetChecksFor(t *testing.T, listStatus int, body string) []che
 				w.WriteHeader(listStatus)
 				return
 			}
-			_, _ = w.Write([]byte(`[{"type":"file","path":"` + prtWorkflowPath + `"}]`))
+			_ = json.NewEncoder(w).Encode([]map[string]string{{"type": "file", "path": prtWorkflowPath}})
 		case strings.HasSuffix(r.URL.Path, "/contents/"+prtWorkflowPath):
-			_, _ = w.Write([]byte(`{"content":"` + base64.StdEncoding.EncodeToString([]byte(body)) + `"}`))
+			_ = json.NewEncoder(w).Encode(map[string]string{"content": base64.StdEncoding.EncodeToString([]byte(body))})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
