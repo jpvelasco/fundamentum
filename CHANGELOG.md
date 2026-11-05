@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-05
+
+**Feature release.** Adds an MCP server for agent-driven plan, audit, and apply, safe revert of the last managed apply, and a default-path audit for risky `pull_request_target` workflows.
+
+### Added
+
+- Stdio MCP server for agent-driven plan, audit, and apply (#286).
+- Safe revert of the last managed harden apply (#287).
+- Audit flags risky `pull_request_target` workflows on the default path: FAIL when a checkout names the PR head, WARN for write scopes, non-`GITHUB_TOKEN` secrets, or third-party actions (#293).
+
+### Changed
+
+- Audit shares apply's security posture via `apply.SecurityMissing` (#285).
+- Apply and audit share the flag preflight in `cmd/globals` (#283).
+
+### Fixed
+
+- `export` fails instead of reporting success when the baseline file fails to close (#291).
+- The npm installer tests run in CI, and Windows drive-prefixed archive members are rejected on every host (#292).
+
 ## [0.5.1] - 2026-10-28
 
 **Patch release.** Keeps required status checks in policy-only PR-mode runs.
@@ -368,7 +388,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.6.0
 [0.5.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.5.1
 [0.5.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.5.0
 [0.4.3]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.4.3
