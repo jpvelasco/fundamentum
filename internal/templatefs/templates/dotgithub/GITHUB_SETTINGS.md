@@ -5,8 +5,11 @@ be enforced by files in the codebase. Re-apply these when setting up a fork
 or new instance.
 
 > **Public repos:** all settings below can be applied via `gh api`.
-> **Private repos on free tier:** rulesets, secret scanning, push protection,
-> and CodeQL must be set via the GitHub UI.
+> **GitHub Free private repos:** native rulesets and classic protection require
+> a paid plan; the UI cannot bypass the restriction. Fundamentum ships an
+> Actions guard for PR discipline, which cannot enforce required checks before
+> merge and fails open on API errors. Private secret scanning, push protection,
+> and CodeQL require the applicable paid security features and permissions.
 
 ---
 
@@ -22,6 +25,12 @@ operator-owned, and explicit `--require-checks` overrides the defaults.
 Do not add a required context before these assets are live.
 
 ## Apply via `gh api` (replace `OWNER/REPO`)
+
+Prefer `fundamentum apply OWNER/REPO --dry-run`, then apply the reviewed plan.
+These manual examples assume the features are available on your plan. The branch
+ruleset example uses team-style CODEOWNERS review; solo operators should disable
+that requirement and stale-review dismissal. Ruleset POSTs create new rulesets;
+use reconciliation or update existing rulesets rather than creating duplicates.
 
 ```bash
 # General settings
@@ -129,9 +138,11 @@ EOF
 > only a real Actions check run with that exact name satisfies it — a
 > third-party app posting an identically-named green check cannot. Checks
 > supplied via `--require-checks` stay unpinned even if their names match a
-> starter workflow (also with `--ci none`), unless
-> explicitly declared in `bot_policy_checks`. Ordinary reconciliation preserves
-> existing pins. With `--bot-managed`, intended shipped checks and baseline
+> starter workflow (also with `--ci none`), unless explicitly declared in
+> `bot_policy_checks`. The managed `pii-gate` is an exception: once eligible, its
+> intended check is pinned to Actions even when explicitly requested. An
+> incompatible existing gate pin is rejected for operator review. Ordinary
+> reconciliation preserves existing pins. With `--bot-managed`, intended shipped checks and baseline
 > policy checks already present are re-pinned if their `integration_id` is missing
 > or wrong. Unrelated checks keep their existing pins.
 
@@ -150,8 +161,9 @@ EOF
 
 Codacy cannot be fully configured from repo files — these steps are done once
 in the Codacy dashboard, then everything runs automatically (PR checks and the
-main dashboard update via the integration webhook; coverage via the
-`codacy-upload` job in `.github/workflows/ci.yml`).
+main dashboard update via the integration webhook). The public Go CI pack
+provides coverage through the `codacy-upload` job in
+`.github/workflows/ci.yml`; other packs need their own coverage integration.
 
 1. **Add the repository to Codacy** (if not already present) so the GitHub
    integration analyzes PRs and posts the `Codacy Static Code Analysis` check.
@@ -182,7 +194,11 @@ main dashboard update via the integration webhook; coverage via the
 
 ---
 
-## Current settings
+## Example settings (team profile)
+
+These describe the manual examples above, not a live inspection of the target
+repository. Solo defaults disable CODEOWNERS review and stale-review dismissal;
+bot-managed mode also restricts merge methods to squash.
 
 ### General
 - Default branch: `main`

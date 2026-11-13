@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Four default managed priority labels based on importance, with apply/audit selectors and snapshot-backed full revert; issue assignments and legacy labels remain owner-managed (#301).
+- A tracked-tree cloud-ID gate for every CI pack and visibility, plus `pii-bootstrap` for local exact-exemption review. Check enrollment waits for a committed valid allowlist, exact gate assets, and a clean default tree (#303).
+- Optional named GitHub App installation audits against portable permission and repository ceilings. App keys support full scope inspection; supplied installation tokens report partial evidence as WARN (#302).
+
+### Fixed
+
+- `export --from` loads the supplied baseline before applying explicit flag overrides, including `--app-audit=false` (#302).
+- Failed MCP audits retain their report alongside `isError` (#302).
+- Go toolchain updated to 1.26.11 to address GO-2026-6859 (#300).
+
+### Changed
+
+- SHA-pinned GitHub Actions dependencies updated (#298).
+- GitHub/npm READMEs, contributor and agent guidance, and repository-settings docs aligned with the current CLI and the new rollout requirements.
+
 ## [0.6.0] - 2026-11-05
 
 **Feature release.** Adds an MCP server for agent-driven plan, audit, and apply, safe revert of the last managed apply, and a default-path audit for risky `pull_request_target` workflows.
