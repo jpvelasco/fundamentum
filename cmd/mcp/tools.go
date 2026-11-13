@@ -57,7 +57,7 @@ func (t *toolSet) list() []toolDef {
 		},
 		{
 			Name:        "apply",
-			Description: "Harden OWNER/REPO for real (writes files, settings, branch protection, security features). This is MUTATING — always run plan first and only call apply when the operator confirmed the plan. Runs with the solo defaults and prompts disabled.",
+			Description: "Harden OWNER/REPO for real (writes files, settings, branch protection, security features, priority labels). This is MUTATING — always run plan first and only call apply when the operator confirmed the plan. Runs with the solo defaults and prompts disabled.",
 			InputSchema: ownerRepoSchema("GitHub repository as OWNER/REPO"),
 		},
 	}

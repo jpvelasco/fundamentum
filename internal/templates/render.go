@@ -17,6 +17,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/jpvelasco/fundamentum/internal/pii"
 	"github.com/jpvelasco/fundamentum/internal/templatefs"
 )
 
@@ -238,6 +239,8 @@ func renderFromFS(fsys fs.FS, data RepoData) ([]RenderedFile, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Trusted Go source must retain exact bytes (including comparison operators).
+	files = append(files, RenderedFile{Path: pii.HelperPath, Content: pii.Standalone()})
 	if data.BotManaged {
 		files = applyBotManagedTransforms(files)
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/jpvelasco/fundamentum/cmd/globals"
+	"github.com/jpvelasco/fundamentum/internal/steps"
 )
 
 func TestExportLoadsAppPolicyAndPreservesExplicitOff(t *testing.T) {
@@ -16,10 +17,13 @@ func TestExportLoadsAppPolicyAndPreservesExplicitOff(t *testing.T) {
 		globals.FromFile = ""
 		globals.AppAuditPolicy = nil
 		globals.AppAudit = false
+		globals.SkipSteps = nil
+		globals.OnlySteps = nil
+		globals.KeepFiles = nil
 		globals.ResetExplicit()
 	})
 	path := filepath.Join(t.TempDir(), "baseline.json")
-	if err := os.WriteFile(path, []byte(`{"version":1,"app_audit":{"enabled":true,"expected_apps":[{"app_id":123,"permissions":{},"repositories":["owner/repo"]}]}}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"version":1,"skip":["labels"],"only":["app-audit","files"],"keep":[".github/workflows/pii-gate.yml"],"app_audit":{"enabled":true,"expected_apps":[{"app_id":123,"permissions":{},"repositories":["owner/repo"]}]}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	globals.FromFile = path
@@ -35,6 +39,9 @@ func TestExportLoadsAppPolicyAndPreservesExplicitOff(t *testing.T) {
 	}
 	if b.AppAudit == nil || b.AppAudit.Enabled == nil || *b.AppAudit.Enabled || len(b.AppAudit.ExpectedApps) != 1 || b.AppAudit.ExpectedApps[0].AppID != 123 {
 		t.Fatalf("export lost app policy or explicit off: %s", out.String())
+	}
+	if strings.Join(b.Skip, ",") != "labels" || strings.Join(b.Only, ",") != "app-audit,files" || strings.Join(b.Keep, ",") != ".github/workflows/pii-gate.yml" {
+		t.Fatalf("export lost labels, app, or PII selectors: %s", out.String())
 	}
 	globals.FromFile = filepath.Join(t.TempDir(), "missing")
 	if err := run("", &strings.Builder{}); err == nil {
@@ -160,5 +167,37 @@ func TestRun_CreateError(t *testing.T) {
 	err := run(filepath.Join(t.TempDir(), "missing", "baseline.json"), &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "create") {
 		t.Fatalf("error = %v, want create", err)
+	}
+}
+
+func TestLabelsSelectorBaselineRoundTrip(t *testing.T) {
+	t.Cleanup(func() { globals.SkipSteps = nil; globals.OnlySteps = nil })
+	for _, skip := range []bool{false, true} {
+		globals.SkipSteps = nil
+		globals.OnlySteps = nil
+		if skip {
+			globals.SkipSteps = []string{"labels"}
+		} else {
+			globals.OnlySteps = []string{"labels"}
+		}
+		path := filepath.Join(t.TempDir(), "baseline.json")
+		if err := run(path, &strings.Builder{}); err != nil {
+			t.Fatal(err)
+		}
+		globals.SkipSteps = nil
+		globals.OnlySteps = nil
+		if err := globals.LoadBaselineFile(path); err != nil {
+			t.Fatal(err)
+		}
+		selector := steps.New(globals.SkipTokens(), globals.OnlySteps)
+		if selector.IncludeStep(steps.Labels) == skip {
+			t.Fatalf("labels selection lost in roundtrip (skip=%v)", skip)
+		}
+		if !skip && selector.IncludeStep(steps.Settings) {
+			t.Fatal("only labels expanded to settings")
+		}
+		if len(selector.Unknown(nil)) != 0 {
+			t.Fatal("labels key unrecognized")
+		}
 	}
 }

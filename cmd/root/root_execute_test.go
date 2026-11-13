@@ -96,8 +96,12 @@ func TestExecute_Root(t *testing.T) {
 // Test that Execute() calls os.Exit on error by checking the command structure.
 func TestExecute_CommandStructure(t *testing.T) {
 	cmd := newRootCmd()
-	if len(cmd.Commands()) != 6 {
-		t.Errorf("expected 6 subcommands, got %d", len(cmd.Commands()))
+	if len(cmd.Commands()) != 7 {
+		t.Errorf("expected 7 subcommands, got %d", len(cmd.Commands()))
+	}
+	bootstrap, _, err := cmd.Find([]string{"pii-bootstrap"})
+	if err != nil || bootstrap == cmd {
+		t.Fatal("expected pii-bootstrap subcommand")
 	}
 
 	names := []string{}

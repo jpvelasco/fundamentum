@@ -70,6 +70,27 @@ The guard's presence forces PR mode, so expect a pull request rather than a dire
 - **Settings**: Auto-delete merged branches.
 - **Opinionated starters**: CI pack is `auto` — Go / Node / Python / Rust from `go.mod`, `package.json`, `pyproject.toml`/`requirements.txt`, or `Cargo.toml`; otherwise a generic `CI` + Trivy workflow whose `CI` job fails with a "configure me" annotation until you give it real commands — a required check that always passes would be false confidence. The node pack runs the `lint`/`test` scripts it finds in `package.json` and fails with the same annotation when they are missing. Override with `--ci go|node|python|rust|generic|none`. `.codacy.yml` is generated from the detected pack (Go analyzers stay off non-Go repos).
 - **Audit**: `fundamentum audit OWNER/REPO` prints a PASS/FAIL/WARN/SKIP report against the baseline: FAIL fails the run, WARN (content drift, optional checks) fails only with `--strict`, SKIP covers opted-out steps and plan-gated protection. A repo whose settings are stricter than the baseline passes.
+- **Cloud-ID gate**: Ships a stdlib Go helper and `pii-gate` workflow for every visibility and CI pack. It scans every tracked PR-head blob, including unchanged files and symlink contents, for account and AWS resource ID shapes. Diagnostics show safe file locations and shape names, never matched values.
+
+### Cloud-ID gate rollout
+
+```bash
+fundamentum pii-bootstrap OWNER/REPO --output .github/pii-allowlist.txt
+# Review the local candidates, scrub inappropriate source values, and commit/merge
+# only legitimate exact exemptions (an empty reviewed file is valid).
+fundamentum apply OWNER/REPO --dry-run
+fundamentum apply OWNER/REPO --pr
+# Merge the workflow/helper PR, then enroll the check:
+fundamentum apply OWNER/REPO --only protect-main
+```
+
+Bootstrap uses the GitHub API to scan one pinned default-branch commit. It creates no remote changes, refuses to overwrite local output, and supports `--dry-run` without creating directories. Its local output is deliberately unreviewed. A valid allowlist committed on the default branch signals operator review; the tool cannot prove a human reviewed it.
+
+`.github/pii-allowlist.txt` is operator-owned and never shipped or overwritten by apply. Use one exact ID per line; blank lines, CRLF, duplicates, and `#` comments are accepted. Wildcards, regexes, prefixes, and multiple values are invalid. Only five synthetic values are exempt by default: `123456789012`, `000000000000`, `999999999999`, `ami-0123456789abcdef0`, and `ami-0abcdef1234567890`. Comments in the allowlist are scanned too.
+
+New enrollment requires the committed valid policy, both exact baseline gate files, and a clean full-tree scan. Missing or changed assets defer enrollment until they land and are rechecked. `--no-overwrite`, declined file updates, workflow-scope refusals, and open file PRs cannot establish readiness. Explicit file skips, baseline `keep`, and skipping protection prevent new enrollment; existing required checks and app identities survive. `--only protect-main` can enroll already-live assets. An incompatible live `pii-gate` app pin requires operator attention.
+
+`--ci none` disables starter language CI but still ships this gate, whose check becomes a default once eligible. `--require-checks` remains a complete override (empty means none); explicitly requesting `pii-gate` before readiness fails preflight with rollout guidance. Audit reports managed file drift and pending enrollment as WARN (fails under `--strict`), and an eligible missing default requirement as protection drift. GitHub plan restrictions still apply to private repositories. This checks current tracked content, not history, issues, PR text, or credentials; keep secret scanning enabled.
 
 `--preset oss|private|strict` skips the wizard so a scripted apply reproduces the same harden. `oss` and `private` take the solo default and do not enable paid GHAS; `strict` turns on `--strict` and `--advanced-security`. Visibility still picks the public vs private file set. The Octopus Review workflow is **never** part of a preset — it is a third-party data-sharing service and requires an explicit `--octopus`.
 
@@ -83,7 +104,7 @@ The guard's presence forces PR mode, so expect a pull request rather than a dire
 
 What stays the same across all three: the shipped files (driven by repo **visibility**, not the preset name), branch-protection rulesets, security feature PUTs, and every other flag default. A preset only pre-answers the wizard — explicit flags always win. Presets compose with the other knobs: `--ci` still picks the starter CI pack independently, `--from` loads a baseline first and explicit flags (including a preset) override it, and `--strict` also changes what `--preset strict` fails on (optional tag/security drift fails the run).
 
-Files land as **one commit** (the default) — no more one-commit-per-file history noise. `--pr` batches **file** changes into a pull request instead. Settings, security, and branch protection still apply immediately via the API — they are not deferred until the PR merges. Required status checks are deferred so the open harden PR cannot deadlock on jobs that only exist after merge; re-apply after it lands to require them. Tag ruleset and security steps are optional unless you pass `--strict`. Required checks default to the jobs for the resolved `--ci` pack, not Codacy (`--require-checks` overrides; existing required checks are merged, not replaced).
+Files land as **one commit** (the default) — no more one-commit-per-file history noise. `--pr` batches **file** changes into a pull request instead. Settings, security, labels, and branch protection still apply immediately via the API — they are not deferred until the PR merges. Required status checks are deferred so the open harden PR cannot deadlock on jobs that only exist after merge; re-apply after it lands to require them. Tag ruleset and security steps are optional unless you pass `--strict`. Required checks default to pack jobs plus eligible `pii-gate`, not Codacy (`--require-checks` overrides; existing required checks are merged, not replaced).
 
 Everything is **idempotent** — re-running is safe and fast.
 
@@ -102,6 +123,25 @@ Everything is **idempotent** — re-running is safe and fast.
 Two guardrails apply: the run **refuses a bot or app token** (it must be driven by a human operator, not the automation it's about to restrict), and it **refuses `--octopus`**.
 
 > **Scope:** the profile hardens repository **settings and shipped templates**. It does **not** vet the code that automation writes — a bot-managed repo still needs review of what its bots merge, exactly as any repo does.
+
+### Managed priority labels
+
+Apply manages these four labels by default. Priority measures importance; effort and size belong in the issue body or a milestone.
+
+| Label | Color | Definition |
+|---|---|---|
+| `priority:critical` | `#8b0000` | Code execution, destructive data paths, or silent data corruption — fix first |
+| `priority:high` | `#d93f0b` | Broken core flows, state corruption, orphaned paid resources, or unencrypted credential paths |
+| `priority:medium` | `#fbca04` | Conditional breakage, wrong output or cost figures, silent truncation |
+| `priority:low` | `#c5def5` | Cosmetic inconsistencies, edge cases, minor DX papercuts |
+
+Apply creates missing labels and updates divergent color/description in place, preserving issue assignments. The token needs permission to manage repository labels (for a fine-grained PAT, Issues write). Matching labels are skipped. Other labels remain repo-owned. Audit reports missing canonical labels as FAIL and metadata drift as WARN (fails with `--strict`). Use `--skip labels` to leave labels alone or `--only labels` to reconcile just this step. These selectors round-trip through `export` / `--from`; MCP plan and audit remain read-only.
+
+A legacy `priority:*` or `P0`/`P1`/`P2` scheme triggers migration guidance in the plan and audit. Review each issue's impact against the definitions above before mapping it. `P0-quick-win`, `P1-medium`, and `P2-larger` describe effort: none maps automatically to an importance tier. The owner relabels issues and retires legacy labels. Fundamentum never relabels issues or changes legacy labels.
+
+Only changed labels accepted after wizard selection enter the V1 snapshot at `.github/fundamentum-baseline.json`, with explicit prior presence and original metadata. Snapshot capture or persistence failure prevents label changes. With `--pr` (including automatic PR fallback), labels change **live** after the snapshot file is saved in the file PR; merge that PR before relying on `revert`, which reads the default branch's snapshot. A pending snapshot PR is not yet the default branch's undo record.
+
+`revert --mode full` restores recorded metadata, recreates previously existing labels if missing, and deletes labels recorded as previously absent. Deleting a label removes its issue assignments; assignment history is not captured or restored. `--mode files` and `--mode settings` leave labels untouched, as do older snapshots without label entries. Snapshots describe the **last changing apply**, not installation history: a later apply can replace the undo record. Unrelated and declined labels never enter that record.
 
 ## Flags
 
@@ -150,12 +190,12 @@ See GitHub's [installation APIs](https://docs.github.com/en/rest/apps/apps#get-a
 | `--verbose`         | Print every API call                             |
 | `--token`           | GitHub token (defaults to `GITHUB_TOKEN`, then `gh auth token`) |
 | `--no-overwrite`    | Skip any file that already exists                |
-| `--pr`              | Batch file changes into a PR (default is one direct commit); settings/security/protection still apply live |
-| `--skip`            | Leave steps alone: `settings`, `protect-main`, `protect-version-tags`, `security`, `files`, or an exact file path |
+| `--pr`              | Batch file changes into a PR (default is one direct commit); settings/security/labels/protection still apply live |
+| `--skip`            | Leave steps alone: `settings`, `protect-main`, `protect-version-tags`, `security`, `labels`, `files`, or an exact file path |
 | `--only`            | When set, apply just the listed steps/paths (same keys as `--skip`) |
 | `--advanced-security` | Enable GitHub Advanced Security (secret scanning, push protection) on private/internal repos (paid) |
 | `--strict`          | Fail the run when any core harden step fails, including optional tag/security items |
-| `--require-checks`  | Required status-check contexts for `protect-main` (merged with existing checks; default: jobs for the resolved `--ci` pack) |
+| `--require-checks`  | Required status-check contexts for `protect-main` (merged with existing checks; default: pack jobs plus eligible `pii-gate`) |
 | `--ci`              | CI pack: `auto` (detect go/node/python/rust, else generic), `go`, `node`, `python`, `rust`, `generic`, or `none` |
 | `--preset`          | Named baseline: `oss` (no prompts), `private` (solo, no GHAS prompt), `strict` (`--strict` + GHAS) |
 | `--from`            | Load a portable JSON baseline from `export` (explicit flags win, including `--flag=false`) |
@@ -177,7 +217,7 @@ See GitHub's [installation APIs](https://docs.github.com/en/rest/apps/apps#get-a
 1. fundamentum detects your repo's current state (existing files, branch protection, visibility, README/AGENTS.md filenames, package.json scripts).
 2. It renders opinionated templates and shows a summary table of what will change — update rows carry the exact drift (ruleset fields, security features, content diffstats).
 3. You confirm all defaults or step through items interactively.
-4. Files land as one commit (or one PR with `--pr`); a 409 from branch protection switches to PR mode automatically. Settings, security, and branch protection are applied via the GitHub API even in `--pr` mode — `--pr` is not a dry-run for those steps. A `--from` baseline fills flags the operator did not pass; an explicit flag wins, including `--strict=false`.
+4. Files land as one commit (or one PR with `--pr`); a 409 from branch protection switches to PR mode automatically. Settings, security, labels, and branch protection are applied via the GitHub API even in `--pr` mode — `--pr` is not a dry-run for those steps. A `--from` baseline fills flags the operator did not pass; an explicit flag wins, including `--strict=false`.
 
 ## Install
 

@@ -9,6 +9,7 @@ import (
 	"github.com/jpvelasco/fundamentum/cmd/exportcmd"
 	"github.com/jpvelasco/fundamentum/cmd/globals"
 	"github.com/jpvelasco/fundamentum/cmd/mcp"
+	"github.com/jpvelasco/fundamentum/cmd/piibootstrap"
 	"github.com/jpvelasco/fundamentum/cmd/repoinit"
 	"github.com/jpvelasco/fundamentum/cmd/revert"
 )
@@ -27,6 +28,7 @@ Examples:
   fundamentum apply OWNER/REPO              # harden existing repo
   fundamentum init OWNER/REPO               # create and harden new repo
   fundamentum audit OWNER/REPO              # verify the harden baseline
+  fundamentum pii-bootstrap OWNER/REPO      # local cloud-ID policy for review
   fundamentum --preset oss apply OWNER/REPO # non-interactive public baseline
   fundamentum --preset oss export -o baseline.json
   fundamentum --from baseline.json apply OWNER/REPO
@@ -43,9 +45,9 @@ Examples:
 	cmd.PersistentFlags().BoolVar(&globals.ViaPR, "pr", false, "batch file changes into a PR; settings, security, and branch protection still apply live")
 	cmd.PersistentFlags().BoolVar(&globals.AdvancedSecurity, "advanced-security", false, "enable GitHub Advanced Security (secret scanning, push protection) on private/internal repos")
 	cmd.PersistentFlags().BoolVar(&globals.Strict, "strict", false, "fail the run when any core harden step fails, including optional tag/security items")
-	cmd.PersistentFlags().StringSliceVar(&globals.RequireChecks, "require-checks", nil, "required status-check contexts for protect-main (comma-separated; default: jobs for the resolved --ci pack)")
+	cmd.PersistentFlags().StringSliceVar(&globals.RequireChecks, "require-checks", nil, "required status-check contexts for protect-main (comma-separated; default: pack jobs plus eligible pii-gate)")
 	cmd.PersistentFlags().StringVar(&globals.CIPack, "ci", "", "CI pack: auto (default; detect go/node/python/rust, else generic), go, node, python, rust, generic, or none")
-	cmd.PersistentFlags().StringSliceVar(&globals.SkipSteps, "skip", nil, "steps/paths to leave alone: settings, protect-main, protect-version-tags, security, files, actions, app-audit (audit only), or an exact file path (comma-separated)")
+	cmd.PersistentFlags().StringSliceVar(&globals.SkipSteps, "skip", nil, "steps/paths to leave alone: settings, protect-main, protect-version-tags, security, labels, files, actions, app-audit (audit only), or an exact file path (comma-separated)")
 	cmd.PersistentFlags().StringSliceVar(&globals.OnlySteps, "only", nil, "when set, apply only these steps/paths (same keys as --skip)")
 	cmd.PersistentFlags().BoolVar(&globals.Octopus, "octopus", false, "opt in to the Octopus Review workflow (public repos; shares PR diffs with octopus-review.ai)")
 	cmd.PersistentFlags().BoolVar(&globals.CodacyInstructions, "codacy-instructions", false, "opt in to shipping .github/instructions/codacy.instructions.md (Codacy MCP rules for AI agents)")
@@ -61,6 +63,7 @@ Examples:
 	cmd.AddCommand(repoinit.NewCmd())
 	cmd.AddCommand(audit.NewCmd())
 	cmd.AddCommand(exportcmd.NewCmd())
+	cmd.AddCommand(piibootstrap.NewCmd())
 	mcp.SetVersion(Version)
 	cmd.AddCommand(mcp.NewCmd())
 	cmd.AddCommand(revert.NewCmd())

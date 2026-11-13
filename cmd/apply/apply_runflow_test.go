@@ -34,6 +34,9 @@ func newRunFlowServer() *httptest.Server {
 
 func runFlowHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if writeCanonicalLabels(w, r) {
+			return
+		}
 		if writeGoModPresent(w, r) {
 			return
 		}
@@ -462,6 +465,10 @@ func TestRunWithClient_VisibilityError(t *testing.T) {
 
 func TestRunWithClient_RulesetError(t *testing.T) {
 	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/contents/.github/pii-allowlist.txt") {
+			http.NotFound(w, r)
+			return
+		}
 		if strings.Contains(r.URL.Path, "/rulesets") {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`not json`))
@@ -484,6 +491,10 @@ func TestRunWithClient_RulesetError(t *testing.T) {
 func TestRunWithClient_TagRulesetError(t *testing.T) {
 	rulesetCalls := 0
 	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/contents/.github/pii-allowlist.txt") {
+			http.NotFound(w, r)
+			return
+		}
 		if strings.Contains(r.URL.Path, "/rulesets") {
 			rulesetCalls++
 			if rulesetCalls == 1 {
@@ -510,6 +521,9 @@ func TestRunWithClient_TagRulesetError(t *testing.T) {
 // with the GitHub "Upgrade to GitHub Pro" 403.
 
 func rulesetsUnavailableHandler(w http.ResponseWriter, r *http.Request) {
+	if writeCanonicalLabels(w, r) {
+		return
+	}
 	if r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo" {
 		_, _ = w.Write([]byte(`{"visibility":"private","default_branch":"main","owner":{"type":"User"}}`))
 		return
@@ -565,8 +579,8 @@ func TestRunWithClient_RulesetsUnavailableOnFreeTier(t *testing.T) {
 	if !strings.Contains(got, "--free-tier-guard") {
 		t.Errorf("expected the free-tier guard PR-mode notice, got:\n%s", got)
 	}
-	if strings.Contains(got, "already exist") {
-		t.Errorf("summary must not count unavailable protection as already exist:\n%s", got)
+	if !strings.Contains(got, "4 already exist, 2 unavailable") {
+		t.Errorf("summary must count matching labels separately from unavailable protection:\n%s", got)
 	}
 }
 
@@ -613,6 +627,8 @@ func TestRunWithClient_RulesetsGeneric403StillFails(t *testing.T) {
 func TestRunWithClient_ClassicProtectionError(t *testing.T) {
 	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/contents/.github/pii-allowlist.txt"):
+			http.NotFound(w, r)
 		case strings.Contains(r.URL.Path, "/rulesets"):
 			_, _ = w.Write([]byte(`[]`))
 		case strings.Contains(r.URL.Path, "/branches/main/protection"):
