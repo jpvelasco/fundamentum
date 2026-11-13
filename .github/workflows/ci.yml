@@ -101,6 +101,9 @@ jobs:
       - name: npm installer tests
         working-directory: npm
         run: npm test
+      - name: Rendered PII helper integration and cold timing (Linux)
+        if: runner.os == 'Linux'
+        run: bash scripts/verify-pii-helper.sh
       # JUnit XML for Codecov Test Analytics — Linux only (gotestsum).
       - name: Install gotestsum (Linux)
         if: runner.os == 'Linux'

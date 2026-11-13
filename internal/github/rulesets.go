@@ -91,10 +91,12 @@ type BranchProtectionOptions struct {
 	// fallback so the open harden PR is not blocked by checks that only
 	// exist after that PR merges (Codacy, shipped CI jobs).
 	SkipStatusChecks bool
-	// ShippedChecks identifies the selected CI pack's default check contexts.
-	// Leave empty for custom --require-checks or --ci none: matching a shipped
-	// name does not make a custom check belong to the GitHub Actions app.
+	// ShippedChecks identifies verified baseline producers: selected pack jobs
+	// and an eligible pack-neutral pii-gate. Unowned custom names stay unpinned.
 	ShippedChecks []string
+	// ResolvedChecks carries preflight rollout intent into application closures.
+	// nil retains legacy pack-only selection for callers without live preflight.
+	ResolvedChecks []string
 	// StrictChecks is the intended strict_required_status_checks_policy
 	// ("branches must be up to date before merging"). Default true; a create
 	// always uses it.

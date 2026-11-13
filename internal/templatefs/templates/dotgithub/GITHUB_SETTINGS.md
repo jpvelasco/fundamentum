@@ -10,6 +10,17 @@ or new instance.
 
 ---
 
+## Cloud-ID gate enrollment
+
+Review and merge `.github/pii-allowlist.txt` from `fundamentum pii-bootstrap`
+before requiring `pii-gate`. Apply ships `.github/workflows/pii-gate.yml` and
+`.github/scripts/pii-gate.go` for every CI pack, including `none`. Merge both
+assets, then re-apply (or use `--only protect-main`) to enroll the check after
+the committed default tree scans clean. A committed valid policy signals
+operator review; it cannot prove a human reviewed it. The allowlist remains
+operator-owned, and explicit `--require-checks` overrides the defaults.
+Do not add a required context before these assets are live.
+
 ## Apply via `gh api` (replace `OWNER/REPO`)
 
 ```bash

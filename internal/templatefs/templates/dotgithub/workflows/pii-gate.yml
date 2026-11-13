@@ -1,0 +1,45 @@
+name: PII gate
+
+on:
+  push:
+    branches: ["{{.DefaultBranch}}"]
+  pull_request:
+    branches: ["{{.DefaultBranch}}"]
+
+permissions:
+  contents: read
+
+jobs:
+  pii-gate:
+    name: pii-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch exact event head
+        env:
+          FETCH_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REPOSITORY: ${{ github.repository }}
+          READ_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://github.com/${REPOSITORY}.git"
+          auth="$(printf 'x-access-token:%s' "$READ_TOKEN" | base64 -w0)"
+          git -c "http.extraHeader=AUTHORIZATION: basic $auth" fetch --depth=1 origin "$FETCH_SHA"
+          unset auth READ_TOKEN
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$FETCH_SHA"
+      - name: Scan all tracked head blobs
+        env:
+          GO111MODULE: "off"
+          GOWORK: "off"
+          GOTOOLCHAIN: local
+        run: |
+          set -euo pipefail
+          git ls-tree -r -z --full-tree HEAD > "$RUNNER_TEMP/pii-manifest"
+          git ls-tree -r -z --format='%(objecttype) %(objectname)' HEAD |
+            while IFS=' ' read -r -d '' type sha; do
+              if [ "$type" = blob ]; then printf '%s\n' "$sha"; fi
+            done > "$RUNNER_TEMP/pii-objects"
+          git cat-file --batch < "$RUNNER_TEMP/pii-objects" > "$RUNNER_TEMP/pii-batch"
+          go run .github/scripts/pii-gate.go "$RUNNER_TEMP/pii-manifest" "$RUNNER_TEMP/pii-batch"

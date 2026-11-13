@@ -17,6 +17,9 @@ func botManagedAuditHandler(t *testing.T, mergeCommit bool) http.HandlerFunc {
 	t.Helper()
 	probes := botManagedHandler(compliantBotManagedProbe)
 	return func(w http.ResponseWriter, r *http.Request) {
+		if serveReviewedPIITree(t, w, r, "# reviewed empty policy\n") {
+			return
+		}
 		switch {
 		case r.URL.Path == "/repos/owner/repo":
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -33,6 +36,7 @@ func botManagedAuditHandler(t *testing.T, mergeCommit bool) http.HandlerFunc {
 			for _, name := range github.ResolveRequiredChecksForPack(nil, "go") {
 				checks = append(checks, map[string]any{"context": name, "integration_id": 15368})
 			}
+			checks = append(checks, map[string]any{"context": "pii-gate", "integration_id": 15368})
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id": 1, "name": "protect-main", "target": "branch", "enforcement": "active",
 				"bypass_actors": []any{},
