@@ -133,10 +133,19 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 	if err != nil {
 		return err
 	}
-	checksWanted := github.ResolveRequiredChecksForPack(globals.RequireChecks, pack)
-	if globals.RequireChecks == nil {
-		opts.ShippedChecks = checksWanted
+	data, err := apply.RenderData(client, info, pack, strings.EqualFold(info.OwnerType, "Organization"))
+	if err != nil {
+		return err
 	}
+	files, err := templates.Render(data)
+	if err != nil {
+		return fmt.Errorf("render templates: %w", err)
+	}
+	checksWanted, shipped, rollout, err := apply.ResolvePIIChecks(client, info, pack, files)
+	if err != nil {
+		return fmt.Errorf("check pii-gate rollout: %w", err)
+	}
+	opts.ShippedChecks = shipped
 	// On a free-tier private repo GitHub 403s both the rulesets and classic
 	// branch-protection probes with an "Upgrade to GitHub Pro" body, so plan
 	// all three absent (the report then shows SKIP plan-gated) rather than
@@ -169,14 +178,6 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 	// enforces (Dependabot alerts + security updates everywhere; secret
 	// scanning, push protection, and CodeQL where the visibility/plan offers
 	// them) — sharing apply.SecurityMissing keeps the two from drifting.
-	data, err := apply.RenderData(client, info, pack, strings.EqualFold(info.OwnerType, "Organization"))
-	if err != nil {
-		return err
-	}
-	files, err := templates.Render(data)
-	if err != nil {
-		return fmt.Errorf("render templates: %w", err)
-	}
 	advancedCodeQL := false
 	for _, f := range files {
 		if f.Path == ".github/workflows/codeql.yml" {
@@ -210,6 +211,23 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 		boolCheck("auto-delete branches", info.DeleteBranchOnMerge, "delete_branch_on_merge is false", steps.Settings, selector),
 		securityCheck(missing, selector),
 	}
+	required, detail, err := apply.InspectPIIRule(branchPlan, rollout)
+	if err != nil {
+		return err
+	}
+	rolloutStatus := statusWarn
+	switch {
+	case required && !rollout.Ready:
+		// A live broken requirement is visible even when opted out.
+	case rollout.OptedOut:
+		rolloutStatus = statusSkip
+	case rollout.Ready && required:
+		rolloutStatus = statusPass
+	case rollout.Ready:
+		rolloutStatus = statusWarn
+		detail = "ready; requirement follows --require-checks and protection availability"
+	}
+	results = append(results, check{Name: "pii-gate rollout", Status: rolloutStatus, Detail: detail})
 	labels, err := labelChecks(client, owner, repo, selector)
 	if err != nil {
 		return fmt.Errorf("check labels: %w", err)

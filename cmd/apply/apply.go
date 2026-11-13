@@ -150,15 +150,23 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	opts.StrictChecksSet = globals.BranchUpToDateSet
 	opts.BotManaged = globals.BotManaged
 	opts.PolicyChecks = globals.PolicyChecks
-	if globals.RequireChecks == nil {
-		opts.ShippedChecks = requiredChecks(pack)
+	checks, shipped, rollout, err := ResolvePIIChecks(client, info, pack, rendered)
+	if err != nil {
+		return fmt.Errorf("check pii-gate rollout: %w", err)
 	}
+	opts.ResolvedChecks = checks
+	opts.ShippedChecks = shipped
 	protectionUnavailable := false
-	branchPlan, err := client.PlanBranchRuleset(owner, repo, requiredChecks(pack), opts)
+	branchPlan, err := client.PlanBranchRuleset(owner, repo, checks, opts)
 	protectionUnavailable = noteProtectionUnavailable(protectionUnavailable, err)
 	if err != nil && !github.IsBranchProtectionUnavailable(err) {
 		return fmt.Errorf("check branch ruleset: %w", err)
 	}
+	_, rolloutDetail, err := InspectPIIRule(branchPlan, rollout)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(stdout, "pii-gate: %s\n\n", rolloutDetail)
 	tagPlan, err := client.PlanTagRuleset(owner, repo)
 	protectionUnavailable = noteProtectionUnavailable(protectionUnavailable, err)
 	if err != nil && !github.IsBranchProtectionUnavailable(err) {
@@ -624,6 +632,10 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 	if opts == nil {
 		opts = &github.BranchProtectionOptions{}
 	}
+	checks := opts.ResolvedChecks
+	if checks == nil {
+		checks = requiredChecks(pack)
+	}
 	// Free-tier guard shipped or already present: the Actions workflow is
 	// the enforcement (it reverts non-PR pushes), so this item points at
 	// the file batch instead of trying a ruleset the plan refuses.
@@ -647,7 +659,7 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			Detail: "drift: " + strings.Join(plan.Drift, ", "),
 			Apply: func() error {
 				printRemovedBypassActors(stdout, github.RemovedBypassActors(plan.Live, *opts))
-				return c.EnsureBranchRuleset(owner, repo, requiredChecks(pack), *opts)
+				return c.EnsureBranchRuleset(owner, repo, checks, *opts)
 			},
 		}
 	case classicExists:
@@ -655,7 +667,7 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			Name:   "Branch protection (upgrade classic → ruleset)",
 			Action: wizard.ActionUpgrade,
 			Apply: func() error {
-				if err := c.EnsureBranchRuleset(owner, repo, requiredChecks(pack), *opts); err != nil {
+				if err := c.EnsureBranchRuleset(owner, repo, checks, *opts); err != nil {
 					return err
 				}
 				return c.RemoveClassicBranchProtection(owner, repo, branch)
@@ -669,7 +681,6 @@ func branchProtectionItem(c *github.Client, owner, repo, branch, visibility stri
 			Name:   "Branch protection (protect-main)",
 			Action: wizard.ActionCreate,
 			Apply: func() error {
-				checks := requiredChecks(pack)
 				err := c.EnsureBranchRuleset(owner, repo, checks, *opts)
 				if err == nil {
 					return nil

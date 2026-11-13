@@ -465,6 +465,10 @@ func TestRunWithClient_VisibilityError(t *testing.T) {
 
 func TestRunWithClient_RulesetError(t *testing.T) {
 	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/contents/.github/pii-allowlist.txt") {
+			http.NotFound(w, r)
+			return
+		}
 		if strings.Contains(r.URL.Path, "/rulesets") {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`not json`))
@@ -487,6 +491,10 @@ func TestRunWithClient_RulesetError(t *testing.T) {
 func TestRunWithClient_TagRulesetError(t *testing.T) {
 	rulesetCalls := 0
 	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/contents/.github/pii-allowlist.txt") {
+			http.NotFound(w, r)
+			return
+		}
 		if strings.Contains(r.URL.Path, "/rulesets") {
 			rulesetCalls++
 			if rulesetCalls == 1 {
@@ -619,6 +627,8 @@ func TestRunWithClient_RulesetsGeneric403StillFails(t *testing.T) {
 func TestRunWithClient_ClassicProtectionError(t *testing.T) {
 	srv, c := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/contents/.github/pii-allowlist.txt"):
+			http.NotFound(w, r)
 		case strings.Contains(r.URL.Path, "/rulesets"):
 			_, _ = w.Write([]byte(`[]`))
 		case strings.Contains(r.URL.Path, "/branches/main/protection"):
