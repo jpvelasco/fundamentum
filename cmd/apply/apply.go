@@ -942,14 +942,16 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 		}
 	}
 
-	// Never mutate labels if the snapshot file failed to persist, including
-	// a failed per-file fallback. Other steps retain their prior semantics.
-	if requiredFailed && len(labelNames) > 0 {
-		return fmt.Errorf("file or snapshot persistence failed — labels unchanged; fix writes and re-run")
-	}
+	// A failed file fallback may leave the snapshot unwritten. Block labels
+	// conservatively while preserving ordinary non-file step execution.
+	labelsBlocked := requiredFailed
 
 	// Apply non-file items (settings, security, labels) directly.
 	for _, item := range nonFileItems {
+		if labelsBlocked && item.LabelName != "" {
+			_, _ = fmt.Fprintf(stdout, "  %-45s  ⚠ file or snapshot persistence failed — label unchanged; fix writes and re-run\n", item.Name)
+			continue
+		}
 		_, _ = fmt.Fprintf(stdout, "  %-45s  applying...", item.Name)
 		if err := item.Apply(); err != nil {
 			_, _ = fmt.Fprint(stdout, "\r")

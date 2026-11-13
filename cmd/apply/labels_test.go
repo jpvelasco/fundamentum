@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -15,6 +16,52 @@ import (
 	"github.com/jpvelasco/fundamentum/internal/steps"
 	"github.com/jpvelasco/fundamentum/internal/wizard"
 )
+
+func TestFileFailureBlocksLabelsButPreservesOtherSteps(t *testing.T) {
+	for _, failedPath := range []string{revert.BaselinePath, "README.md"} {
+		t.Run(failedPath, func(t *testing.T) {
+			mutations := 0
+			flow := runFlowHandler()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/labels"):
+					_, _ = w.Write([]byte(`[]`))
+				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/labels"):
+					mutations++
+					w.WriteHeader(http.StatusCreated)
+				case r.Method == http.MethodPut && r.URL.Path == "/repos/owner/repo/contents/"+failedPath:
+					w.WriteHeader(http.StatusForbidden)
+				default:
+					flow(w, r)
+				}
+			}))
+			defer srv.Close()
+			c := github.NewClient("t", false).WithBaseURL(srv.URL)
+			items, err := labelItems(c, "owner", "repo", steps.New(nil, nil), io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			items = append(items[:1], wizard.Item{Name: "README.md", Content: []byte("managed file"), Action: wizard.ActionCreate})
+			calls := make(map[string]int)
+			for _, step := range []string{"settings", "security", "protection", "actions"} {
+				items = append(items, wizard.Item{Name: step, Action: wizard.ActionUpdate, Apply: func() error {
+					calls[step]++
+					return nil
+				}})
+			}
+			var output bytes.Buffer
+			err = applyItems(c, "owner", "repo", "main", items, false, nil, &output)
+			if err == nil || mutations != 0 || !strings.Contains(output.String(), "label unchanged") {
+				t.Fatalf("apply = %v, label writes=%d, output=%s", err, mutations, output.String())
+			}
+			for _, step := range []string{"settings", "security", "protection", "actions"} {
+				if calls[step] != 1 {
+					t.Errorf("%s calls = %d, want 1", step, calls[step])
+				}
+			}
+		})
+	}
+}
 
 func TestLabelPlanSelectorsAndErrors(t *testing.T) {
 	calls := 0
