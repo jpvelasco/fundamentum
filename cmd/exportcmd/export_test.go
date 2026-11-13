@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jpvelasco/fundamentum/cmd/globals"
+	"github.com/jpvelasco/fundamentum/internal/steps"
 )
 
 func TestNewCmd(t *testing.T) {
@@ -127,5 +128,37 @@ func TestRun_CreateError(t *testing.T) {
 	err := run(filepath.Join(t.TempDir(), "missing", "baseline.json"), &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "create") {
 		t.Fatalf("error = %v, want create", err)
+	}
+}
+
+func TestLabelsSelectorBaselineRoundTrip(t *testing.T) {
+	t.Cleanup(func() { globals.SkipSteps = nil; globals.OnlySteps = nil })
+	for _, skip := range []bool{false, true} {
+		globals.SkipSteps = nil
+		globals.OnlySteps = nil
+		if skip {
+			globals.SkipSteps = []string{"labels"}
+		} else {
+			globals.OnlySteps = []string{"labels"}
+		}
+		path := filepath.Join(t.TempDir(), "baseline.json")
+		if err := run(path, &strings.Builder{}); err != nil {
+			t.Fatal(err)
+		}
+		globals.SkipSteps = nil
+		globals.OnlySteps = nil
+		if err := globals.LoadBaselineFile(path); err != nil {
+			t.Fatal(err)
+		}
+		selector := steps.New(globals.SkipTokens(), globals.OnlySteps)
+		if selector.IncludeStep(steps.Labels) == skip {
+			t.Fatalf("labels selection lost in roundtrip (skip=%v)", skip)
+		}
+		if !skip && selector.IncludeStep(steps.Settings) {
+			t.Fatal("only labels expanded to settings")
+		}
+		if len(selector.Unknown(nil)) != 0 {
+			t.Fatal("labels key unrecognized")
+		}
 	}
 }

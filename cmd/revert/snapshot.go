@@ -5,6 +5,7 @@ package revert
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/jpvelasco/fundamentum/internal/github"
 )
@@ -14,8 +15,10 @@ const BaselinePath = ".github/fundamentum-baseline.json"
 
 // Snapshot captures enough pre-apply state to undo the apply: the file
 // contents (or absence) apply would touch, the repo settings it flips, the
-// security toggles, and whether the two managed rulesets existed.
+// security toggles, whether the two managed rulesets existed, and selected
+// label changes.
 type Snapshot struct {
+	Labels   []LabelState  `json:"labels,omitempty"`
 	Version  int           `json:"version"` // schema version, currently 1
 	Owner    string        `json:"owner"`
 	Repo     string        `json:"repo"`
@@ -128,6 +131,17 @@ func DecodeSnapshot(b []byte) (*Snapshot, error) {
 	var s Snapshot
 	if err := json.Unmarshal(b, &s); err != nil {
 		return nil, fmt.Errorf("parse snapshot: %w", err)
+	}
+	seen := make(map[string]bool)
+	for _, label := range s.Labels {
+		key := strings.ToLower(label.Name)
+		if _, managed := github.FindLabel(github.PriorityLabels(), key); !managed {
+			return nil, fmt.Errorf("snapshot contains unmanaged label %q", label.Name)
+		}
+		if seen[key] {
+			return nil, fmt.Errorf("snapshot contains duplicate label %q", label.Name)
+		}
+		seen[key] = true
 	}
 	return &s, nil
 }
