@@ -20,6 +20,10 @@ func botManagedAuditHandler(t *testing.T, mergeCommit bool) http.HandlerFunc {
 		if serveReviewedPIITree(t, w, r, "# reviewed empty policy\n") {
 			return
 		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/labels") {
+			_ = json.NewEncoder(w).Encode(github.PriorityLabels())
+			return
+		}
 		switch {
 		case r.URL.Path == "/repos/owner/repo":
 			_ = json.NewEncoder(w).Encode(map[string]any{

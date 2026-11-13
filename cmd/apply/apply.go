@@ -31,7 +31,8 @@ func NewCmd() *cobra.Command {
 		Use:   "apply OWNER/REPO",
 		Short: "Harden an existing GitHub repo",
 		Long: `Harden an existing GitHub repository with community health files,
-branch protection, security features, and starter workflows.
+branch protection, security features, priority labels, and starter workflows.
+Labels change live even with --pr; their snapshot is saved in the file PR.
 
 Files land as ONE commit (git data API); --pr batches them into a single
 pull request instead. A direct commit rejected by branch protection (409)
@@ -42,7 +43,7 @@ their integration_id, extra checks and unowned rules survive, and stricter
 live review settings are never weakened.
 
 Steps can be excluded or selected with --skip / --only: settings,
-protect-main, protect-version-tags, security, files, or an exact file path.
+protect-main, protect-version-tags, security, labels, files, or an exact file path.
 
 Examples:
   fundamentum apply OWNER/REPO              # interactive harden
@@ -114,7 +115,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 
 	data, err := RenderData(client, info, pack, orgOwner)
 	if err != nil {
-		return fmt.Errorf("plan %s/%s: %w (verify the token grants Contents read access and retry)", owner, repo, err)
+		return fmt.Errorf("plan %s/%s: %w (verify the token grants Contents read access and Issues read access for labels, then retry)", owner, repo, err)
 	}
 	rendered, err := renderTemplates(data)
 	if err != nil {
@@ -134,7 +135,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 	// paths: a typo must be an error, not a silent no-op that lets apply
 	// touch exactly what the operator meant to leave alone.
 	if unknown := steps.New(globals.SkipSteps, globals.OnlySteps).Unknown(renderedPaths(rendered)); len(unknown) > 0 {
-		return fmt.Errorf("unknown --skip/--only key(s): %s — use settings, protect-main, protect-version-tags, security, files, or an exact shipped file path", strings.Join(unknown, ", "))
+		return fmt.Errorf("unknown --skip/--only key(s): %s — use settings, protect-main, protect-version-tags, security, labels, files, or an exact shipped file path", strings.Join(unknown, ", "))
 	}
 
 	// Pre-flight: check branch protection state before asking solo/team.
@@ -211,7 +212,7 @@ func runWithClient(client *github.Client, owner, repo string, stdin io.Reader, s
 
 	items, err := buildItems(client, &info, owner, repo, branch, visibility, rendered, branchPlan, tagPlan, classicExists, protectionUnavailable, &opts, paidSecurity, pack, stdout)
 	if err != nil {
-		return fmt.Errorf("plan %s/%s: %w (verify the token grants Contents read access and retry)", owner, repo, err)
+		return fmt.Errorf("plan %s/%s: %w (verify the token grants Contents read access and Issues read access for labels, then retry)", owner, repo, err)
 	}
 
 	if globals.DryRun {
@@ -305,7 +306,7 @@ func PlanNewRepo(owner, repo, visibility string, stdout io.Writer) error {
 		return fmt.Errorf("render templates: %w", err)
 	}
 	if unknown := steps.New(globals.SkipSteps, globals.OnlySteps).Unknown(renderedPaths(rendered)); len(unknown) > 0 {
-		return fmt.Errorf("unknown --skip/--only key(s): %s — use settings, protect-main, protect-version-tags, security, files, or an exact shipped file path", strings.Join(unknown, ", "))
+		return fmt.Errorf("unknown --skip/--only key(s): %s — use settings, protect-main, protect-version-tags, security, labels, files, or an exact shipped file path", strings.Join(unknown, ", "))
 	}
 	// Named presets must match a live apply: only strict / --advanced-security
 	// enable GHAS. Interactive dry-run still shows the offered plan line.
@@ -414,6 +415,11 @@ func buildItems(
 		items = append(items, actItem)
 	}
 
+	labels, err := labelItems(c, owner, repo, selector, stdout)
+	if err != nil {
+		return nil, fmt.Errorf("check labels: %w", err)
+	}
+	items = append(items, labels...)
 	return items, nil
 }
 
@@ -754,7 +760,7 @@ func validateBotManaged(client *github.Client) error {
 	return nil
 }
 
-const prModeNotice = "--pr: file changes go in a pull request. Settings, security, and branch protection still apply live via the API. When file changes go to a PR, required status checks are deferred until you re-apply after it merges.\n\n"
+const prModeNotice = "--pr: file changes go in a pull request. Settings, security, labels, and branch protection still apply live via the API. When file changes go to a PR, required status checks are deferred until you re-apply after it merges.\n\n"
 
 func printPRModeNotice(stdout io.Writer) {
 	if globals.ViaPR {
@@ -880,6 +886,7 @@ func codeOwnerLine(owner string, org bool) string {
 func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Item, viaPR bool, opts *github.BranchProtectionOptions, stdout io.Writer) error {
 	var fileChanges []github.FileChange
 	var nonFileItems []wizard.Item
+	var labelNames []string
 	requiredFailed := false
 
 	for _, item := range items {
@@ -894,6 +901,9 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 			continue
 		}
 		nonFileItems = append(nonFileItems, item)
+		if item.LabelName != "" {
+			labelNames = append(labelNames, item.LabelName)
+		}
 	}
 
 	// Snapshot the pre-apply state before any write so revert can restore it.
@@ -904,11 +914,19 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 			paths = append(paths, ch.Path)
 		}
 		snap, err := revert.CaptureSnapshotForApply(c, owner, repo, branch, paths)
+		if err == nil {
+			err = snap.CaptureLabels(c, owner, repo, labelNames)
+		}
 		if err != nil {
+			if len(labelNames) > 0 {
+				return fmt.Errorf("snapshot failed — labels unchanged; fix snapshot access and re-run: %w", err)
+			}
 			_, _ = fmt.Fprintf(stdout, "  %-45s  ⚠ snapshot failed (%v) — continuing without it\n", "snapshot", err)
-		} else if snapBytes, err := snap.Encode(); err != nil {
-			_, _ = fmt.Fprintf(stdout, "  %-45s  ⚠ snapshot encode failed (%v) — continuing without it\n", "snapshot", err)
 		} else {
+			snapBytes, err := snap.Encode()
+			if err != nil {
+				return fmt.Errorf("encode snapshot: %w", err)
+			}
 			fileChanges = append(fileChanges, github.FileChange{Path: revert.BaselinePath, Content: snapBytes})
 		}
 	}
@@ -935,8 +953,16 @@ func applyItems(c *github.Client, owner, repo, branch string, items []wizard.Ite
 		}
 	}
 
-	// Apply non-file items (settings, security) directly.
+	// A failed file fallback may leave the snapshot unwritten. Block labels
+	// conservatively while preserving ordinary non-file step execution.
+	labelsBlocked := requiredFailed
+
+	// Apply non-file items (settings, security, labels) directly.
 	for _, item := range nonFileItems {
+		if labelsBlocked && item.LabelName != "" {
+			_, _ = fmt.Fprintf(stdout, "  %-45s  ⚠ file or snapshot persistence failed — label unchanged; fix writes and re-run\n", item.Name)
+			continue
+		}
 		_, _ = fmt.Fprintf(stdout, "  %-45s  applying...", item.Name)
 		if err := item.Apply(); err != nil {
 			_, _ = fmt.Fprint(stdout, "\r")
@@ -966,6 +992,11 @@ func applyFilesViaPR(c *github.Client, owner, repo, branch string, changes []git
 	if prNum > 0 {
 		_, _ = fmt.Fprintf(stdout, "  ✓ PR #%d created: https://github.com/%s/%s/pull/%d\n", prNum, owner, repo, prNum)
 	} else {
+		for _, change := range changes {
+			if change.Path == revert.BaselinePath {
+				return fmt.Errorf("no snapshot PR persisted — labels unchanged")
+			}
+		}
 		_, _ = fmt.Fprintf(stdout, "  no file changes to put in a PR\n")
 	}
 	return nil
@@ -1035,7 +1066,7 @@ func itemFailedRequired(item wizard.Item) bool {
 }
 
 // prGuardNotice explains why file changes go via a PR without --pr.
-const prGuardNotice = "--free-tier-guard: the protect-main Actions guard reverts direct pushes to the default branch, so file changes go in a pull request (settings and security still apply live).\n"
+const prGuardNotice = "--free-tier-guard: the protect-main Actions guard reverts direct pushes to the default branch, so file changes go in a pull request (settings, security, and labels still apply live).\n"
 
 // guardShipped reports whether the free-tier Actions guard is being shipped
 // in this apply (rendered) or already exists on the repo. Either way the

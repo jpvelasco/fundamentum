@@ -47,7 +47,7 @@ Examples:
 	cmd.PersistentFlags().BoolVar(&globals.Strict, "strict", false, "fail the run when any core harden step fails, including optional tag/security items")
 	cmd.PersistentFlags().StringSliceVar(&globals.RequireChecks, "require-checks", nil, "required status-check contexts for protect-main (comma-separated; default: pack jobs plus eligible pii-gate)")
 	cmd.PersistentFlags().StringVar(&globals.CIPack, "ci", "", "CI pack: auto (default; detect go/node/python/rust, else generic), go, node, python, rust, generic, or none")
-	cmd.PersistentFlags().StringSliceVar(&globals.SkipSteps, "skip", nil, "steps/paths to leave alone: settings, protect-main, protect-version-tags, security, files, or an exact file path (comma-separated)")
+	cmd.PersistentFlags().StringSliceVar(&globals.SkipSteps, "skip", nil, "steps/paths to leave alone: settings, protect-main, protect-version-tags, security, labels, files, or an exact file path (comma-separated)")
 	cmd.PersistentFlags().StringSliceVar(&globals.OnlySteps, "only", nil, "when set, apply only these steps/paths (same keys as --skip)")
 	cmd.PersistentFlags().BoolVar(&globals.Octopus, "octopus", false, "opt in to the Octopus Review workflow (public repos; shares PR diffs with octopus-review.ai)")
 	cmd.PersistentFlags().BoolVar(&globals.CodacyInstructions, "codacy-instructions", false, "opt in to shipping .github/instructions/codacy.instructions.md (Codacy MCP rules for AI agents)")

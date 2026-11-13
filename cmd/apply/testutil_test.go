@@ -1,10 +1,12 @@
 package apply
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jpvelasco/fundamentum/cmd/util"
@@ -17,7 +19,12 @@ import (
 // the server plus a github.Client configured to point at it. The caller must
 // defer the returned server's Close() call.
 func newTestServer(handler http.HandlerFunc) (*httptest.Server, *github.Client) {
-	srv := httptest.NewServer(handler)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeCanonicalLabels(w, r) {
+			return
+		}
+		handler(w, r)
+	}))
 	return srv, github.NewClient("t", false).WithBaseURL(srv.URL)
 }
 
@@ -66,11 +73,19 @@ func newTestClient(srv *httptest.Server) *github.Client {
 // skeleton across table-driven tests.
 func testWithServer(t *testing.T, handler http.HandlerFunc, action func(*github.Client), verify func(*testing.T)) {
 	t.Helper()
-	srv := httptest.NewServer(handler)
+	srv, c := newTestServer(handler)
 	defer srv.Close()
-	c := github.NewClient("t", false).WithBaseURL(srv.URL)
 	action(c)
 	if verify != nil {
 		verify(t)
 	}
+}
+
+// Existing non-label tests model a repo whose label metadata already matches.
+func writeCanonicalLabels(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/labels") {
+		return false
+	}
+	_ = json.NewEncoder(w).Encode(github.PriorityLabels())
+	return true
 }

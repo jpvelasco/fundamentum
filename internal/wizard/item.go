@@ -30,11 +30,12 @@ func (a Action) String() string {
 
 // Item is a single setting or file that fundamentum manages.
 type Item struct {
-	Name     string
-	Action   Action
-	Apply    func() error
-	Optional bool   // failures show as ⚠ (plan limit) rather than ✗ (error)
-	Content  []byte // rendered file content for file items (used by PR mode)
+	LabelName string // non-empty for a managed label; snapshot after selection
+	Name      string
+	Action    Action
+	Apply     func() error
+	Optional  bool   // failures show as ⚠ (plan limit) rather than ✗ (error)
+	Content   []byte // rendered file content for file items (used by PR mode)
 	// Detail explains an update (field drift, diffstat) or a non-obvious skip
 	// (plan-unavailable protection). Empty on plain skips.
 	Detail string
