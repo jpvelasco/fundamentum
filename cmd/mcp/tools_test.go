@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,6 +33,8 @@ func mockGitHub(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.URL.Path == "/repos/owner/repo/labels" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(github.PriorityLabels())
 		case r.URL.Path == "/repos/owner/repo" && r.Method == http.MethodGet:
 			_, _ = w.Write([]byte(`{"visibility":"public","default_branch":"main","delete_branch_on_merge":true,"owner":{"type":"User"},"security_and_analysis":{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"}}}`))
 		case strings.Contains(r.URL.Path, "/vulnerability-alerts"),
@@ -101,5 +104,55 @@ func TestRun_AuditAgainstMock(t *testing.T) {
 	}
 	if !strings.Contains(out, "fundamentum audit owner/repo") && err == nil {
 		t.Errorf("audit output missing report header:\n%s", out)
+	}
+}
+
+func TestLabelMCPReadOnlyAndSelectors(t *testing.T) {
+	for _, name := range []string{"plan", "audit"} {
+		for _, skip := range []bool{false, true} {
+			t.Run(name+fmt.Sprint(skip), func(t *testing.T) {
+				resetGlobals(t)
+				t.Cleanup(func() { globals.SkipSteps = nil; globals.OnlySteps = nil })
+				globals.SkipSteps = nil
+				globals.OnlySteps = nil
+				if skip {
+					globals.SkipSteps = []string{"labels"}
+				} else {
+					globals.OnlySteps = []string{"labels"}
+				}
+				fallback := mockGitHub(t)
+				defer fallback.Close()
+				reads, writes := 0, 0
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method != http.MethodGet {
+						writes++
+					}
+					if r.URL.Path == "/repos/owner/repo/labels" {
+						reads++
+						labels := []github.Label{}
+						if name == "audit" {
+							labels = github.PriorityLabels()
+						}
+						_ = json.NewEncoder(w).Encode(labels)
+						return
+					}
+					fallback.Config.Handler.ServeHTTP(w, r)
+				}))
+				defer srv.Close()
+				newClient = func(token string, verbose bool) *github.Client {
+					return github.NewClient(token, verbose).WithBaseURL(srv.URL)
+				}
+				out, err := (&toolSet{}).run(name, json.RawMessage(`{"repo":"owner/repo"}`))
+				if writes != 0 {
+					t.Fatalf("read-only %s made %d writes", name, writes)
+				}
+				if skip && reads != 0 {
+					t.Fatalf("excluded labels made %d reads", reads)
+				}
+				if !skip && (reads == 0 || !strings.Contains(out, "priority:critical")) {
+					t.Fatalf("missing label plan/report: %s (%v)", out, err)
+				}
+			})
+		}
 	}
 }

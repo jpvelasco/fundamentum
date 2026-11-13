@@ -144,7 +144,8 @@ func TestBuildItems_Private(t *testing.T) {
 }
 
 func TestBuildItems_PrivatePaidSecurity(t *testing.T) {
-	c := github.NewClient("", false)
+	srv, c := newTestServer(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNotFound) })
+	defer srv.Close()
 	items, err := buildItems(c, nil, "owner", "repo", "main", "private", nil, github.RulesetPlan{}, github.RulesetPlan{}, false, false, &github.BranchProtectionOptions{}, true, "", io.Discard)
 	if err != nil {
 		t.Fatalf("buildItems() error: %v", err)
@@ -428,7 +429,8 @@ func sameStrSlices(got, want []string) bool {
 }
 
 func TestBuildItems_TagRulesetExists(t *testing.T) {
-	c := github.NewClient("", false)
+	srv, c := newTestServer(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNotFound) })
+	defer srv.Close()
 	items := buildItemsForTest(t, c, "private", nil, github.RulesetPlan{}, existsPlan(true), false)
 
 	for _, item := range items {

@@ -23,7 +23,7 @@ type Mode string
 const (
 	ModeFiles    Mode = "files"    // restore files only
 	ModeSettings Mode = "settings" // files + repo settings + security toggles
-	ModeFull     Mode = "full"     // files + settings + rulesets (the default)
+	ModeFull     Mode = "full"     // files + settings + rulesets + recorded labels (the default)
 )
 
 // NewCmd returns the revert subcommand.
@@ -37,7 +37,7 @@ func NewCmd() *cobra.Command {
 
 Modes:
   full     restore files, repo settings, security toggles, and the managed
-           rulesets to their pre-apply state (default)
+           rulesets and recorded labels to their pre-apply state (default)
   files    restore only the files apply wrote (delete what it created,
            restore what it overwrote)
   settings restore files + repo settings + security toggles (leave the
@@ -126,6 +126,13 @@ func plan(c *github.Client, owner, repo string, snap *Snapshot, mode Mode) ([]st
 	} else {
 		items = append(items, "delete protect-version-tags ruleset")
 	}
+	for _, label := range snap.Labels {
+		action := "restore label "
+		if !label.Present {
+			action = "delete label (removes issue assignments) "
+		}
+		items = append(items, action+label.Name)
+	}
 	return items, nil
 }
 
@@ -190,6 +197,9 @@ func execute(c *github.Client, owner, repo string, snap *Snapshot, mode Mode, st
 			return err
 		}
 		_, _ = fmt.Fprintln(stdout, "  ✓ deleted protect-version-tags ruleset")
+	}
+	if err := restoreLabels(c, owner, repo, snap.Labels, stdout); err != nil {
+		return err
 	}
 	_, _ = fmt.Fprintln(stdout, "\n  ✓ Done — full revert applied")
 	return nil

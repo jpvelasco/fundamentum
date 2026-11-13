@@ -201,7 +201,7 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 		paths = append(paths, f.Path)
 	}
 	if unknown := steps.New(globals.SkipSteps, globals.OnlySteps).Unknown(paths); len(unknown) > 0 {
-		return fmt.Errorf("unknown --skip/--only key(s): %s — use settings, protect-main, protect-version-tags, security, files, or an exact shipped file path", strings.Join(unknown, ", "))
+		return fmt.Errorf("unknown --skip/--only key(s): %s — use settings, protect-main, protect-version-tags, security, labels, files, or an exact shipped file path", strings.Join(unknown, ", "))
 	}
 
 	results := []check{
@@ -210,6 +210,11 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 		boolCheck("auto-delete branches", info.DeleteBranchOnMerge, "delete_branch_on_merge is false", steps.Settings, selector),
 		securityCheck(missing, selector),
 	}
+	labels, err := labelChecks(client, owner, repo, selector)
+	if err != nil {
+		return fmt.Errorf("check labels: %w", err)
+	}
+	results = append(results, labels...)
 	if globals.BotManaged {
 		drift := info.SquashOnlyDrift()
 		results = append(results, boolCheck("squash-only merges", len(drift) == 0, strings.Join(drift, ", "), steps.Settings, selector))

@@ -17,6 +17,10 @@ func botManagedAuditHandler(t *testing.T, mergeCommit bool) http.HandlerFunc {
 	t.Helper()
 	probes := botManagedHandler(compliantBotManagedProbe)
 	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/labels") {
+			_ = json.NewEncoder(w).Encode(github.PriorityLabels())
+			return
+		}
 		switch {
 		case r.URL.Path == "/repos/owner/repo":
 			_ = json.NewEncoder(w).Encode(map[string]any{

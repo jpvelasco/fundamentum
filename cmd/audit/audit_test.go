@@ -2,6 +2,7 @@ package audit
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -548,6 +549,10 @@ func writePassingAudit(t *testing.T, w http.ResponseWriter, r *http.Request, hea
 // writePassingAuditVisibility is writePassingAudit with an explicit repo visibility
 // so the file content renderer matches the audit's rendered template set.
 func writePassingAuditVisibility(t *testing.T, w http.ResponseWriter, r *http.Request, healthyBranch, healthyTag bool, visibility string) {
+	if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/labels") {
+		_ = json.NewEncoder(w).Encode(github.PriorityLabels())
+		return
+	}
 	enforcement := "active"
 	if !healthyBranch {
 		enforcement = "disabled"
