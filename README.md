@@ -27,6 +27,9 @@ fundamentum init OWNER/REPO
 # Verify the harden baseline
 fundamentum audit OWNER/REPO
 
+# Generate local cloud-ID exemptions for review
+fundamentum pii-bootstrap OWNER/REPO --output .github/pii-allowlist.txt
+
 # Export / reapply a portable baseline
 fundamentum --preset oss export -o baseline.json
 fundamentum --from baseline.json apply OWNER/REPO
@@ -43,7 +46,7 @@ fundamentum revert OWNER/REPO --mode full
 
 ## Prerequisites
 
-A GitHub personal access token with **`repo` scope** (classic) or **Contents + Metadata + Administration** permissions (fine-grained). Set it via the `GITHUB_TOKEN` environment variable, pass `--token`, or be signed in to the GitHub CLI — fundamentum falls back to `gh auth token` when the first two are absent.
+A GitHub personal access token with **`repo` scope** (classic), or a fine-grained token with **Contents write, Administration write, Metadata read, and Issues write** for the default hardening steps. Issues write is needed for managed labels; `--skip labels` opts out. PR mode also needs **Pull requests write**, and security endpoints may need additional feature-specific permissions. Set the token via `GITHUB_TOKEN`, pass `--token`, or sign in to the GitHub CLI — fundamentum falls back to `gh auth token` when the first two are absent.
 
 **Workflow files need one more scope.** GitHub refuses writes to `.github/workflows/` (CI starter, CodeQL, the free-tier guard) through any API when the token lacks the **`workflow`** scope (classic) / **Workflows** permission (fine-grained) — the write returns 404. With a repo-only token, apply still lands every non-workflow file and skips the workflow ones with a visible warning; `audit` then flags what's missing. Add the scope (`gh auth refresh -s workflow`, or update your PAT) and re-run to ship them.
 
@@ -52,7 +55,7 @@ export GITHUB_TOKEN=ghp_xxxxx        # Linux/macOS
 $env:GITHUB_TOKEN = "ghp_xxxxx"      # PowerShell
 ```
 
-**Note:** Branch protection on free-tier private repos requires GitHub Pro for the API. If rulesets are unavailable, fundamentum falls back to classic branch protection — but if that also fails (403), you'll need to set up branch protection manually via the repo Settings → Branches page.
+**Private repos on GitHub Free:** native rulesets and classic branch protection require a paid plan; the UI cannot bypass that restriction. Fundamentum ships an Actions guard that reverts direct default-branch pushes after a grace window, excluding initial pushes and GitHub Actions bot pushes. It forces file changes through a PR, including bootstrap. The guard is not native branch protection: it cannot require checks before a merge and fails open if its API checks fail. Audit checks that the guard is present; upgrade the plan for native protection.
 
 **Updating the free-tier guard.** The guard workflow is a shipped file: a routine apply with `--no-overwrite` skips it once it exists (like any other existing file), so a fundamentum release that changes the guard template leaves the installed guard stale — `audit` reports the drift as a WARN. Refresh it with a targeted apply:
 
@@ -68,8 +71,9 @@ The guard's presence forces PR mode, so expect a pull request rather than a dire
 - **Branch protection**: Modern `protect-main` ruleset (PRs, optional CODEOWNERS review, shipped CI status checks, no force-push/delete) + optional tag protection. Reconcile **merges with your live ruleset** instead of replacing it: required checks keep their app identity (`integration_id`), extra checks and rules survive, and stricter settings are never weakened. Classic fallback only when GitHub says rulesets are unavailable on the plan.
 - **Security**: Dependabot alerts + updates everywhere; secret scanning + push protection on public repos, opt-in on private/internal repos via `--advanced-security` (paid GHAS); CodeQL default setup on public repos unless a `codeql*.yml` workflow (or the shipped advanced one) already provides CodeQL.
 - **Settings**: Auto-delete merged branches.
+- **Priority labels**: Create or reconcile four importance-based labels without changing issue assignments; see [managed priority labels](#managed-priority-labels).
 - **Opinionated starters**: CI pack is `auto` — Go / Node / Python / Rust from `go.mod`, `package.json`, `pyproject.toml`/`requirements.txt`, or `Cargo.toml`; otherwise a generic `CI` + Trivy workflow whose `CI` job fails with a "configure me" annotation until you give it real commands — a required check that always passes would be false confidence. The node pack runs the `lint`/`test` scripts it finds in `package.json` and fails with the same annotation when they are missing. Override with `--ci go|node|python|rust|generic|none`. `.codacy.yml` is generated from the detected pack (Go analyzers stay off non-Go repos).
-- **Audit**: `fundamentum audit OWNER/REPO` prints a PASS/FAIL/WARN/SKIP report against the baseline: FAIL fails the run, WARN (content drift, optional checks) fails only with `--strict`, SKIP covers opted-out steps and plan-gated protection. A repo whose settings are stricter than the baseline passes.
+- **Audit**: `fundamentum audit OWNER/REPO` prints a PASS/FAIL/WARN/SKIP report against the baseline: FAIL fails the run, WARN (content drift, optional checks) fails only with `--strict`, and SKIP covers opted-out steps and private security features without GHAS. Plan-gated protection is judged by the Actions guard's presence. A repo whose settings are stricter than the baseline passes.
 - **Cloud-ID gate**: Ships a stdlib Go helper and `pii-gate` workflow for every visibility and CI pack. It scans every tracked PR-head blob, including unchanged files and symlink contents, for account and AWS resource ID shapes. Diagnostics show safe file locations and shape names, never matched values.
 
 ### Cloud-ID gate rollout
@@ -124,7 +128,7 @@ Two guardrails apply: the run **refuses a bot or app token** (it must be driven 
 
 > **Scope:** the profile hardens repository **settings and shipped templates**. It does **not** vet the code that automation writes — a bot-managed repo still needs review of what its bots merge, exactly as any repo does.
 
-### Managed priority labels
+## Managed priority labels
 
 Apply manages these four labels by default. Priority measures importance; effort and size belong in the issue body or a milestone.
 
@@ -135,7 +139,7 @@ Apply manages these four labels by default. Priority measures importance; effort
 | `priority:medium` | `#fbca04` | Conditional breakage, wrong output or cost figures, silent truncation |
 | `priority:low` | `#c5def5` | Cosmetic inconsistencies, edge cases, minor DX papercuts |
 
-Apply creates missing labels and updates divergent color/description in place, preserving issue assignments. The token needs permission to manage repository labels (for a fine-grained PAT, Issues write). Matching labels are skipped. Other labels remain repo-owned. Audit reports missing canonical labels as FAIL and metadata drift as WARN (fails with `--strict`). Use `--skip labels` to leave labels alone or `--only labels` to reconcile just this step. These selectors round-trip through `export` / `--from`; MCP plan and audit remain read-only.
+Apply creates missing labels and updates divergent color/description in place, preserving issue assignments. The token needs permission to manage repository labels (for a fine-grained PAT, Issues write). Matching labels are skipped. Other labels remain repo-owned. Audit reports missing canonical labels as FAIL and metadata drift as WARN (fails with `--strict`). Use `--skip labels` to leave labels alone or `--only labels` to reconcile just this step. These selectors round-trip through `export` / `--from`; MCP plan and audit do not change labels.
 
 A legacy `priority:*` or `P0`/`P1`/`P2` scheme triggers migration guidance in the plan and audit. Review each issue's impact against the definitions above before mapping it. `P0-quick-win`, `P1-medium`, and `P2-larger` describe effort: none maps automatically to an importance tier. The owner relabels issues and retires legacy labels. Fundamentum never relabels issues or changes legacy labels.
 
@@ -143,9 +147,7 @@ Only changed labels accepted after wizard selection enter the V1 snapshot at `.g
 
 `revert --mode full` restores recorded metadata, recreates previously existing labels if missing, and deletes labels recorded as previously absent. Deleting a label removes its issue assignments; assignment history is not captured or restored. `--mode files` and `--mode settings` leave labels untouched, as do older snapshots without label entries. Snapshots describe the **last changing apply**, not installation history: a later apply can replace the undo record. Unrelated and declined labels never enter that record.
 
-## Flags
-
-### GitHub App audit
+## GitHub App audit
 
 `audit --app-audit` checks the installation grants of apps you explicitly name in a baseline. It requires a separate credential for each app; the normal repo token still handles the rest of the audit. `--bot-managed` enables this check by default, and `--app-audit=false` disables it even when a baseline enables it. An `app_audit` block also enables the check unless it has `"enabled": false`.
 
@@ -182,6 +184,8 @@ Keys, tokens, credential paths, and environment-variable references are never ex
 
 See GitHub's [installation APIs](https://docs.github.com/en/rest/apps/apps#get-a-repository-installation-for-the-authenticated-app) and [installation token scope documentation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app). These endpoints do not provide a general inventory of unknown apps on a personal repository.
 
+## Flags
+
 ### Shared flags
 
 | Flag                | Description                                      |
@@ -191,7 +195,7 @@ See GitHub's [installation APIs](https://docs.github.com/en/rest/apps/apps#get-a
 | `--token`           | GitHub token (defaults to `GITHUB_TOKEN`, then `gh auth token`) |
 | `--no-overwrite`    | Skip any file that already exists                |
 | `--pr`              | Batch file changes into a PR (default is one direct commit); settings/security/labels/protection still apply live |
-| `--skip`            | Leave steps alone: `settings`, `protect-main`, `protect-version-tags`, `security`, `labels`, `files`, or an exact file path |
+| `--skip`            | Leave steps alone: `settings`, `protect-main`, `protect-version-tags`, `security`, `labels`, `files`, `actions` (bot-managed), `app-audit` (audit only), or an exact file path |
 | `--only`            | When set, apply just the listed steps/paths (same keys as `--skip`) |
 | `--advanced-security` | Enable GitHub Advanced Security (secret scanning, push protection) on private/internal repos (paid) |
 | `--strict`          | Fail the run when any core harden step fails, including optional tag/security items |
@@ -206,11 +210,10 @@ See GitHub's [installation APIs](https://docs.github.com/en/rest/apps/apps#get-a
 | `--app-private-key` | `APP_ID=PEM_PATH` app audit credential, repeatable |
 | `--app-private-key-env` | `APP_ID=ENV_NAME` naming an app key environment variable, repeatable |
 | `--app-installation-token-env` | `APP_ID=ENV_NAME` naming a token for partial app audit evidence, repeatable |
-| `--mode`            | Revert scope: `full` (default), `files`, or `settings` |
 | `--branch-up-to-date` | `protect-main`: require branches up to date before merging (default true; unset keeps the live policy on reconcile) |
 | `--version`         | Print version and exit                           |
 
-`init` also supports `--private` (default: `true`).
+Command-specific flags: `init --private` defaults to `true` (pass `--private=false` for public); `export --output` / `-o` writes a file instead of stdout; `pii-bootstrap --output` defaults to `.github/pii-allowlist.txt` and refuses overwrite; `revert --mode` selects `full` (default), `files`, or `settings`.
 
 ## How it works
 
@@ -228,23 +231,34 @@ npm install -g fundamentum-cli
 # Go install
 go install github.com/jpvelasco/fundamentum@latest
 
-# Run from source
-go run github.com/jpvelasco/fundamentum apply OWNER/REPO
+# Run the current source (including unreleased changes)
+git clone https://github.com/jpvelasco/fundamentum.git
+cd fundamentum
+go run . apply OWNER/REPO
 ```
 
-Binaries are published on GitHub Releases.
+Binaries are published on [GitHub Releases](https://github.com/jpvelasco/fundamentum/releases). npm supports macOS/Linux on x64 and arm64, and Windows on x64; its installer verifies the matching release binary against embedded SHA-256 checksums. If install scripts were blocked, the launcher tries downloading on first use when the package directory is writable. See the [npm installation notes](npm/README.md#install) for recovery steps.
+
+The docs on `main` describe the current source. Changes listed under [Unreleased](CHANGELOG.md#unreleased) require a source build until the next release; npm and `go install ...@latest` use the latest published version.
 
 ## Development
 
 ```bash
-git config core.hooksPath .hooks     # enable pre-commit (build + lint + test)
+git config core.hooksPath .hooks     # enable template drift → build → lint → test
+
+go test ./internal/templatefs/ -run TestCodecovTemplateDrift -count=1
 
 go build -o fundamentum.exe -v .     # Windows
 go build -o fundamentum -v .         # Linux/macOS
 
 golangci-lint run ./...
 go test ./...
+
+# Also validate raw YAML after changing embedded templates
+go test ./internal/templatefs/ -run TestEmbeddedYAMLParses -count=1
 ```
+
+If `golangci-lint` is unavailable or blocked, run `go vet ./...`. Documentation-only changes require `git diff --check`; source, template, workflow, and configuration changes use the full gate above. See [AGENTS.md](AGENTS.md) for hooks and verification details.
 
 ### Troubleshooting: Windows CRLF makes dry-run lie about template updates
 
@@ -258,21 +272,25 @@ Focused, high-quality, free forever. Good defaults for OSS and small teams. Not 
 
 `fundamentum revert OWNER/REPO` undoes the last apply using the snapshot written to `.github/fundamentum-baseline.json` at apply time.
 
-- **`--mode full`** (default): restore files, repo settings, security toggles, and the managed rulesets to their pre-apply state.
+- **`--mode full`** (default): restore files, repo settings, security toggles, managed rulesets, and recorded labels to their pre-apply state.
 - **`--mode files`**: restore only the files apply wrote (delete what it created, restore what it overwrote).
 - **`--mode settings`**: restore files + repo settings + security toggles (leave the rulesets as they are).
 
 `--dry-run` prints the plan without changing anything. Revert is idempotent: a snapshot field that already matches is skipped.
+
+Files/settings modes leave labels alone. Full revert deletes labels recorded as previously absent, which also removes their issue assignments; assignment history is not restored. See [managed priority labels](#managed-priority-labels) for snapshot and pending-PR limits.
 
 ## Agent use (`fundamentum mcp`)
 
 `fundamentum mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio so a coding agent can drive the same commands locally. It exposes three tools:
 
 - `plan` — dry-run a harden and return the plan table (never changes anything).
-- `audit` — compare a repo to the baseline (read-only).
+- `audit` — compare a repo to the baseline without changing repository or installation settings. A configured app-key audit mints a short-lived metadata-only inspection token.
 - `apply` — harden for real (solo defaults, prompts disabled). **Mutating** — run `plan` first and only call `apply` once the operator has confirmed the plan.
 
 Tokens come from the same places as the CLI (`GITHUB_TOKEN`, `--token`, `gh auth token`) and are never written to tool output.
+
+App audit policy and credentials come from the server's startup flags/baseline and environment; credentials are never tool arguments. A failed audit returns its report with `isError`, so the agent can inspect the drift.
 
 > **Disclaimer.** fundamentum is free open-source software, provided **as-is** with no warranty of any kind, express or implied. Branch protection, security toggles, and file writes change your repository's configuration. Whether you run it yourself or have an agent run it for you, **you are responsible for every change made to your repos.** Read the plan before you apply.
 
