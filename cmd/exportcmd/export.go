@@ -19,10 +19,11 @@ func NewCmd() *cobra.Command {
 		Long: `Write the current flag baseline as JSON so apply --from can
 reproduce it. Combine with --preset / --ci / --require-checks /
 --skip / --only / --advanced-security / --strict / --octopus /
---codacy-instructions / --bot-managed / --branch-up-to-date. The baseline
+--codacy-instructions / --bot-managed / --app-audit / --branch-up-to-date. The baseline
 also carries bot_policy_checks and keep (no CLI flag). An explicit flag on
 the later apply or audit wins over the file, including --flag=false.
-Does not call GitHub.
+App audit policy is preserved; runtime app credentials are never exported.
+Use --from to copy an existing baseline. Does not call GitHub.
 
 Examples:
   fundamentum --preset oss export
@@ -40,7 +41,7 @@ Examples:
 }
 
 func run(outPath string, stdout io.Writer) error {
-	if err := globals.ApplyPreset(globals.Preset); err != nil {
+	if err := globals.LoadSharedFlags(); err != nil {
 		return err
 	}
 	b := globals.CurrentBaseline()

@@ -127,9 +127,13 @@ func (s *server) call(req *jsonRPCRequest) *jsonRPCResponse {
 	if err != nil {
 		// Tool failures are reported as isError content, not protocol errors,
 		// so the agent sees the message and can act on it.
+		message := err.Error()
+		if out != "" {
+			message = out + "\n" + message
+		}
 		return s.result(req.ID, map[string]any{
 			"isError": true,
-			"content": []map[string]any{{"type": "text", "text": err.Error()}},
+			"content": []map[string]any{{"type": "text", "text": message}},
 		})
 	}
 	return s.result(req.ID, map[string]any{

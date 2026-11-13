@@ -76,7 +76,7 @@ func TestServe_ToolsCallDispatch(t *testing.T) {
 	if !result.IsError {
 		t.Errorf("audit against unprotected repo must be isError; got: %v", result.Content)
 	}
-	if len(result.Content) == 0 || !strings.Contains(result.Content[0].Text, "audit failed") {
+	if len(result.Content) == 0 || !strings.Contains(result.Content[0].Text, "audit failed") || !strings.Contains(result.Content[0].Text, "protect-main") {
 		t.Errorf("tools/call audit content: %+v", result.Content)
 	}
 }

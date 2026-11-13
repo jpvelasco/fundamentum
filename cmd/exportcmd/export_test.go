@@ -1,13 +1,46 @@
 package exportcmd
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/jpvelasco/fundamentum/cmd/globals"
 )
+
+func TestExportLoadsAppPolicyAndPreservesExplicitOff(t *testing.T) {
+	t.Cleanup(func() {
+		globals.FromFile = ""
+		globals.AppAuditPolicy = nil
+		globals.AppAudit = false
+		globals.ResetExplicit()
+	})
+	path := filepath.Join(t.TempDir(), "baseline.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"app_audit":{"enabled":true,"expected_apps":[{"app_id":123,"permissions":{},"repositories":["owner/repo"]}]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	globals.FromFile = path
+	globals.NoteExplicit("app-audit")
+	globals.AppAudit = false
+	var out strings.Builder
+	if err := run("", &out); err != nil {
+		t.Fatal(err)
+	}
+	var b globals.Baseline
+	if err := json.Unmarshal([]byte(out.String()), &b); err != nil {
+		t.Fatal(err)
+	}
+	if b.AppAudit == nil || b.AppAudit.Enabled == nil || *b.AppAudit.Enabled || len(b.AppAudit.ExpectedApps) != 1 || b.AppAudit.ExpectedApps[0].AppID != 123 {
+		t.Fatalf("export lost app policy or explicit off: %s", out.String())
+	}
+	globals.FromFile = filepath.Join(t.TempDir(), "missing")
+	if err := run("", &strings.Builder{}); err == nil {
+		t.Fatal("export ignored unreadable --from")
+	}
+}
 
 func TestNewCmd(t *testing.T) {
 	cmd := NewCmd()

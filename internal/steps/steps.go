@@ -13,12 +13,13 @@ const (
 	Security           = "security"             // Dependabot / secret scanning / CodeQL
 	Files              = "files"                // all community/CI file items
 	Actions            = "actions"              // default GITHUB_TOKEN workflow permissions (bot-managed)
+	AppAudit           = "app-audit"            // named GitHub App grants (audit only)
 )
 
 // IsStep reports whether a token names a whole step rather than a file path.
 func IsStep(token string) bool {
 	switch strings.ToLower(strings.TrimSpace(token)) {
-	case Settings, ProtectMain, ProtectVersionTags, Security, Files, Actions:
+	case Settings, ProtectMain, ProtectVersionTags, Security, Files, Actions, AppAudit:
 		return true
 	default:
 		return false

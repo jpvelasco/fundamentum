@@ -40,6 +40,12 @@ A repo whose settings are STRICTER than the baseline passes: required
 status checks are judged as "at least the intended ones", and stricter
 review settings never count as drift.
 
+--app-audit checks only named apps from the app_audit baseline block.
+It defaults on with --bot-managed; --app-audit=false disables it.
+No app credentials means SKIP. App keys permit grant/scope checks and
+mint a metadata-only token; supplied installation tokens provide partial
+evidence (WARN). Other apps are not inventoried. No installations are changed.
+
 Examples:
   fundamentum audit OWNER/REPO
   fundamentum --preset oss audit OWNER/REPO
@@ -231,6 +237,9 @@ func runWithClient(client *github.Client, owner, repo string, stdout io.Writer) 
 	// pwn-request whether or not the bot-managed profile is in use.
 	if selector.IncludeStep(steps.Actions) {
 		results = append(results, pullRequestTargetChecks(client, owner, repo)...)
+	}
+	if appCheck := appAuditCheck(client, owner, repo, selector); appCheck != nil {
+		results = append(results, *appCheck)
 	}
 
 	_, _ = fmt.Fprint(stdout, formatReport(owner, repo, results))

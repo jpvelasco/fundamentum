@@ -31,7 +31,7 @@ func trackedBoolFlags() []string {
 	for _, slot := range baselineBools(Baseline{}) {
 		flags = append(flags, slot.name)
 	}
-	return append(flags, branchUpToDateFlag)
+	return append(flags, branchUpToDateFlag, "app-audit")
 }
 
 var explicitFlags = map[string]bool{}

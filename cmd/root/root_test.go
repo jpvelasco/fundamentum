@@ -24,9 +24,41 @@ func resetRootGlobals(t *testing.T) {
 		globals.FromFile = ""
 		globals.BotManaged = false
 		globals.PolicyChecks = nil
+		globals.AppAudit = false
+		globals.AppAuditPolicy = nil
+		globals.AppPrivateKeys = nil
+		globals.AppPrivateKeyEnvs = nil
+		globals.AppTokenEnvs = nil
 		globals.ResetExplicit()
 	})
 	globals.ResetExplicit()
+}
+
+func TestAppAuditFlagAndCredentialExport(t *testing.T) {
+	for _, flag := range []string{"--app-audit", "--app-audit=false"} {
+		t.Run(flag, func(t *testing.T) {
+			resetRootGlobals(t)
+			cmd := newRootCmd()
+			var out strings.Builder
+			cmd.SetOut(&out)
+			cmd.SetArgs([]string{"export", "--bot-managed", flag, "--app-private-key", "123=/private/key.pem", "--app-private-key-env", "234=PRIVATE_PEM", "--app-installation-token-env", "345=PRIVATE_TOKEN"})
+			if err := cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			var b globals.Baseline
+			if err := json.Unmarshal([]byte(out.String()), &b); err != nil {
+				t.Fatal(err)
+			}
+			if b.AppAudit == nil || b.AppAudit.Enabled == nil || *b.AppAudit.Enabled != (flag == "--app-audit") || !globals.Explicit("app-audit") {
+				t.Fatalf("exported app choice = %+v", b.AppAudit)
+			}
+			for _, secret := range []string{"/private", "PRIVATE_PEM", "PRIVATE_TOKEN"} {
+				if strings.Contains(out.String(), secret) {
+					t.Fatal("runtime credentials exported")
+				}
+			}
+		})
+	}
 }
 
 func TestBotManagedFlagWithPresets(t *testing.T) {
