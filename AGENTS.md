@@ -149,6 +149,21 @@ Shared flags `--skip` / `--only` select steps (`internal/steps`): `settings`, `p
 
 ### Packages
 
+`--app-audit` adds an audit-only `app installations` row, defaulting on with
+`--bot-managed` unless explicitly disabled. The portable `app_audit` block holds
+`enabled` (optional bool) and `expected_apps` (`app_id`, permission ceilings,
+allowed `repositories`; target-only by default). `cmd/audit/appaudit.go` compares
+known app grants; `internal/github/appaudit.go` uses app JWT metadata plus a
+metadata-only installation token without repository narrowing to enumerate full
+scope. A pre-minted token is always partial evidence (WARN); it cannot establish
+the full installation grants or app identity. No credentials means SKIP, confirmed
+excess grants/repos or a missing expected installation FAIL, and unknown apps are
+never inventoried. Credentials are runtime `APP_ID=PATH`/`APP_ID=ENV_NAME` mappings,
+never baseline fields or MCP arguments. App-specific errors omit response bodies,
+and token-mint POSTs never retry. Apply/init/plan never consume app credentials.
+Export loads `--from` and preserves policy; explicit `--app-audit=false` survives
+export and overrides both baseline and bot-managed defaults.
+
 - `cmd/root` — root Cobra command, flags
 - `cmd/apply` — apply logic: renders templates, checks existing state, builds item list, runs wizard
 - `cmd/audit` — post-apply compliance check using the same ruleset compare as apply

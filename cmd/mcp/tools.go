@@ -52,7 +52,7 @@ func (t *toolSet) list() []toolDef {
 		},
 		{
 			Name:        "audit",
-			Description: "Compare OWNER/REPO against the fundamentum baseline and return the PASS/FAIL/WARN/SKIP report. Read-only; never changes anything.",
+			Description: "Compare OWNER/REPO against the fundamentum baseline and return the PASS/FAIL/WARN/SKIP report. Never changes repository or installation settings; configured app-key audits mint a short-lived metadata-only token for inspection.",
 			InputSchema: ownerRepoSchema("GitHub repository as OWNER/REPO"),
 		},
 		{
@@ -124,7 +124,7 @@ func (t *toolSet) audit(client *github.Client, owner, repo string) (string, erro
 	globals.Preset = globals.PresetOSS
 	var out strings.Builder
 	if err := audit.RunWithClientForMCP(client, owner, repo, &out); err != nil {
-		return "", err
+		return out.String(), err
 	}
 	return out.String(), nil
 }

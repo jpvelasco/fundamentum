@@ -145,6 +145,45 @@ Only changed labels accepted after wizard selection enter the V1 snapshot at `.g
 
 ## Flags
 
+### GitHub App audit
+
+`audit --app-audit` checks the installation grants of apps you explicitly name in a baseline. It requires a separate credential for each app; the normal repo token still handles the rest of the audit. `--bot-managed` enables this check by default, and `--app-audit=false` disables it even when a baseline enables it. An `app_audit` block also enables the check unless it has `"enabled": false`.
+
+```json
+{
+  "version": 1,
+  "app_audit": {
+    "expected_apps": [
+      {
+        "app_id": 12345,
+        "permissions": {"contents": "read", "pull_requests": "write"},
+        "repositories": ["OWNER/REPO"]
+      }
+    ]
+  }
+}
+```
+
+Supply keys by path or by naming an existing environment variable. Repeat the credential flags for multiple apps:
+
+```bash
+fundamentum --from baseline.json --app-private-key 12345=/path/app.pem audit OWNER/REPO
+fundamentum --from baseline.json --app-private-key-env 12345=MY_APP_KEY audit OWNER/REPO
+fundamentum --from baseline.json --app-installation-token-env 12345=MY_APP_TOKEN audit OWNER/REPO
+```
+
+The app ID and RSA PEM key identify **that app**, and GitHub supplies its installation ID. Key-backed checks read the installation's granted permissions and mint a one-hour, metadata-read-only token to enumerate its full repository selection. They never change app installations, permission grants, or repository contents. Only the app's owner or someone entrusted with its key can use this path; installing a vendor's app does not grant access to that vendor's key.
+
+`permissions` defines maximum grants (`none`, `read`, `write`, `admin`): lower grants pass; excess or unexpected grants fail. Metadata read is implicitly allowed. A missing permission map warns; an empty map allows only metadata read. `repositories` defaults to the audited target; an explicit list must include it. Extra repositories fail. “All repositories” selection warns because future repositories will also be included.
+
+**PASS covers only the named apps. Other apps are not inventoried.** A supplied installation token always produces WARN: it may be narrower than its installation, and it cannot prove app identity or granular installation grants. Unreadable or incomplete evidence also warns. No expected apps or no credentials produces SKIP. WARN fails only with `--strict`; confirmed policy failures always fail the audit.
+
+Keys, tokens, credential paths, and environment-variable references are never exported in a baseline. `export --from baseline.json` preserves policy with explicit flag overrides. Apply, init, and MCP plan/apply do not consume these credentials; MCP audit uses the server's startup flags and environment, without secret tool arguments. `--skip app-audit` excludes the check.
+
+See GitHub's [installation APIs](https://docs.github.com/en/rest/apps/apps#get-a-repository-installation-for-the-authenticated-app) and [installation token scope documentation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app). These endpoints do not provide a general inventory of unknown apps on a personal repository.
+
+### Shared flags
+
 | Flag                | Description                                      |
 |---------------------|--------------------------------------------------|
 | `--dry-run`         | Print actions without applying them (update rows say exactly what drifted) |
@@ -163,6 +202,10 @@ Only changed labels accepted after wizard selection enter the V1 snapshot at `.g
 | `--octopus`         | Opt in to the third-party Octopus Review workflow (public repos; shares PR diffs with octopus-review.ai) |
 | `--codacy-instructions` | Opt in to `.github/instructions/codacy.instructions.md` (Codacy MCP rules for AI agents) |
 | `--bot-managed`      | Opt in to the bot-managed profile: harden repos whose PRs are opened by automation (squash-only merges, read-only default Actions token, no privileged workflow triggers, pinned required checks) |
+| `--app-audit`       | Audit named apps against the `app_audit` baseline; defaults on with `--bot-managed` |
+| `--app-private-key` | `APP_ID=PEM_PATH` app audit credential, repeatable |
+| `--app-private-key-env` | `APP_ID=ENV_NAME` naming an app key environment variable, repeatable |
+| `--app-installation-token-env` | `APP_ID=ENV_NAME` naming a token for partial app audit evidence, repeatable |
 | `--mode`            | Revert scope: `full` (default), `files`, or `settings` |
 | `--branch-up-to-date` | `protect-main`: require branches up to date before merging (default true; unset keeps the live policy on reconcile) |
 | `--version`         | Print version and exit                           |

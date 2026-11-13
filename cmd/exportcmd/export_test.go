@@ -1,7 +1,9 @@
 package exportcmd
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,6 +11,43 @@ import (
 	"github.com/jpvelasco/fundamentum/cmd/globals"
 	"github.com/jpvelasco/fundamentum/internal/steps"
 )
+
+func TestExportLoadsAppPolicyAndPreservesExplicitOff(t *testing.T) {
+	t.Cleanup(func() {
+		globals.FromFile = ""
+		globals.AppAuditPolicy = nil
+		globals.AppAudit = false
+		globals.SkipSteps = nil
+		globals.OnlySteps = nil
+		globals.KeepFiles = nil
+		globals.ResetExplicit()
+	})
+	path := filepath.Join(t.TempDir(), "baseline.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"skip":["labels"],"only":["app-audit","files"],"keep":[".github/workflows/pii-gate.yml"],"app_audit":{"enabled":true,"expected_apps":[{"app_id":123,"permissions":{},"repositories":["owner/repo"]}]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	globals.FromFile = path
+	globals.NoteExplicit("app-audit")
+	globals.AppAudit = false
+	var out strings.Builder
+	if err := run("", &out); err != nil {
+		t.Fatal(err)
+	}
+	var b globals.Baseline
+	if err := json.Unmarshal([]byte(out.String()), &b); err != nil {
+		t.Fatal(err)
+	}
+	if b.AppAudit == nil || b.AppAudit.Enabled == nil || *b.AppAudit.Enabled || len(b.AppAudit.ExpectedApps) != 1 || b.AppAudit.ExpectedApps[0].AppID != 123 {
+		t.Fatalf("export lost app policy or explicit off: %s", out.String())
+	}
+	if strings.Join(b.Skip, ",") != "labels" || strings.Join(b.Only, ",") != "app-audit,files" || strings.Join(b.Keep, ",") != ".github/workflows/pii-gate.yml" {
+		t.Fatalf("export lost labels, app, or PII selectors: %s", out.String())
+	}
+	globals.FromFile = filepath.Join(t.TempDir(), "missing")
+	if err := run("", &strings.Builder{}); err == nil {
+		t.Fatal("export ignored unreadable --from")
+	}
+}
 
 func TestNewCmd(t *testing.T) {
 	cmd := NewCmd()
