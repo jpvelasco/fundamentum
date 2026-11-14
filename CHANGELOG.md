@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-13
+
+**Feature release.** Adds managed priority labels, a tracked-tree cloud-ID gate with reviewed rollout, and optional GitHub App installation audits.
+
 ### Added
 
 - Four default managed priority labels based on importance, with apply/audit selectors and snapshot-backed full revert; issue assignments and legacy labels remain owner-managed (#301).
@@ -405,7 +409,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.7.0
 [0.6.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.6.0
 [0.5.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.5.1
 [0.5.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.5.0
