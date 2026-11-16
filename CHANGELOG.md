@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-15
+
+**Patch release.** Fixes the npm installer on Windows.
+
 ### Fixed
 
 - **npm installer works on Windows again.** The shim now lists and extracts the release zip with Windows' bundled `tar.exe` instead of `Expand-Archive` and `unzip`. When launched from PowerShell 7, `Expand-Archive` extracted nothing but still exited successfully, so the install failed with "Binary fundamentum.exe not found in archive". The old member listing also required a third-party `unzip` (#306).
@@ -413,7 +417,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.7.1
 [0.7.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.7.0
 [0.6.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.6.0
 [0.5.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.5.1
