@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-16
+
+**Patch release.** Publishes the npm packages that 0.8.0 did not.
+
+### Fixed
+
+- **npm publish of the per-platform packages completes.** v0.8.0 created the GitHub release, then the npm publish stopped because the platform package names did not exist yet. This tag publishes `fundamentum-cli` and the five `fundamentum-cli-<os>-<arch>` packages.
+
 ## [0.8.0] - 2026-11-15
 
 **Feature release.** npm installs the binary from a per-platform package instead of a postinstall download.
@@ -425,7 +433,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.8.1
 [0.8.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.8.0
 [0.7.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.7.1
 [0.7.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.7.0
