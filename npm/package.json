@@ -15,8 +15,14 @@
     "fundamentum": "run.js"
   },
   "scripts": {
-    "postinstall": "node install.js",
-    "test": "node --test install.test.js"
+    "test": "node --test"
+  },
+  "optionalDependencies": {
+    "fundamentum-cli-linux-x64": "0.0.0",
+    "fundamentum-cli-linux-arm64": "0.0.0",
+    "fundamentum-cli-darwin-x64": "0.0.0",
+    "fundamentum-cli-darwin-arm64": "0.0.0",
+    "fundamentum-cli-win32-x64": "0.0.0"
   },
   "os": [
     "linux",
@@ -53,9 +59,6 @@
   ],
   "files": [
     "README.md",
-    "install.js",
-    "run.js",
-    "bin/"
-  ],
-  "binaryChecksums": {}
+    "run.js"
+  ]
 }

@@ -96,9 +96,9 @@ jobs:
         run: |
           go test ./... -v -race -coverprofile=coverage.out -covermode=atomic
           tr -d '\r' < coverage.out > coverage.tmp && mv coverage.tmp coverage.out
-      # npm installer unit tests (zip-slip guard, #236/#288). Runs on the same
-      # 3-OS matrix so the Windows-path check is exercised on every host.
-      - name: npm installer tests
+      # npm launcher and platform-package tests. Runs on the same 3-OS matrix
+      # so path handling is exercised on every host.
+      - name: npm package tests
         working-directory: npm
         run: npm test
       - name: Rendered PII helper integration and cold timing (Linux)

@@ -4,15 +4,81 @@
 
 const fs = require("fs");
 const path = require("path");
-const { spawn, spawnSync } = require("child_process");
+const { spawn } = require("child_process");
 
-const binaryName = process.platform === "win32" ? "fundamentum.exe" : "fundamentum";
-const binaryPath = path.join(__dirname, "bin", binaryName);
+const ISSUES_URL = "https://github.com/jpvelasco/fundamentum/issues";
+const REINSTALL = "Reinstall without omitting optional dependencies: npm install -g fundamentum-cli";
 
-function runBinary() {
-  const child = spawn(binaryPath, process.argv.slice(2), {
-    stdio: "inherit",
-  });
+function binaryName(platform) {
+  return platform === "win32" ? "fundamentum.exe" : "fundamentum";
+}
+
+// The platform package must be one the launcher declares, so an arbitrary
+// installed package can never be resolved and executed.
+function platformPackage(platform, arch, optionalDependencies) {
+  const name = `fundamentum-cli-${platform}-${arch}`;
+  return Object.hasOwn(optionalDependencies || {}, name) ? name : undefined;
+}
+
+function unsupportedMessage(platform, arch) {
+  if (platform === "win32" && arch === "arm64") {
+    return `unsupported platform ${platform}/${arch}. Windows ARM64 binaries are not published; use Windows x64 or build from source.`;
+  }
+  return `unsupported platform ${platform}/${arch}. Please file an issue: ${ISSUES_URL}`;
+}
+
+function readVersion(pkgJsonPath) {
+  try {
+    return JSON.parse(fs.readFileSync(pkgJsonPath, "utf8")).version;
+  } catch (_) {
+    return undefined;
+  }
+}
+
+// Returns the absolute path of the binary to run, or throws with a recovery
+// message. A 0.0.0 launcher is a git checkout and runs a local build instead.
+function locateBinary({ platform, arch, pkg, dir = __dirname, resolve = require.resolve }) {
+  const name = platformPackage(platform, arch, pkg.optionalDependencies);
+  if (!name) {
+    throw new Error(unsupportedMessage(platform, arch));
+  }
+  const exe = binaryName(platform);
+
+  if (pkg.version === "0.0.0") {
+    const local = path.join(dir, "bin", exe);
+    if (!fs.existsSync(local)) {
+      throw new Error(
+        "package version is 0.0.0 (git checkout) and no local build exists.\n" +
+          `Build locally: go build -o npm/bin/${exe} .\n` +
+          "Or install a published release: npm install -g fundamentum-cli"
+      );
+    }
+    return local;
+  }
+
+  let pkgDir;
+  try {
+    pkgDir = path.dirname(resolve(`${name}/package.json`, { paths: [dir] }));
+  } catch (_) {
+    throw new Error(`platform package ${name} is not installed.\n${REINSTALL}`);
+  }
+
+  const binVersion = readVersion(path.join(pkgDir, "package.json"));
+  if (binVersion !== pkg.version) {
+    throw new Error(
+      `launcher v${pkg.version} does not match binary package v${binVersion}.\n${REINSTALL}`
+    );
+  }
+
+  const bin = path.join(pkgDir, "bin", exe);
+  if (!fs.existsSync(bin)) {
+    throw new Error(`binary not found at ${bin}.\n${REINSTALL}`);
+  }
+  return bin;
+}
+
+function runBinary(bin) {
+  const child = spawn(bin, process.argv.slice(2), { stdio: "inherit" });
 
   // Forward signals so the Go binary shuts down cleanly
   ["SIGINT", "SIGTERM", "SIGHUP"].forEach((sig) => {
@@ -20,15 +86,7 @@ function runBinary() {
   });
 
   child.on("error", (err) => {
-    if (err.code === "ENOENT") {
-      console.error(
-        `fundamentum: binary not found at ${binaryPath}\n` +
-          "Try running: node " +
-          path.join(__dirname, "install.js")
-      );
-    } else {
-      console.error(`fundamentum: failed to start: ${err.message}`);
-    }
+    console.error(`fundamentum: failed to start ${bin}: ${err.message}`);
     process.exit(1);
   });
 
@@ -37,68 +95,19 @@ function runBinary() {
   });
 }
 
-function isDevCheckout() {
+if (require.main === module) {
+  let bin;
   try {
-    const pkg = JSON.parse(
-      fs.readFileSync(path.join(__dirname, "package.json"), "utf8")
-    );
-    return pkg.version === "0.0.0";
-  } catch (_) {
-    return false;
+    bin = locateBinary({
+      platform: process.platform,
+      arch: process.arch,
+      pkg: require("./package.json"),
+    });
+  } catch (err) {
+    console.error(`fundamentum: ${err.message}`);
+    process.exit(1);
   }
+  runBinary(bin);
 }
 
-// If the binary is missing, postinstall was likely blocked by npm's allow-scripts
-// security policy. Attempt a lazy download, but the package dir may be root-owned
-// (e.g. sudo npm install -g). In that case, surface a clear recovery message.
-if (!fs.existsSync(binaryPath)) {
-  if (isDevCheckout()) {
-    console.error(
-      "fundamentum: binary not found and package version is 0.0.0 (git checkout).\n" +
-        "install.js will not download a release binary in this state.\n" +
-        "Build locally:\n" +
-        "  go build -o npm/bin/" +
-        binaryName +
-        " .\n" +
-        "Or install a published release: npm install -g fundamentum-cli"
-    );
-    process.exit(1);
-  }
-
-  const installScript = path.join(__dirname, "install.js");
-
-  // Check if we can write to the package dir before attempting the download.
-  let canWrite = false;
-  try {
-    fs.accessSync(__dirname, fs.constants.W_OK);
-    canWrite = true;
-  } catch (_) {
-    // directory is not writable by current user
-  }
-
-  if (!canWrite) {
-    console.error(
-      "fundamentum: binary not found and the package directory is not writable.\n" +
-        "Run the installer with the same permissions used for npm install:\n" +
-        "  sudo node " + installScript
-    );
-    process.exit(1);
-  }
-
-  console.error(
-    "fundamentum: binary not found — postinstall was likely blocked by npm allow-scripts."
-  );
-  console.error("fundamentum: downloading binary now...");
-  const result = spawnSync(process.execPath, [installScript], {
-    stdio: "inherit",
-  });
-  if (result.error || result.status !== 0) {
-    console.error(
-      "fundamentum: download failed. Manual recovery:\n" +
-        "  node " + installScript
-    );
-    process.exit(1);
-  }
-}
-
-runBinary();
+module.exports = { locateBinary, platformPackage };

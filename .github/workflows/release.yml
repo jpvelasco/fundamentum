@@ -36,15 +36,37 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Embed binary checksums into npm package
-        run: node scripts/embed-checksums.js dist/checksums.txt npm/package.json
-
       - name: Pin npm (trusted publishing needs >=11.5.1)
         run: npm install -g npm@11.21.0
+
+      - name: Copy binaries into platform packages
+        run: node npm/copy-binaries.js dist/artifacts.json npm/packages
+
+      # Platform packages publish first so a failure never ships a launcher
+      # whose pinned binaries are missing. Already-published versions are
+      # skipped so a partially failed release can be re-run.
+      - name: Publish platform packages
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for dir in npm/packages/*/; do
+            name="$(node -p "require('./${dir}package.json').name")"
+            if npm view "${name}@${VERSION}" version >/dev/null 2>&1; then
+              echo "${name}@${VERSION} already published; skipping"
+              continue
+            fi
+            (cd "$dir" && npm version "$VERSION" --no-git-tag-version && npm publish --access public)
+          done
 
       - name: Publish npm package
         working-directory: npm
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          npm version "$VERSION" --no-git-tag-version
+          node -e '
+            const fs = require("fs");
+            const v = process.argv[1];
+            const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            p.version = v;
+            for (const d of Object.keys(p.optionalDependencies)) p.optionalDependencies[d] = v;
+            fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n");
+          ' "$VERSION"
           npm publish --access public

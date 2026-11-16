@@ -237,7 +237,7 @@ cd fundamentum
 go run . apply OWNER/REPO
 ```
 
-Binaries are published on [GitHub Releases](https://github.com/jpvelasco/fundamentum/releases). npm supports macOS/Linux on x64 and arm64, and Windows on x64; its installer verifies the matching release binary against embedded SHA-256 checksums. If install scripts were blocked, the launcher tries downloading on first use when the package directory is writable. See the [npm installation notes](npm/README.md#install) for recovery steps.
+Binaries are published on [GitHub Releases](https://github.com/jpvelasco/fundamentum/releases). npm supports macOS/Linux on x64 and arm64, and Windows on x64; the binary ships in a per-platform optional-dependency package, so installation runs no install scripts. See the [npm installation notes](npm/README.md#install) for recovery steps.
 
 The docs on `main` describe the current source. Changes listed under [Unreleased](CHANGELOG.md#unreleased) require a source build until the next release; npm and `go install ...@latest` use the latest published version.
 
