@@ -10,7 +10,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const { isPathEscape, validateMembers } = require("./install.js");
+const { archiveCommands, extract, isPathEscape, validateMembers } = require("./install.js");
 
 test("isPathEscape flags traversal primitives and absolute names", () => {
   assert.equal(isPathEscape(".."), true);
@@ -68,7 +68,7 @@ test("listMembers + validateMembers reject a real tar that escapes (end to end)"
       ["-czPf", archivePath, "-C", tmpDir, "../fundamentum-evil-probe"],
       { stdio: "pipe" }
     );
-    const members = listMembers(archivePath, false);
+    const members = listMembers(archiveCommands(archivePath, tmpDir, false));
     assert.ok(members.includes("../fundamentum-evil-probe"));
     assert.throws(() => validateMembers(members), /Archive path escape/);
   } finally {
@@ -77,3 +77,40 @@ test("listMembers + validateMembers reject a real tar that escapes (end to end)"
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test("archiveCommands uses the OS-bundled bsdtar on Windows, never PowerShell or unzip", () => {
+  const { list, extract: ex } = archiveCommands("a.zip", "out", true, "win32");
+  assert.match(list[0], /System32[\\/]tar\.exe$/i);
+  assert.equal(ex[0], list[0]);
+  assert.deepEqual(list[1], ["-tf", "a.zip"]);
+  assert.deepEqual(ex[1], ["-xf", "a.zip", "-C", "out"]);
+});
+
+test("archiveCommands keeps unzip/tar on non-Windows hosts", () => {
+  assert.equal(archiveCommands("a.zip", "o", true, "linux").extract[0], "unzip");
+  assert.equal(archiveCommands("a.tar.gz", "o", false, "darwin").extract[0], "tar");
+});
+
+test(
+  "extract installs fundamentum.exe from a release-shaped zip on Windows (#306)",
+  { skip: process.platform !== "win32" && "Windows-only extraction path" },
+  () => {
+    const { execFileSync } = require("node:child_process");
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fundamentum-zip-"));
+    try {
+      const src = path.join(tmpDir, "src");
+      fs.mkdirSync(src);
+      fs.writeFileSync(path.join(src, "fundamentum.exe"), "binary");
+      fs.writeFileSync(path.join(src, "README.md"), "readme");
+      const zipPath = path.join(tmpDir, "release.zip");
+      const { list } = archiveCommands(zipPath, src, true, "win32");
+      execFileSync(list[0], ["-a", "-cf", zipPath, "-C", src, "fundamentum.exe", "README.md"]);
+
+      const binDir = path.join(tmpDir, "bin");
+      extract(fs.readFileSync(zipPath), "fundamentum_1.2.3_windows_amd64.zip", binDir);
+      assert.equal(fs.readFileSync(path.join(binDir, "fundamentum.exe"), "utf8"), "binary");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+);
