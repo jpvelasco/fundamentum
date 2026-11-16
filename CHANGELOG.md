@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-15
+
+**Feature release.** npm installs the binary from a per-platform package instead of a postinstall download.
+
 ### Changed
 
 - **npm binaries ship as per-platform packages.** `fundamentum-cli` now pulls its binary from an optional dependency (`fundamentum-cli-<os>-<arch>`) instead of a postinstall download from GitHub Releases, so npm's install-script policy no longer blocks installation and `--allow-scripts` is unnecessary. The launcher refuses a launcher/binary version mismatch (#309).
@@ -421,7 +425,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README badge suite.** CI, release, Go version, npm version/downloads, Codecov, and Codacy coverage/grade badges (Go Report Card excluded — service retired).
 
-[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/jpvelasco/fundamentum/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.8.0
 [0.7.1]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.7.1
 [0.7.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.7.0
 [0.6.0]: https://github.com/jpvelasco/fundamentum/releases/tag/v0.6.0
