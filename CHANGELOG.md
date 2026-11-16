@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **npm installer works on Windows again.** The shim now lists and extracts the release zip with Windows' bundled `tar.exe` instead of `Expand-Archive` and `unzip`. When launched from PowerShell 7, `Expand-Archive` extracted nothing but still exited successfully, so the install failed with "Binary fundamentum.exe not found in archive". The old member listing also required a third-party `unzip` (#306).
+
 ## [0.7.0] - 2026-11-13
 
 **Feature release.** Adds managed priority labels, a tracked-tree cloud-ID gate with reviewed rollout, and optional GitHub App installation audits.

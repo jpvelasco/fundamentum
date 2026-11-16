@@ -126,10 +126,34 @@ function verifyChecksum(buffer, archiveName, pkg) {
   console.log("fundamentum: checksum verified (SHA-256)");
 }
 
-// Escape a string for use inside PowerShell single quotes.
-// PowerShell single-quoted strings only need '' to represent a literal '.
-function psEscape(s) {
-  return s.replace(/'/g, "''");
+// archiveCommands returns the list/extract argv for an archive. Windows uses
+// its bundled bsdtar by absolute path: it reads zip natively, needs no
+// third-party unzip, and avoids spawning Windows PowerShell, whose
+// Expand-Archive silently extracts nothing (exit 0) when launched from
+// PowerShell 7 with an inherited PSModulePath (#306). The absolute path keeps
+// a GNU tar earlier on PATH (Git, GnuWin32), which cannot read zip, out.
+function archiveCommands(archivePath, destDir, isZip, platform = process.platform) {
+  if (platform === "win32") {
+    const tar = path.win32.join(
+      process.env.SystemRoot || "C:\\Windows",
+      "System32",
+      "tar.exe"
+    );
+    return {
+      list: [tar, ["-tf", archivePath]],
+      extract: [tar, ["-xf", archivePath, "-C", destDir]],
+    };
+  }
+  if (isZip) {
+    return {
+      list: ["unzip", ["-Z1", archivePath]],
+      extract: ["unzip", ["-o", archivePath, "-d", destDir]],
+    };
+  }
+  return {
+    list: ["tar", ["-tzf", archivePath]],
+    extract: ["tar", ["-xzf", archivePath, "-C", destDir]],
+  };
 }
 
 function spawnStdout(cmd, args, label) {
@@ -161,28 +185,9 @@ function extract(buffer, archiveName, binDir) {
     // Validate the member list before extraction: a crafted archive can name
     // members like ../../.bashrc, and the extractor would happily write them
     // outside tmpDir. Reject such members up front so nothing leaves the dir.
-    const isZip = archiveName.endsWith(".zip");
-    validateMembers(listMembers(archivePath, isZip));
-
-    if (isZip) {
-      if (process.platform === "win32") {
-        spawnOrFail(
-          "powershell",
-          [
-            "-NoProfile",
-            "-Command",
-            `Expand-Archive -Force -Path '${psEscape(
-              archivePath
-            )}' -DestinationPath '${psEscape(tmpDir)}'`,
-          ],
-          "Expand-Archive"
-        );
-      } else {
-        spawnOrFail("unzip", ["-o", archivePath, "-d", tmpDir], "unzip");
-      }
-    } else {
-      spawnOrFail("tar", ["-xzf", archivePath, "-C", tmpDir], "tar");
-    }
+    const cmds = archiveCommands(archivePath, tmpDir, archiveName.endsWith(".zip"));
+    validateMembers(listMembers(cmds));
+    spawnOrFail(...cmds.extract, "extract");
 
     const extractedBinary = path.join(tmpDir, binaryName);
 
@@ -215,11 +220,8 @@ function isPathEscape(name) {
   );
 }
 
-function listMembers(archivePath, isZip) {
-  const listing = isZip
-    ? spawnStdout("unzip", ["-Z1", archivePath], "unzip -Z1")
-    : spawnStdout("tar", ["-tzf", archivePath], "tar -tzf");
-  return listing.split(/\r?\n/).filter(Boolean);
+function listMembers(cmds) {
+  return spawnStdout(...cmds.list, "list archive").split(/\r?\n/).filter(Boolean);
 }
 
 function validateMembers(members) {
@@ -272,4 +274,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { isPathEscape, listMembers, validateMembers };
+module.exports = { archiveCommands, extract, isPathEscape, listMembers, validateMembers };
