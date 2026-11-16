@@ -4,4 +4,8 @@ exclude_paths:
   - ".codacy/**"
   - "CLAUDE.md"
   - "AGENTS.md"
+  - "npm/copy-binaries.js"
+  - "npm/copy-binaries.test.js"
+  - "npm/packages.test.js"
   - "npm/run.js"
+  - "npm/run.test.js"

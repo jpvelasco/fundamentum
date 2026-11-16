@@ -10,7 +10,11 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const main = require("./package.json");
+function readPackage(file) {
+  return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+const main = readPackage(path.join(__dirname, "package.json"));
 const packagesDir = path.join(__dirname, "packages");
 
 test("platform packages match the launcher's optional dependencies", () => {
@@ -18,7 +22,7 @@ test("platform packages match the launcher's optional dependencies", () => {
   assert.deepEqual(dirs, Object.keys(main.optionalDependencies).sort());
 
   for (const dir of dirs) {
-    const pkg = require(path.join(packagesDir, dir, "package.json"));
+    const pkg = readPackage(path.join(packagesDir, dir, "package.json"));
     const [, platform, arch] = dir.match(/^fundamentum-cli-([a-z0-9]+)-([a-z0-9]+)$/);
     assert.equal(pkg.name, dir);
     assert.equal(pkg.version, main.optionalDependencies[dir]);
