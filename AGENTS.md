@@ -97,14 +97,19 @@ match, or PRs deadlock on contexts that never report.
 ## Release (tag `v*`)
 
 `.github/workflows/release.yml` runs GoReleaser on version tags, then publishes the npm shim
-(`fundamentum-cli`): a `0.0.0` checkout skips the release download and tells you to `go build -o npm/bin/…`. `scripts/embed-checksums.js` embeds GoReleaser's `dist/checksums.txt` into
-`npm/package.json` (`binaryChecksums`), then `npm publish` runs from `npm/` via OIDC trusted
-publishing (`id-token: write`). `.goreleaser.yml` pins version ldflags to
+(`fundamentum-cli`) with no install scripts: `npm/copy-binaries.js` copies GoReleaser's
+`dist/artifacts.json` binaries into the per-platform packages under `npm/packages/`
+(`fundamentum-cli-<os>-<arch>`), each is published first (already-published versions are
+skipped so reruns work), then the launcher publishes with `version` and every
+`optionalDependencies` entry pinned to the tag. All publishes use OIDC trusted publishing
+(`id-token: write`); a new platform package needs a one-time manual publish plus a
+trusted-publisher entry on npmjs.com first. `npm/run.js` resolves the binary only from a
+declared platform package with a matching version; a `0.0.0` checkout uses a local
+`go build -o npm/bin/…` build. `npm/packages.test.js` keeps the package dirs,
+`optionalDependencies`, and each package's `os`/`cpu` in sync. `.goreleaser.yml` pins version ldflags to
 `cmd/root.Version` (`{{.Version}}`), archives tar.gz (zip on Windows) as
-`fundamentum_<version>_<os>_<arch>.{tar.gz,zip}`, ignores Windows/arm64 — the npm shim
-(`npm/install.js` + `npm/run.js`) must match that naming and the release-asset layout
-(nyx/ludus/juggernaut pattern). `npm/package.json` version stays `0.0.0` in the repo; the
-workflow sets it to the tag version before publishing. Local check:
+`fundamentum_<version>_<os>_<arch>.{tar.gz,zip}`, ignores Windows/arm64 (juggernaut npm pattern). `npm/package.json` version stays `0.0.0` in the repo; the
+workflow sets it (and the platform packages) to the tag version before publishing. Local check:
 `goreleaser build --snapshot --clean`, then run `dist/.../fundamentum.exe --version`. Never
 publish a release from CI without an explicit tag.
 

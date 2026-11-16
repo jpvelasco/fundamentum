@@ -21,5 +21,5 @@ planning/
 
 # npm shim install-time downloads
 npm/bin/
-npm/.tmp-install/
+dist/
 

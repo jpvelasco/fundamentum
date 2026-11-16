@@ -1,0 +1,19 @@
+{
+  "name": "fundamentum-cli-win32-x64",
+  "version": "0.0.0",
+  "description": "Windows x64 binary for fundamentum-cli",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jpvelasco/fundamentum.git"
+  }
+}

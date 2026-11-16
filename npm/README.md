@@ -25,32 +25,20 @@ npx fundamentum-cli --version
 npx fundamentum-cli apply OWNER/REPO
 ```
 
-Works on **macOS** and **Linux** (`x64` and `arm64`) and **Windows** (`x64`). Postinstall downloads the matching prebuilt binary from GitHub Releases with embedded SHA-256 verification.
+Works on **macOS** and **Linux** (`x64` and `arm64`) and **Windows** (`x64`). The prebuilt binary ships inside a per-platform package (`fundamentum-cli-<os>-<arch>`, for example `fundamentum-cli-win32-x64`) that npm installs as an optional dependency for your platform. No install scripts run, so `--allow-scripts` or `ignore-scripts=true` policies do not affect installation, and the binary comes from the npm registry, not a separate download.
 
-A git checkout keeps `package.json` at `0.0.0` and will not download a binary. Build it locally instead:
+If `fundamentum` reports that its platform package is not installed, reinstall without `--omit=optional` (or `--no-optional`):
+
+```bash
+npm install -g fundamentum-cli
+```
+
+A git checkout keeps `package.json` at `0.0.0` and uses a locally built binary instead:
 
 ```bash
 go build -o npm/bin/fundamentum .
 # Windows: go build -o npm/bin/fundamentum.exe .
 ```
-
-If npm's install-script policy blocks postinstall, the launcher tries downloading
-the binary on first use when the package directory is writable. Otherwise, run
-the installer with the same permissions used for installation. Manual recovery
-on Linux/macOS:
-
-```bash
-node "$(npm root -g)/fundamentum-cli/install.js"
-```
-
-PowerShell:
-
-```powershell
-node (Join-Path (npm root -g) "fundamentum-cli/install.js")
-```
-
-The download requires access to GitHub Releases. A missing checksum or failed
-verification stops installation.
 
 ## Quickstart
 

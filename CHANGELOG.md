@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **npm binaries ship as per-platform packages.** `fundamentum-cli` now pulls its binary from an optional dependency (`fundamentum-cli-<os>-<arch>`) instead of a postinstall download from GitHub Releases, so npm's install-script policy no longer blocks installation and `--allow-scripts` is unnecessary. The launcher refuses a launcher/binary version mismatch (#309).
+
 ## [0.7.1] - 2026-11-15
 
 **Patch release.** Fixes the npm installer on Windows.
